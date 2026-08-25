@@ -1,0 +1,42 @@
+<Window x:Class="FlexTaskbar.Views.RecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FlexTaskbar Recovery"
+        Width="380"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Topmost="True"
+        Background="{StaticResource TaskbarBackgroundBrush}"
+        Foreground="{StaticResource TaskbarForegroundBrush}"
+        ShowInTaskbar="True">
+    <StackPanel Margin="16">
+        <TextBlock Text="FlexTaskbar Recovery" FontSize="18" FontWeight="Bold" Margin="0,0,0,4" />
+        <TextBlock x:Name="SubtitleText" TextWrapping="Wrap" FontSize="12"
+                   Foreground="{StaticResource TaskbarSubtleForegroundBrush}" Margin="0,0,0,12" />
+
+        <Button x:Name="RestoreTaskbarButton" Content="Restore Windows Taskbar (disable screen-space reservation)"
+                Click="RestoreTaskbar_Click" Style="{StaticResource TaskbarButtonStyle}"
+                HorizontalContentAlignment="Left" Padding="10,7" Margin="0,0,0,6" />
+
+        <Button x:Name="RestartExplorerButton" Content="Restart Explorer"
+                Click="RestartExplorer_Click" Style="{StaticResource TaskbarButtonStyle}"
+                HorizontalContentAlignment="Left" Padding="10,7" Margin="0,0,0,6" />
+
+        <Button x:Name="DisableStartupButton" Content="Disable FlexTaskbar Auto-Start"
+                Click="DisableStartup_Click" Style="{StaticResource TaskbarButtonStyle}"
+                HorizontalContentAlignment="Left" Padding="10,7" Margin="0,0,0,6" />
+
+        <Button x:Name="OpenSettingsButton" Content="Open Settings"
+                Click="OpenSettings_Click" Style="{StaticResource TaskbarButtonStyle}"
+                HorizontalContentAlignment="Left" Padding="10,7" Margin="0,0,0,6" />
+
+        <Button x:Name="SafeModeButton" Content="Restart in Safe Mode"
+                Click="SafeMode_Click" Style="{StaticResource TaskbarButtonStyle}"
+                HorizontalContentAlignment="Left" Padding="10,7" Margin="0,0,0,12" />
+
+        <TextBlock x:Name="StatusText" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,8" />
+
+        <Button Content="Close" Width="90" HorizontalAlignment="Right" Click="Close_Click" Style="{StaticResource TaskbarButtonStyle}" />
+    </StackPanel>
+</Window>

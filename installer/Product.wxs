@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FlexTaskbar installer (spec Section 43/44).
+
+  Deliberately per-user (Scope="perUser"): no administrator privileges required to
+  install, matching Section 31/43's "no admin required" rule. Installs to
+  %LocalAppData%\Programs\FlexTaskbar, the same convention VS Code and many other
+  modern per-user Windows apps use.
+
+  Three independently-selectable features (Section 43's "optionally create desktop
+  shortcut", "optionally enable startup"):
+    - MainApplication (required): the app itself + Start Menu shortcut.
+    - DesktopShortcut (optional, on by default): a desktop shortcut.
+    - StartWithWindows (optional, OFF by default — Level 1000 means "not installed
+      unless the user explicitly enables it" in WiX's feature-selection UI): a
+      Startup-folder shortcut, using the exact same folder StartupService.cs
+      manages at runtime — the installer's "start with Windows" checkbox and the
+      in-app Settings toggle for the same feature both just create/delete this one
+      shortcut, so they can never disagree.
+
+  Uninstall never touches %APPDATA%\FlexTaskbar (Section 44 — must ask before
+  removing settings): the installer doesn't know that path exists at all, since it's
+  created by the app at runtime, not installed by MSI. Not touching it is the
+  natural, safe default rather than something requiring extra custom-action code.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="FlexTaskbar"
+           Manufacturer="FlexTaskbar Project"
+           Version="$(FlexTaskbarVersion)"
+           UpgradeCode="0364EDE8-0FE1-44D0-AA16-75391199CC10"
+           Scope="perUser"
+           Compressed="yes">
+
+    <SummaryInformation Description="FlexTaskbar — a lightweight, category-organized Windows taskbar replacement" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of FlexTaskbar is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="FlexTaskbarIcon" SourceFile="..\src\FlexTaskbar\Resources\App.ico" />
+    <Property Id="ARPPRODUCTICON" Value="FlexTaskbarIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/" />
+    <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="FlexTaskbar" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="FlexTaskbar" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="StartupFolder" />
+
+    <Feature Id="MainApplication" Title="FlexTaskbar" Description="The FlexTaskbar application and Start Menu shortcut." Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+    </Feature>
+
+    <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Description="Adds a FlexTaskbar shortcut to your desktop." Level="1">
+      <ComponentRef Id="DesktopShortcutComponent" />
+    </Feature>
+
+    <Feature Id="StartWithWindowsFeature" Title="Start with Windows" Description="Launches FlexTaskbar automatically when you sign in. Off by default — enable here or later from FlexTaskbar's own Settings." Level="1000">
+      <ComponentRef Id="StartupShortcutComponent" />
+    </Feature>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.FlexTaskbar.TargetDir)**" />
+    </ComponentGroup>
+
+    <Component Id="StartMenuShortcutComponent" Directory="ApplicationProgramsFolder" Guid="0A1B2C3D-4E5F-4A6B-8C7D-1E2F3A4B5C6D">
+      <Shortcut Id="StartMenuShortcut"
+                Name="FlexTaskbar"
+                Description="Launch FlexTaskbar"
+                Target="[INSTALLFOLDER]FlexTaskbar.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="FlexTaskbarIcon" />
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\FlexTaskbar" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Guid="1B2C3D4E-5F6A-4B7C-8D1E-2F3A4B5C6D7E">
+      <Shortcut Id="DesktopShortcut"
+                Name="FlexTaskbar"
+                Description="Launch FlexTaskbar"
+                Target="[INSTALLFOLDER]FlexTaskbar.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="FlexTaskbarIcon" />
+      <RegistryValue Root="HKCU" Key="Software\FlexTaskbar" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="StartupShortcutComponent" Directory="StartupFolder" Guid="2C3D4E5F-6A7B-4C8D-9E1F-3A4B5C6D7E8F">
+      <!-- Same %AppData%\...\Startup\FlexTaskbar.lnk that Services/StartupService.cs
+           manages at runtime — installer opt-in and the in-app Settings toggle are
+           two entry points to the exact same mechanism, never two competing ones. -->
+      <Shortcut Id="StartupShortcut"
+                Name="FlexTaskbar"
+                Description="Launch FlexTaskbar"
+                Target="[INSTALLFOLDER]FlexTaskbar.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="FlexTaskbarIcon" />
+      <RegistryValue Root="HKCU" Key="Software\FlexTaskbar" Name="StartupShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <ui:WixUI Id="WixUI_FeatureTree" />
+
+  </Package>
+</Wix>

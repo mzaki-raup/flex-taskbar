@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <!-- Tray icon uses System.Windows.Forms.NotifyIcon (a thin, well-tested wrapper
+         over Shell_NotifyIcon) rather than reimplementing the icon-lifecycle/message
+         -loop plumbing by hand — see Tray/TrayIconService.cs and DEVELOPMENT.md's
+         Phase 7 notes for why (spec Section 14: "document limitations" applies here
+         to the deliberate choice, not a missing feature). -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>FlexTaskbar</RootNamespace>
+    <AssemblyName>FlexTaskbar</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\App.ico</ApplicationIcon>
+    <Platforms>x64;arm64</Platforms>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- NOT invariant-globalization: WPF needs real culture data for text-input caret
+         handling (InputLanguageSource reads the current keyboard layout's CultureInfo).
+         Verified the hard way — InvariantGlobalization=true crashes on first TextBox
+         focus with CultureNotFoundException. -->
+    <!-- WFAC010 tells WinForms apps to configure DPI via Application.SetHighDpiMode
+         instead of the manifest. This app is WPF-primary (WinForms exists only for
+         the tray icon) and WPF's Per-Monitor V2 awareness genuinely does need the
+         manifest declaration — the API-based route is WinForms-specific and doesn't
+         apply here, so this is a deliberate suppression, not an ignored real issue. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\App.ico" />
+  </ItemGroup>
+
+  <!-- SVG rasterization for custom category icons (round-2 feedback: "select icon
+       for parent category from disk (png, ico, svg)"). PNG/ICO decode natively via
+       WPF's BitmapDecoder; only SVG needs a dedicated library. -->
+  <ItemGroup>
+    <PackageReference Include="Svg" Version="3.4.7" />
+  </ItemGroup>
+
+  <!-- UseWPF + UseWindowsForms together implicitly global-`using` both
+       System.Windows and System.Windows.Forms, which collide on every type name
+       the two namespaces share (Application, Button, Point, MouseEventArgs, ...) —
+       breaking compilation project-wide, not just in the one file that actually
+       needs WinForms. Removing the WinForms global using and adding it explicitly
+       only where needed (Tray/TrayIconService.cs) keeps the rest of the WPF-heavy
+       codebase unambiguous. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+</Project>
