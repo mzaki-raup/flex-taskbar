@@ -131,8 +131,9 @@ original FlexTaskbar:
   - resting the pointer on a subcategory opens **its flyout beyond this one**
     (further from the bar, lined up with the tile), and so on down the levels.
     Moving to another subcategory switches it; resting on an app tile closes
-    it. Tiles fill from the bar's side outwards, so a flyout below a top bar
-    starts with a full row right under the bar;
+    it. Tiles fill from the bar's side outwards: below a top bar the **app
+    icons fill the top rows first**, right under the bar, and the
+    subcategories follow below them, nearest where their own flyouts open;
   - *No apps in this category* when it's empty. Flyouts only launch apps;
     categories are managed in the Manage window (⚙ on the bar, or
     right-click a category and pick *Manage categories…*).

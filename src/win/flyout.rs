@@ -19,7 +19,7 @@ use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
 use crate::appearance::{Appearance, Colors};
-use crate::striplayout::{self, Hit};
+use crate::striplayout::{self, Edge, Hit};
 use resvg::tiny_skia::Pixmap;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -385,13 +385,14 @@ fn rebuild(idx: usize) {
             let tile = (s(84), s(76));
             let tm = s(2);
             let cols = (look.flyout_columns as usize).max(1);
-            // Subcategories first, so they sit nearest the flyouts they open.
-            let items: Vec<(Elem, String, String)> = content
-                .subs
-                .iter()
-                .map(|(id, name)| (Elem::Sub(*id), name.clone(), format!("cat:{id}")))
-                .chain(content.tiles.iter().map(|(id, name)| (Elem::Tile(id.clone()), name.clone(), id.clone())))
-                .collect();
+            // Subcategories sit nearest the flyouts they open: first (the top
+            // row) above a bottom bar or beside a side bar; below a top bar the
+            // apps fill the top rows first and the subcategories follow,
+            // nearest the next level opening further down.
+            let subs = content.subs.iter().map(|(id, name)| (Elem::Sub(*id), name.clone(), format!("cat:{id}")));
+            let apps = content.tiles.iter().map(|(id, name)| (Elem::Tile(id.clone()), name.clone(), id.clone()));
+            let items: Vec<(Elem, String, String)> =
+                if strip::edge() == Edge::Top { apps.chain(subs).collect() } else { subs.chain(apps).collect() };
             // A horizontal strip for a top or bottom bar, a vertical one for
             // a side bar (see `flyout_cells`).
             let n = items.len();
