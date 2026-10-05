@@ -361,7 +361,7 @@ fn rebuild(idx: usize) {
 
     let Some((look, dpi, font)) = with(|f| (f.look.clone(), f.dpi, f.font)) else { return };
     let s = |v: i32| scale(v, dpi);
-    let border = if look.border_width > 0 { s(look.border_width as i32).max(1) } else { 0 };
+    let border = if look.flyout_border_width > 0 { s(look.flyout_border_width as i32).max(1) } else { 0 };
     let pad = s(4) + border;
     let mut elems: Vec<Placed> = Vec::new();
     let mut y = pad;
@@ -508,10 +508,11 @@ fn render(idx: usize) {
         let d = f.dpi;
         let s = |v: i32| scale(v, d);
         let c = f.colors;
-        let radius = s(6.max(f.look.corner_radius.min(12) as i32)) as f32;
-        let border = if f.look.border_width > 0 { s(f.look.border_width as i32).max(1) as f32 } else { 0.0 };
+        let radius = s(f.look.flyout_corner_radius as i32) as f32;
+        let border =
+            if f.look.flyout_border_width > 0 { s(f.look.flyout_border_width as i32).max(1) as f32 } else { 0.0 };
         cv.fill_round_rect(0.0, 0.0, w as f32, h as f32, radius, c.background);
-        cv.stroke_round_rect(0.0, 0.0, w as f32, h as f32, radius, border, c.border);
+        cv.stroke_round_rect(0.0, 0.0, w as f32, h as f32, radius, border, c.flyout_border);
 
         let r4 = s(4) as f32;
         for (i, p) in l.elems.iter().enumerate() {

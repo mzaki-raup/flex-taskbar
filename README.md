@@ -45,8 +45,10 @@ match the original .NET version.
 | ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
 | **Drag an icon to rearrange the bar** | **Arrange the bar (from Manage or right-click)** |
 | ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: the bar's buttons in order, with move buttons](screenshots/arrange.png) |
-| **Appearance window** | **Right-click: the full menu** |
-| ![Appearance window with theme, bar width, colours and sliders](screenshots/appearance.png) | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) |
+| **Appearance window** | **Flyouts with their own corners and border** |
+| ![Appearance window with general, bar and category flyout settings](screenshots/appearance.png) | ![Flyouts with 12 px corners and a 2 px red border over a light floating dock](screenshots/flyout-style.png) |
+| **Right-click: the full menu** | |
+| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | |
 | **Search** | **Custom app (a browser web app)** |
 | ![Search window listing apps with their category paths](screenshots/search.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
 
@@ -93,7 +95,7 @@ out like the original FlexTaskbar:
 - **Rearrange by dragging.** Press on a category or app icon and drag it along
   the bar; the others make room, and it stays where you let go. Categories
   and apps can be mixed in any order. Let go away from the bar to cancel.
-- **Arrange the bar** (in the Manage window, or right-click the bar): the same
+- **Arrange the bar** (in the Manage window, the menu, or right-click the bar): the same
   order as a list, left to right. Drag a row, or use *Move to start*, *Move
   left*, *Move right*, *Move to end* and *Unpin*. Changes show on the bar
   straight away. (This order is the bar's own; the menus keep the order of
@@ -112,18 +114,24 @@ Every change shows on the bar straight away:
 
 | Setting | Choices | Default |
 |---|---|---|
+| **General** | | |
 | Theme | Windows default, Dark, Light | Dark (the original look) |
-| Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
 | Accent colour | Any colour (marks the open button) | Light blue `#60CDFF` |
 | Background colour | Any colour; the text turns dark or light to stay readable | Theme's colour |
-| Border colour | Any colour | A faint line in the text colour |
 | Background opacity | 10–100 % (icons and text stay solid) | 87 % |
+| Icon size | 16–48 | 32 |
+| **Bar** | | |
+| Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
+| Border colour | Any colour | A faint line in the text colour |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
 | Gap from screen edge | 0–24 | 0 (docked flush) |
-| Icon size | 16–48 | 32 |
 | Bar height | 32–96 | 48 |
+| **Category flyouts** | | |
 | App tiles per row | 1–12 | 4 |
+| Border colour | Any colour | Same as the bar |
+| Border width | 0–6 | 1 |
+| Corner radius | 0–24 | 6 |
 
 The theme also applies to the menus and the search window. *Reset to defaults*
 brings back the original look.
@@ -317,7 +325,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 36 unit tests cover:
+The 37 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -328,8 +336,8 @@ The 36 unit tests cover:
   testing, where a dragged icon lands), flyout tile grids, pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
 - appearance settings: the default colours matching the original, the three
-  themes, readable text on a custom background, opacity, colour parsing and
-  clamping
+  themes, readable text on a custom background, opacity, the flyout border
+  following the bar's unless set, colour parsing and clamping
 - the old-settings importer, including cycles in old data and bad JSON
 
 **Manually, under Wine 9 on Linux** (not real Windows):
@@ -346,7 +354,8 @@ The 36 unit tests cover:
   - showing and hiding it
   - coming back after a crash
 - the Appearance window: Light and Dark themes, fitted dock, corner radius,
-  gap, opacity and accent colour (via the colour picker) all applied live and
+  gap, opacity and accent colour (via the colour picker), and the flyouts'
+  own corner radius, border width and border colour, all applied live and
   saved
 - first-run Manage window
 - creating three levels of nested categories, including renaming them

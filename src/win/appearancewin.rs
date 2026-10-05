@@ -3,6 +3,7 @@
 //! straight away and is saved shortly after.
 
 use super::app;
+use super::canvas;
 use super::ui::{self, scale, wide};
 use super::{searchwin, strip, theme};
 use crate::appearance::{Appearance, DockWidth, Rgba, ThemeMode};
@@ -26,6 +27,7 @@ const DOCK: u16 = 11;
 const ACCENT: u16 = 20;
 const BACKGROUND: u16 = 21;
 const BORDER: u16 = 22;
+const FLYOUT_BORDER: u16 = 23;
 const DEFAULT_OFFSET: u16 = 100;
 // Sliders; each has a value label at +200.
 const OPACITY: u16 = 30;
@@ -35,6 +37,8 @@ const MARGIN: u16 = 33;
 const ICON_SIZE: u16 = 34;
 const BAR_HEIGHT: u16 = 35;
 const COLUMNS: u16 = 36;
+const FLYOUT_RADIUS: u16 = 37;
+const FLYOUT_BORDER_WIDTH: u16 = 38;
 const VALUE_OFFSET: u16 = 200;
 const RESET: u16 = 50;
 const CLOSE: u16 = 51;
@@ -55,6 +59,7 @@ struct Win {
     hwnd: HWND,
     controls: HashMap<u16, HWND>,
     font: HFONT,
+    heading: HFONT,
     /// Custom colours of the colour picker, kept while the window is open.
     custom: [COLORREF; 16],
 }
@@ -72,7 +77,7 @@ fn hwnd() -> Option<HWND> {
 }
 
 /// (id, label, min, max) of every slider.
-const SLIDERS: [(u16, &str, u32, u32); 7] = [
+const SLIDERS: [(u16, &str, u32, u32); 9] = [
     (OPACITY, "Background opacity (%)", 10, 100),
     (BORDER_WIDTH, "Border width", 0, 6),
     (RADIUS, "Corner radius", 0, 24),
@@ -80,10 +85,45 @@ const SLIDERS: [(u16, &str, u32, u32); 7] = [
     (ICON_SIZE, "Icon size", 16, 48),
     (BAR_HEIGHT, "Bar height", 32, 96),
     (COLUMNS, "App tiles per row", 1, 12),
+    (FLYOUT_RADIUS, "Corner radius", 0, 24),
+    (FLYOUT_BORDER_WIDTH, "Border width", 0, 6),
 ];
 
-const COLOURS: [(u16, &str); 3] =
-    [(ACCENT, "Accent colour"), (BACKGROUND, "Background colour"), (BORDER, "Border colour")];
+const COLOURS: [(u16, &str); 4] = [
+    (ACCENT, "Accent colour"),
+    (BACKGROUND, "Background colour"),
+    (BORDER, "Border colour"),
+    (FLYOUT_BORDER, "Border colour"),
+];
+
+/// The window's rows, top to bottom.
+enum Row {
+    Heading(&'static str),
+    Combo(u16, &'static str, &'static [&'static str]),
+    Colour(u16),
+    Slider(u16),
+}
+
+const ROWS: [Row; 18] = [
+    Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
+    Row::Colour(ACCENT),
+    Row::Colour(BACKGROUND),
+    Row::Slider(OPACITY),
+    Row::Slider(ICON_SIZE),
+    Row::Heading("Bar"),
+    Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
+    Row::Colour(BORDER),
+    Row::Slider(BORDER_WIDTH),
+    Row::Slider(RADIUS),
+    Row::Slider(MARGIN),
+    Row::Slider(BAR_HEIGHT),
+    Row::Heading("Category flyouts"),
+    Row::Slider(COLUMNS),
+    Row::Colour(FLYOUT_BORDER),
+    Row::Slider(FLYOUT_BORDER_WIDTH),
+    Row::Slider(FLYOUT_RADIUS),
+    Row::Heading(""),
+];
 
 pub fn show() {
     if let Some(h) = hwnd() {
@@ -135,6 +175,7 @@ fn create() {
         let s = |v: i32| scale(v, dpi);
         let mut controls = HashMap::new();
         let mut labels = 0u16;
+        let mut bold: Vec<HWND> = Vec::new();
         let mut label = |controls: &mut HashMap<u16, HWND>, text: &str| {
             let id = LABEL_BASE + labels;
             labels += 1;
@@ -177,46 +218,59 @@ fn create() {
             let _ = SetWindowPos(h, None, x, y + (row_h - height) / 2, w, height, SWP_NOZORDER);
         };
 
-        let combos: [(u16, &str, &[&str]); 2] = [
-            (THEME, "Theme", &["Windows default", "Dark", "Light"]),
-            (DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
-        ];
-        for (id, text, items) in combos {
-            place(label(&mut controls, text), m, label_w, s(18), y);
-            let h = combo(id, items);
-            // A combo box's height includes its drop-down list.
-            let _ = SetWindowPos(h, None, ctl_x, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
-            controls.insert(id, h);
-            y += row_h;
-        }
-        for (id, text) in COLOURS {
-            place(label(&mut controls, text), m, label_w, s(18), y);
-            let h = button("", id);
-            place(h, ctl_x, s(160), ctl_h, y);
-            controls.insert(id, h);
-            let d = button("Default", id + DEFAULT_OFFSET);
-            place(d, ctl_x + s(166), ctl_w - s(166), ctl_h, y);
-            controls.insert(id + DEFAULT_OFFSET, d);
-            y += row_h;
-        }
-        for (id, text, min, max) in SLIDERS {
-            place(label(&mut controls, text), m, label_w, s(18), y);
-            let h =
-                ui::child(hwnd, "msctls_trackbar32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), id);
-            SendMessageW(h, TBM_SETRANGE, Some(WPARAM(1)), Some(LPARAM(((max << 16) | min) as isize)));
-            place(h, ctl_x, ctl_w - s(44), ctl_h, y);
-            controls.insert(id, h);
-            let v = ui::child(
-                hwnd,
-                "STATIC",
-                "",
-                WS_CHILD | WS_VISIBLE | ui::SS_LABEL,
-                WINDOW_EX_STYLE(0),
-                id + VALUE_OFFSET,
-            );
-            place(v, ctl_x + ctl_w - s(40), s(40), s(18), y);
-            controls.insert(id + VALUE_OFFSET, v);
-            y += row_h;
+        for row in &ROWS {
+            match *row {
+                Row::Heading(text) => {
+                    if !text.is_empty() {
+                        let h = label(&mut controls, text);
+                        place(h, m, label_w + ctl_w, s(18), y + s(4));
+                        bold.push(h);
+                    }
+                }
+                Row::Combo(id, text, items) => {
+                    place(label(&mut controls, text), m, label_w, s(18), y);
+                    let h = combo(id, items);
+                    // A combo box's height includes its drop-down list.
+                    let _ = SetWindowPos(h, None, ctl_x, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
+                    controls.insert(id, h);
+                }
+                Row::Colour(id) => {
+                    let text = COLOURS.iter().find(|(c, _)| *c == id).map(|(_, t)| *t).unwrap_or_default();
+                    place(label(&mut controls, text), m, label_w, s(18), y);
+                    let h = button("", id);
+                    place(h, ctl_x, s(160), ctl_h, y);
+                    controls.insert(id, h);
+                    let d = button("Default", id + DEFAULT_OFFSET);
+                    place(d, ctl_x + s(166), ctl_w - s(166), ctl_h, y);
+                    controls.insert(id + DEFAULT_OFFSET, d);
+                }
+                Row::Slider(id) => {
+                    let Some(&(_, text, min, max)) = SLIDERS.iter().find(|(s, ..)| *s == id) else { continue };
+                    place(label(&mut controls, text), m, label_w, s(18), y);
+                    let h = ui::child(
+                        hwnd,
+                        "msctls_trackbar32",
+                        "",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                        WINDOW_EX_STYLE(0),
+                        id,
+                    );
+                    SendMessageW(h, TBM_SETRANGE, Some(WPARAM(1)), Some(LPARAM(((max << 16) | min) as isize)));
+                    place(h, ctl_x, ctl_w - s(44), ctl_h, y);
+                    controls.insert(id, h);
+                    let v = ui::child(
+                        hwnd,
+                        "STATIC",
+                        "",
+                        WS_CHILD | WS_VISIBLE | ui::SS_LABEL,
+                        WINDOW_EX_STYLE(0),
+                        id + VALUE_OFFSET,
+                    );
+                    place(v, ctl_x + ctl_w - s(40), s(40), s(18), y);
+                    controls.insert(id + VALUE_OFFSET, v);
+                }
+            }
+            y += if matches!(row, Row::Heading(_)) { row_h * 3 / 4 } else { row_h };
         }
         y += s(8);
         let r = button("Reset to defaults", RESET);
@@ -228,10 +282,11 @@ fn create() {
         y += row_h + m;
 
         let font = ui::message_font(dpi, 1.0);
+        let heading = canvas::font(scale(14, dpi), true);
         for h in controls.values() {
-            ui::set_font(*h, font);
+            ui::set_font(*h, if bold.contains(h) { heading } else { font });
         }
-        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, controls, font, custom: [COLORREF(0xFFFFFF); 16] }));
+        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, controls, font, heading, custom: [COLORREF(0xFFFFFF); 16] }));
         app::register_dialog(hwnd, true);
         theme::style_window(hwnd, false, false);
         load();
@@ -272,15 +327,20 @@ fn load() {
         (ICON_SIZE, a.icon_size),
         (BAR_HEIGHT, height),
         (COLUMNS, a.flyout_columns),
+        (FLYOUT_RADIUS, a.flyout_corner_radius),
+        (FLYOUT_BORDER_WIDTH, a.flyout_border_width),
     ] {
         unsafe {
             SendMessageW(ctl(id), TBM_SETPOS, Some(WPARAM(1)), Some(LPARAM(value as isize)));
         }
         ui::set_text(ctl(id + VALUE_OFFSET), &value.to_string());
     }
-    for (id, value) in [(ACCENT, a.accent), (BACKGROUND, a.background), (BORDER, a.border)] {
+    for (id, value) in
+        [(ACCENT, a.accent), (BACKGROUND, a.background), (BORDER, a.border), (FLYOUT_BORDER, a.flyout_border)]
+    {
         let text = match value {
             Some(c) => c.with_alpha(255).to_hex(),
+            None if id == FLYOUT_BORDER => "Same as the bar".to_string(),
             None => "Theme default".to_string(),
         };
         ui::set_text(ctl(id), &text);
@@ -318,17 +378,13 @@ fn change(f: impl FnOnce(&mut Appearance, &mut u32)) {
 fn pick_colour(owner: HWND, id: u16) {
     let current = app::with(|s| {
         let a = &s.cfg.settings.appearance;
-        let c = match id {
-            ACCENT => a.accent,
-            BACKGROUND => a.background,
-            _ => a.border,
-        };
         let colors = a.colors(theme::is_dark_cached());
-        c.unwrap_or(match id {
+        match id {
             ACCENT => colors.accent,
             BACKGROUND => colors.background,
+            FLYOUT_BORDER => colors.flyout_border,
             _ => colors.border,
-        })
+        }
     });
     let mut custom = WIN.with(|w| w.borrow().as_ref().map(|w| w.custom)).unwrap_or([COLORREF(0xFFFFFF); 16]);
     let mut cc = CHOOSECOLORW {
@@ -350,10 +406,10 @@ fn pick_colour(owner: HWND, id: u16) {
     }
     let v = cc.rgbResult.0;
     let picked = Rgba::rgb((v & 0xFF) as u8, ((v >> 8) & 0xFF) as u8, ((v >> 16) & 0xFF) as u8);
-    // The border keeps its transparency so a picked colour stays subtle.
     change(|a, _| match id {
         ACCENT => a.accent = Some(picked),
         BACKGROUND => a.background = Some(picked),
+        FLYOUT_BORDER => a.flyout_border = Some(picked),
         _ => a.border = Some(picked),
     });
     load();
@@ -381,11 +437,12 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                         _ => a.dock_width = [DockWidth::Full, DockWidth::Fit][i.min(1)],
                     });
                 }
-                (ACCENT | BACKGROUND | BORDER, BN_CLICKED) => pick_colour(hwnd, id),
-                (i, BN_CLICKED) if [ACCENT, BACKGROUND, BORDER].contains(&(i.wrapping_sub(DEFAULT_OFFSET))) => {
+                (ACCENT | BACKGROUND | BORDER | FLYOUT_BORDER, BN_CLICKED) => pick_colour(hwnd, id),
+                (i, BN_CLICKED) if COLOURS.iter().any(|(c, _)| *c == i.wrapping_sub(DEFAULT_OFFSET)) => {
                     change(|a, _| match i - DEFAULT_OFFSET {
                         ACCENT => a.accent = None,
                         BACKGROUND => a.background = None,
+                        FLYOUT_BORDER => a.flyout_border = None,
                         _ => a.border = None,
                     });
                     load();
@@ -417,6 +474,8 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     MARGIN => a.margin = v,
                     ICON_SIZE => a.icon_size = v,
                     BAR_HEIGHT => *h = v,
+                    FLYOUT_RADIUS => a.flyout_corner_radius = v,
+                    FLYOUT_BORDER_WIDTH => a.flyout_border_width = v,
                     _ => a.flyout_columns = v,
                 });
             }
@@ -440,6 +499,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             app::register_dialog(hwnd, false);
             if let Some(w) = WIN.with(|w| w.borrow_mut().take()) {
                 ui::delete_font(w.font);
+                ui::delete_font(w.heading);
             }
             LRESULT(0)
         }

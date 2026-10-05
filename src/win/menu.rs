@@ -20,6 +20,7 @@ pub enum Action {
     Search,
     Manage,
     Appearance,
+    Arrange,
     Rescan,
     ToggleAutostart,
     ToggleStrip,
@@ -233,6 +234,8 @@ pub fn build_main() -> Built {
         b.item(root, &search_label, id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::Manage);
         b.item(root, "Manage categories…", id, None, None, MENU_ITEM_STATE(0));
+        let id = b.command(Action::Arrange);
+        b.item(root, "Arrange the bar…", id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::Appearance);
         b.item(root, "Appearance…", id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::Rescan);

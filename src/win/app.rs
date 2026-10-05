@@ -386,6 +386,7 @@ pub fn perform(action: menu::Action) {
         menu::Action::Search => searchwin::show(),
         menu::Action::Manage => manager::show(),
         menu::Action::Appearance => super::appearancewin::show(),
+        menu::Action::Arrange => super::arrangewin::show(),
         menu::Action::Rescan => start_scan(),
         menu::Action::ToggleAutostart => toggle_autostart(None),
         menu::Action::ToggleStrip => set_strip(None),

@@ -104,6 +104,12 @@ pub struct Appearance {
     pub icon_size: u32,
     /// App tiles per row in a category flyout.
     pub flyout_columns: u32,
+    /// Corner radius of the flyouts in DIPs (0 = square).
+    pub flyout_corner_radius: u32,
+    /// Border thickness of the flyouts in DIPs (0 = none).
+    pub flyout_border_width: u32,
+    /// Border colour of the flyouts. `None`: the same as the bar's border.
+    pub flyout_border: Option<Rgba>,
 }
 
 impl Default for Appearance {
@@ -120,6 +126,9 @@ impl Default for Appearance {
             dock_width: DockWidth::Full,
             icon_size: 32,
             flyout_columns: 4,
+            flyout_corner_radius: 6,
+            flyout_border_width: 1,
+            flyout_border: None,
         }
     }
 }
@@ -130,6 +139,7 @@ pub struct Colors {
     pub dark: bool,
     pub background: Rgba,
     pub border: Rgba,
+    pub flyout_border: Rgba,
     pub text: Rgba,
     pub subtle: Rgba,
     pub hover: Rgba,
@@ -165,6 +175,7 @@ impl Appearance {
             dark,
             background,
             border,
+            flyout_border: self.flyout_border.unwrap_or(border),
             text,
             subtle: text.with_alpha(0xB3),
             hover: text.with_alpha(0x1A),
@@ -182,6 +193,8 @@ impl Appearance {
             margin: self.margin.min(24),
             icon_size: self.icon_size.clamp(16, 48),
             flyout_columns: self.flyout_columns.clamp(1, 12),
+            flyout_corner_radius: self.flyout_corner_radius.min(24),
+            flyout_border_width: self.flyout_border_width.min(6),
             ..self.clone()
         }
     }
@@ -200,6 +213,22 @@ mod tests {
         assert_eq!(c.border, Rgba { r: 0xFF, g: 0xFF, b: 0xFF, a: 0x33 });
         assert_eq!(c.hover, Rgba { r: 0xFF, g: 0xFF, b: 0xFF, a: 0x1A });
         assert_eq!(c.accent, DEFAULT_ACCENT);
+        // Flyouts: the original's 6 px corners and 1 px border, in the bar's colour.
+        let a = Appearance::default();
+        assert_eq!((a.flyout_corner_radius, a.flyout_border_width), (6, 1));
+        assert_eq!(c.flyout_border, c.border);
+    }
+
+    #[test]
+    fn flyout_border_colour() {
+        let bar = Rgba::rgb(1, 2, 3);
+        let a = Appearance { border: Some(bar), ..Default::default() };
+        assert_eq!(a.colors(true).flyout_border, bar); // follows the bar by default
+        let own = Rgba::rgb(9, 9, 9);
+        let a = Appearance { border: Some(bar), flyout_border: Some(own), ..Default::default() };
+        assert_eq!(a.colors(true).flyout_border, own);
+        let a = Appearance { flyout_corner_radius: 99, flyout_border_width: 40, ..Default::default() }.clamped();
+        assert_eq!((a.flyout_corner_radius, a.flyout_border_width), (24, 6));
     }
 
     #[test]
