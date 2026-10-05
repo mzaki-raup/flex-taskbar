@@ -72,9 +72,10 @@ top or bottom bar and vertical strips from a side bar.
 
 These were captured under Wine on Linux, using a demo setup: Wine's built-in
 programs filed into example categories, with custom icons. On Windows you see
-your own apps with their real icons, in Windows' own control styling. Wine has
-no compositor, so translucent parts of the bar blend against black there; on
-Windows they show the desktop behind them.
+your own apps with their real icons, in Windows' own control styling. Most were
+taken without a compositor, where translucent parts of the bar blend against
+black; on Windows they show the desktop behind them. The flyout shadows were
+captured with a compositor (xcompmgr), as they look on Windows.
 
 ## Features
 
@@ -174,6 +175,23 @@ original FlexTaskbar:
     away.
 
     ![A category flyout opening with the Genie animation (slowed to 600 ms)](screenshots/flyout-genie.gif)
+  - **Shadow.** Every flyout (category, subcategory and *All*) casts a
+    shadow on the desktop. Pick its style in the Appearance window
+    (*Shadow*), and how strong it is (*Shadow strength*, 10–100 %):
+    - *Soft* (the default): soft and a little below, like Windows 11's menus;
+    - *Floating*: larger and further below, lifted off the desktop;
+    - *Even all round*: the same on every side;
+    - *Sharp*: a crisp shadow offset to the lower right;
+    - *Glow*: a halo in the accent colour;
+    - *Off*.
+
+    The shadow stops at the bar's edge so it never dims the bar's icons, and
+    the pointer passes through it: resting on a shadow is the same as
+    leaving the flyout, and clicks there reach what's underneath. It is
+    drawn once per flyout size and look, and reused while the flyout is
+    redrawn on hover or scrolled, so it adds nothing to hovering.
+
+    ![The six shadow styles on a category flyout: Off, Soft, Floating, Even, Sharp and Glow](screenshots/flyout-shadows.png)
 - **Hover animations**, in the spirit of the macOS Dock, on every icon of the
   bar (categories and pinned apps). Pick one in the Appearance window, or turn
   them off:
@@ -230,7 +248,6 @@ Every change shows on the bar straight away:
 | Background colour | Any colour; the text turns dark or light to stay readable | Theme's colour |
 | Background opacity | 10–100 % (icons and text stay solid) | 87 % |
 | Icon size | 16–48 | 32 |
-| Hover animation | Off, Magnify (like the macOS Dock), Lift, Bounce, Pulse | Magnify |
 | **Category indicator** | | |
 | Style | Badge with arrow, Arrow, Dot, Folded corner, Underline, Your own picture, None | Badge with arrow |
 | Picture | Any PNG, JPEG, BMP, GIF, ICO or SVG; copied into `data\icons\` | none |
@@ -243,6 +260,7 @@ Every change shows on the bar straight away:
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
 | Gap from screen edge | 0–24 | 0 (docked flush) |
 | Bar thickness | 32–96 (its height, or its width on a side edge) | 48 |
+| Hover animation | Off, Magnify (like the macOS Dock), Lift, Bounce, Pulse | Magnify |
 | All button picture | Any PNG, JPEG, BMP, GIF, ICO or SVG instead of the word; copied into `data\icons\`; *Use text* goes back | The word "All" |
 | **Category flyouts** | | |
 | App tiles per row | 1–12 (top and bottom bars; on a side bar a flyout is one column) | 4 |
@@ -251,6 +269,8 @@ Every change shows on the bar straight away:
 | Corner radius | 0–24 | 6 |
 | Opening animation | Off, Fade, Slide, Scale, Drawer, Genie (like macOS) | Fade |
 | Animation length | 60–600 ms | 180 ms |
+| Shadow | Off, Soft (like Windows 11), Floating, Even all round, Sharp, Glow (accent colour) | Soft |
+| Shadow strength | 10–100 % | 100 % |
 
 The theme also applies to the menus and the search window. *Reset to defaults*
 brings back the original look.
@@ -489,6 +509,9 @@ The launcher is built to cost almost nothing while idle:
   frames are stretched copies of the finished flyout, not redrawn.
   Menus are native Windows popup menus.
 - The search list is virtual, so it only creates rows for what's on screen.
+- A flyout's shadow is a blurred copy of its shape: a running-sum box blur
+  (its cost doesn't grow with the blur's size), drawn once per flyout size
+  and look and reused on every redraw.
 - Pictures drawn on every frame of the bar (the *All* button's, the category
   indicator's) are loaded once per size and drawn from that cache without
   allocating or copying. Redrawing a flyout on hover hands its finished
@@ -504,7 +527,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 68 unit tests cover:
+The 73 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -519,6 +542,9 @@ The 68 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- flyout shadows: each style's look, the room each needs around the flyout
+  (following its offset and the DPI), and the blur spreading softly while
+  keeping the shadow's amount, symmetric, and safe on empty or short input
 - flyout opening animations: every style ending on the finished flyout,
   Scale growing out of its button, Drawer showing the far end first, Genie
   narrowing towards the button with no gaps between its slices, Fade and
@@ -567,6 +593,12 @@ The 68 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - the flyout shadows, with a compositor: all six styles on category
+    flyouts two levels deep and on the *All* list, choosing one in the
+    Appearance window (applied and saved), the shadow stopping at the bar's
+    edge, the flyout closing when the pointer rests on its shadow, hover and
+    clicks in the *All* list still landing on the right row, and the Genie
+    animation with a shadow
   - a picture on the *All* button: uploading it from the Appearance window
     (copied into `data\icons\` and saved), on a bottom and a side bar, and
     *Use text* bringing the word back and deleting the copy
@@ -661,6 +693,7 @@ src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
+src/shadow.rs        flyout shadow styles and blur                     (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/pkgsources.rs    package managers' folders and console programs   (tested)
 src/allview.rs       sorting and filtering the All list               (tested)

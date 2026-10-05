@@ -18,10 +18,11 @@ use super::app;
 use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
-use crate::appearance::{Appearance, Colors, FlyoutAnim};
+use crate::appearance::{Appearance, Colors, FlyoutAnim, FlyoutShadow};
 use crate::flyanim;
+use crate::shadow;
 use crate::striplayout::{self, Edge, Hit};
-use resvg::tiny_skia::Pixmap;
+use resvg::tiny_skia::{Pixmap, PixmapPaint, Transform};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -31,12 +32,12 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HWND_TOPMOST,
-    InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
-    PostMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer, SetWindowPos,
-    ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HTTRANSPARENT,
+    HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING,
+    MF_UNCHECKED, PostMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer,
+    SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_LBUTTONUP, WM_MOUSEACTIVATE,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -122,6 +123,23 @@ struct Level {
     /// The opening animation under way: when it began, and where the
     /// button it opens from lies across the flyout (window pixels).
     anim: Option<(std::time::Instant, (f32, f32))>,
+    /// Room around `win` for the shadow: (left, top, right, bottom). The
+    /// window is that much larger than the flyout.
+    pad: (i32, i32, i32, i32),
+    /// The shadow, drawn once per size and look.
+    shadow: Option<(ShadowKey, Pixmap)>,
+}
+
+/// What a cached shadow was drawn for.
+#[derive(Clone, Copy, PartialEq)]
+struct ShadowKey {
+    size: (i32, i32),
+    style: FlyoutShadow,
+    strength: u32,
+    radius: i32,
+    colour: crate::appearance::Rgba,
+    dpi: u32,
+    edge: Edge,
 }
 
 struct Flyouts {
@@ -254,6 +272,8 @@ fn push_level(view: View, source: Option<usize>) -> bool {
             frame: None,
             shown: false,
             anim: None,
+            pad: (0, 0, 0, 0),
+            shadow: None,
         })
     });
     true
@@ -572,16 +592,17 @@ fn rebuild(idx: usize) {
         with(|f| f.icons.extend(loaded));
     }
 
+    let pad = shadow_pad(&look, dpi);
     let animated = look.flyout_animation != FlyoutAnim::Off;
     let starts = with(|f| {
         let l = &mut f.levels[idx];
         let first = !std::mem::replace(&mut l.shown, true);
         if first && animated {
-            // Where the button lies across the flyout (along the bar).
+            // Where the button lies across the window (along the bar).
             let across = if strip::edge().vertical() {
-                ((anchor_rc.top - win.top) as f32, (anchor_rc.bottom - win.top) as f32)
+                ((anchor_rc.top - win.top + pad.1) as f32, (anchor_rc.bottom - win.top + pad.1) as f32)
             } else {
-                ((anchor_rc.left - win.left) as f32, (anchor_rc.right - win.left) as f32)
+                ((anchor_rc.left - win.left + pad.0) as f32, (anchor_rc.right - win.left + pad.0) as f32)
             };
             l.anim = Some((std::time::Instant::now(), across));
         }
@@ -597,6 +618,7 @@ fn rebuild(idx: usize) {
         let l = &mut f.levels[idx];
         l.elems = elems;
         l.win = win;
+        l.pad = pad;
         if let Some((total, visible, first)) = all_rows {
             l.rows = (total, visible);
             l.view = View::All { first_row: first };
@@ -608,7 +630,8 @@ fn rebuild(idx: usize) {
     });
     if let Some(hw) = hwnd {
         unsafe {
-            let _ = SetWindowPos(hw, Some(HWND_TOPMOST), win.left, win.top, w, h, SWP_NOACTIVATE);
+            let (ww, wh) = (w + pad.0 + pad.2, h + pad.1 + pad.3);
+            let _ = SetWindowPos(hw, Some(HWND_TOPMOST), win.left - pad.0, win.top - pad.1, ww, wh, SWP_NOACTIVATE);
             let _ = ShowWindow(hw, SW_SHOWNOACTIVATE);
         }
     }
@@ -747,10 +770,101 @@ fn render(idx: usize) {
         }
         Some(cv.pix)
     });
-    if let Some(pix) = drawn {
-        with(|f| f.levels.get_mut(idx).map(|l| l.frame = Some(pix)));
+    if let Some(content) = drawn {
+        with(|f| {
+            let (look, colors, dpi) = (&f.look, f.colors, f.dpi);
+            if let Some(l) = f.levels.get_mut(idx) {
+                l.frame = Some(with_shadow(l, &content, look, &colors, dpi));
+            }
+        });
         present(idx);
     }
+}
+
+/// Room the flyouts' shadow needs around them, in pixels.
+fn shadow_pad(look: &Appearance, dpi: u32) -> (i32, i32, i32, i32) {
+    shadow::spec(look.flyout_shadow).map(|sp| shadow::margins(&sp, dpi as f32 / 96.0)).unwrap_or((0, 0, 0, 0))
+}
+
+/// The flyout's drawing on top of its shadow (made once per size and look,
+/// then reused while the flyout is redrawn on hover).
+fn with_shadow(l: &mut Level, content: &Pixmap, look: &Appearance, c: &Colors, dpi: u32) -> Pixmap {
+    let Some(sp) = shadow::spec(look.flyout_shadow) else { return content.clone() };
+    let (pl, pt, pr, pb) = l.pad;
+    let (w, h) = (content.width() as i32, content.height() as i32);
+    let key = ShadowKey {
+        size: (w, h),
+        style: look.flyout_shadow,
+        strength: look.flyout_shadow_strength.clamp(10, 100),
+        radius: scale(look.flyout_corner_radius as i32, dpi),
+        colour: if sp.accent { c.accent } else { crate::appearance::Rgba::rgb(0, 0, 0) },
+        dpi,
+        edge: strip::edge(),
+    };
+    if l.shadow.as_ref().is_none_or(|(k, _)| *k != key) {
+        l.shadow = shadow_layer(&sp, &key, l.pad).map(|p| (key, p));
+    }
+    let Some((_, layer)) = &l.shadow else { return content.clone() };
+    let mut out = layer.clone();
+    if out.width() as i32 != w + pl + pr || out.height() as i32 != h + pt + pb {
+        return content.clone();
+    }
+    out.draw_pixmap(pl, pt, content.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    out
+}
+
+/// Draws the shadow of a `key.size` flyout with `pad` room around it: its
+/// shape, offset and blurred, minus the flyout itself (so a translucent
+/// flyout doesn't show its own shadow through it).
+fn shadow_layer(sp: &shadow::Spec, key: &ShadowKey, pad: (i32, i32, i32, i32)) -> Option<Pixmap> {
+    let (w, h) = key.size;
+    let (ww, wh) = ((w + pad.0 + pad.2) as u32, (h + pad.1 + pad.3) as u32);
+    let k = key.dpi as f32 / 96.0;
+    let r = key.radius as f32;
+    let shape = |dx: f32, dy: f32| -> Option<Vec<u8>> {
+        let mut cv = Canvas::new(ww as i32, wh as i32)?;
+        cv.fill_round_rect(
+            pad.0 as f32 + dx,
+            pad.1 as f32 + dy,
+            w as f32,
+            h as f32,
+            r,
+            crate::appearance::Rgba::rgb(0, 0, 0),
+        );
+        Some(cv.pix.data().as_chunks::<4>().0.iter().map(|p| p[3]).collect())
+    };
+    let mut mask = shape(sp.dx * k, sp.dy * k)?;
+    shadow::blur(&mut mask, ww as usize, wh as usize, shadow::box_radius(sp, k));
+    let body = shape(0.0, 0.0)?;
+    let mut out = Pixmap::new(ww, wh)?;
+    let strength = sp.alpha * key.strength as f32 / 100.0;
+    let c = key.colour;
+    // Nothing beyond the small gap on the bar's side: the shadow must not dim
+    // the bar's icons (or the flyout below, for higher levels).
+    let gap = scale(4, key.dpi);
+    let ww_i = ww as i32;
+    let keep = |x: i32, y: i32| match key.edge {
+        Edge::Bottom => y < pad.1 + h + gap,
+        Edge::Top => y >= pad.1 - gap,
+        Edge::Left => x >= pad.0 - gap,
+        Edge::Right => x < pad.0 + w + gap,
+    };
+    for (i, ((px, &m), &b)) in out.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(&mask).zip(&body).enumerate() {
+        let (x, y) = (i as i32 % ww_i, i as i32 / ww_i);
+        if !keep(x, y) {
+            continue;
+        }
+        let a = (m as f32 * strength * (255 - b) as f32 / 255.0).round().clamp(0.0, 255.0) as u32;
+        if a == 0 {
+            continue;
+        }
+        // Premultiplied.
+        px[0] = (c.r as u32 * a / 255) as u8;
+        px[1] = (c.g as u32 * a / 255) as u8;
+        px[2] = (c.b as u32 * a / 255) as u8;
+        px[3] = a as u8;
+    }
+    Some(out)
 }
 
 /// Puts level `idx` on screen: its finished drawing, or the opening
@@ -767,8 +881,10 @@ fn present(idx: usize) -> bool {
         let anim = l.anim.filter(|_| t < 1.0);
         l.anim = anim;
         match anim {
-            Some((_, across)) => animation_frame(pix, style, t, across).present(l.hwnd, l.win.left, l.win.top),
-            None => canvas::present_pixmap(pix, l.hwnd, l.win.left, l.win.top),
+            Some((_, across)) => {
+                animation_frame(pix, style, t, across).present(l.hwnd, l.win.left - l.pad.0, l.win.top - l.pad.1)
+            }
+            None => canvas::present_pixmap(pix, l.hwnd, l.win.left - l.pad.0, l.win.top - l.pad.1),
         }
         anim.is_some()
     })
@@ -830,9 +946,13 @@ fn animate() {
 
 // ---------------------------------------------------------------- input
 
+/// The element at (`x`, `y`) in level `idx`'s window (which includes the
+/// shadow's room).
 fn elem_at(idx: usize, x: i32, y: i32) -> Option<usize> {
     with(|f| {
-        f.levels.get(idx)?.elems.iter().position(|p| {
+        let l = f.levels.get(idx)?;
+        let (x, y) = (x - l.pad.0, y - l.pad.1);
+        l.elems.iter().position(|p| {
             interactive(&p.elem) && x >= p.rect.left && x < p.rect.right && y >= p.rect.top && y < p.rect.bottom
         })
     })
@@ -1055,6 +1175,16 @@ fn pointer_inside() -> bool {
     over_flyout || with(|f| f.anchor).is_some_and(strip::pointer_over)
 }
 
+/// Whether the screen point in `lparam` (as `WM_NCHITTEST` gives it) is on
+/// level `idx`'s flyout itself rather than its shadow.
+fn over_flyout(idx: usize, lparam: LPARAM) -> bool {
+    let (x, y) = mouse_xy(lparam);
+    with(|f| {
+        f.levels.get(idx).is_some_and(|l| x >= l.win.left && x < l.win.right && y >= l.win.top && y < l.win.bottom)
+    })
+    .unwrap_or(true)
+}
+
 fn mouse_xy(lparam: LPARAM) -> (i32, i32) {
     ((lparam.0 & 0xFFFF) as i16 as i32, ((lparam.0 >> 16) & 0xFFFF) as i16 as i32)
 }
@@ -1068,7 +1198,23 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
     let level = level_of(hwnd);
     match (msg, level) {
         (WM_MOUSEACTIVATE, _) => LRESULT(MA_NOACTIVATE as isize),
+        // The shadow lets the pointer through to what's under it (the bar,
+        // or the flyout below), so it never gets in the way.
+        (WM_NCHITTEST, Some(idx)) if !over_flyout(idx, lparam) => LRESULT(HTTRANSPARENT as isize),
         (WM_MOUSEMOVE, Some(idx)) => {
+            // Over the shadow (nothing of ours underneath): like being outside.
+            let (cx, cy) = mouse_xy(lparam);
+            let on_body = with(|f| {
+                f.levels.get(idx).is_some_and(|l| {
+                    let (x, y) = (cx - l.pad.0, cy - l.pad.1);
+                    x >= 0 && y >= 0 && x < ui::rect_w(&l.win) && y < ui::rect_h(&l.win)
+                })
+            })
+            .unwrap_or(true);
+            if !on_body {
+                start_close_timer();
+                return LRESULT(0);
+            }
             cancel_close();
             let (x, y) = mouse_xy(lparam);
             let under = elem_at(idx, x, y);

@@ -56,6 +56,23 @@ pub enum FlyoutAnim {
     Genie,
 }
 
+/// The shadow under every flyout (see `shadow`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FlyoutShadow {
+    Off,
+    /// Soft and a little below, like Windows 11's menus.
+    Soft,
+    /// Larger and further below: lifted off the desktop.
+    Floating,
+    /// The same all round.
+    Even,
+    /// Crisp and offset.
+    Sharp,
+    /// A halo in the accent colour.
+    Glow,
+}
+
 /// The mark on a category (and subcategory) icon that says "this opens a
 /// flyout".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +193,10 @@ pub struct Appearance {
     pub flyout_animation: FlyoutAnim,
     /// How long that takes, in milliseconds.
     pub flyout_animation_ms: u32,
+    /// The shadow under the flyouts.
+    pub flyout_shadow: FlyoutShadow,
+    /// Its strength in percent (100 = as designed).
+    pub flyout_shadow_strength: u32,
     /// File name (in the data folder's `icons`) of a picture shown on the
     /// *All* button instead of the word. `None`: the word "All".
     pub all_icon: Option<String>,
@@ -204,6 +225,8 @@ impl Default for Appearance {
             flyout_border: None,
             flyout_animation: FlyoutAnim::Fade,
             flyout_animation_ms: 180,
+            flyout_shadow: FlyoutShadow::Soft,
+            flyout_shadow_strength: 100,
             all_icon: None,
         }
     }
@@ -280,6 +303,7 @@ impl Appearance {
             flyout_border_width: self.flyout_border_width.min(6),
             indicator_size: self.indicator_size.clamp(25, 80),
             flyout_animation_ms: self.flyout_animation_ms.clamp(60, 600),
+            flyout_shadow_strength: self.flyout_shadow_strength.clamp(10, 100),
             // A picture that was never chosen falls back to the badge.
             indicator: if self.indicator == Indicator::Image && self.indicator_image.is_none() {
                 Indicator::Badge
@@ -389,6 +413,17 @@ mod tests {
         // Older files without these keys get the defaults.
         let old: Appearance = serde_json::from_str("{\"opacity\":50}").unwrap();
         assert_eq!((old.flyout_animation, old.all_icon), (FlyoutAnim::Fade, None));
+    }
+
+    #[test]
+    fn flyout_shadow_settings() {
+        let a = Appearance::default();
+        assert_eq!((a.flyout_shadow, a.flyout_shadow_strength), (FlyoutShadow::Soft, 100));
+        let a = Appearance { flyout_shadow: FlyoutShadow::Glow, flyout_shadow_strength: 0, ..a }.clamped();
+        assert_eq!(a.flyout_shadow_strength, 10);
+        assert!(serde_json::to_string(&a).unwrap().contains("\"flyout_shadow\":\"glow\""));
+        let old: Appearance = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.flyout_shadow, FlyoutShadow::Soft);
     }
 
     #[test]
