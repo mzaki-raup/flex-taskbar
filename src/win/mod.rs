@@ -2,8 +2,11 @@
 
 mod app;
 mod appdialog;
+mod appearancewin;
 mod autostart;
+mod canvas;
 mod catalog;
+mod flyout;
 mod icons;
 mod launch;
 mod manager;
@@ -13,7 +16,6 @@ mod searchwin;
 mod strip;
 mod supervisor;
 mod theme;
-mod tiles;
 mod ui;
 
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, LPARAM, WPARAM};

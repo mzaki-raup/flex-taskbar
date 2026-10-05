@@ -182,7 +182,7 @@ fn create() -> bool {
         SendMessageW(list, LVM_SETIMAGELIST, Some(WPARAM(LVSIL_SMALL as usize)), Some(LPARAM(images.0)));
 
         let dpi = ui::dpi_of(hwnd);
-        let dark = theme::is_dark();
+        let dark = theme::app_dark();
         let palette = theme::palette(dark);
         let s = Search {
             hwnd,
@@ -274,7 +274,7 @@ pub fn theme_changed() {
     let exists = SEARCH.with(|s| {
         let mut b = s.borrow_mut();
         let Some(s) = b.as_mut() else { return false };
-        s.dark = theme::is_dark();
+        s.dark = theme::app_dark();
         s.palette = theme::palette(s.dark);
         unsafe {
             let _ = DeleteObject(HGDIOBJ(s.brush_window.0));

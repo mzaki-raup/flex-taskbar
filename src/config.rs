@@ -76,11 +76,8 @@ pub struct Settings {
     pub strip_height: u32,
     /// Milliseconds the pointer rests on a category icon before it opens.
     pub hover_delay_ms: u32,
-    /// Category popups from the strip show apps and subcategories as tiles
-    /// (large icon, name underneath) in a horizontal row instead of a list.
-    pub tile_menus: bool,
-    /// Tiles per row before a category popup wraps into a grid.
-    pub tile_columns: usize,
+    /// Theme, colours, transparency, border, corners and size of the strip.
+    pub appearance: crate::appearance::Appearance,
 }
 
 impl Default for Settings {
@@ -94,9 +91,8 @@ impl Default for Settings {
             show_strip: true,
             reserve_space: true,
             strip_height: 48,
-            hover_delay_ms: 250,
-            tile_menus: true,
-            tile_columns: 8,
+            hover_delay_ms: 100,
+            appearance: crate::appearance::Appearance::default(),
         }
     }
 }

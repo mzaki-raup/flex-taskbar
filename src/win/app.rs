@@ -10,7 +10,7 @@ use super::catalog::{self, Catalog, ShellApp, Source as AppSource};
 use super::icons::{self, Source as IconSource};
 use super::launch::{self, Target};
 use super::ui::{self, wide};
-use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, strip, supervisor, theme, tiles};
+use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, strip, supervisor, theme};
 use crate::config::{Config, Hotkey, LoadOutcome, Store};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,7 +18,6 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM
 use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT};
 use windows::Win32::UI::Controls::{
     ICC_BAR_CLASSES, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, ICC_STANDARD_CLASSES, ICC_TREEVIEW_CLASSES,
     INITCOMMONCONTROLSEX, InitCommonControlsEx,
@@ -36,7 +35,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SM_CXSMICON, SW_SHOWNORMAL, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_HOTKEY,
     WM_QUERYENDSESSION, WM_SETTINGCHANGE, WNDCLASSW, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
-use windows::Win32::UI::WindowsAndMessaging::{WM_DRAWITEM, WM_MEASUREITEM};
 use windows::core::{PCWSTR, w};
 
 pub const WM_APP_COMMAND: u32 = WM_APP + 1;
@@ -160,6 +158,7 @@ pub fn run(args: &Args) -> i32 {
         // Write the recovered settings back right away, so the next start is clean.
         save();
     }
+    theme::set_mode(with(|s| s.cfg.settings.appearance.theme));
     theme::allow_dark_for_window(main);
     add_tray_icon(main);
     strip::apply_settings();
@@ -327,15 +326,6 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             }
             LRESULT(0)
         }
-        // Owner-drawn tiles in category popups (menus are owned by this window).
-        WM_MEASUREITEM => {
-            let mis = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
-            if tiles::measure(mis) { LRESULT(1) } else { unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) } }
-        }
-        WM_DRAWITEM => {
-            let dis = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-            if tiles::draw(dis) { LRESULT(1) } else { unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) } }
-        }
         WM_QUERYENDSESSION => LRESULT(1),
         WM_ENDSESSION => {
             if wparam.0 != 0 {
@@ -395,6 +385,7 @@ pub fn perform(action: menu::Action) {
         menu::Action::Launch(id) => launch_app(&id),
         menu::Action::Search => searchwin::show(),
         menu::Action::Manage => manager::show(),
+        menu::Action::Appearance => super::appearancewin::show(),
         menu::Action::Rescan => start_scan(),
         menu::Action::ToggleAutostart => toggle_autostart(None),
         menu::Action::ToggleStrip => set_strip(None),
@@ -651,7 +642,6 @@ pub fn reload_icon(key: &str) {
     searchwin::icons_changed(&keys);
     manager::icons_changed(&keys);
     strip::icon_changed(key);
-    tiles::icon_changed(key);
 }
 
 // ---------------------------------------------------------------- hotkeys

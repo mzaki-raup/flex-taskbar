@@ -4,6 +4,12 @@
 //! `SetPreferredAppMode` (ordinal 135). It is undocumented but present on every
 //! Windows 10 1903+ and Windows 11 build, and is what Explorer and Notepad use;
 //! if the lookup fails the menus simply stay light.
+//!
+//! The Appearance setting can force dark or light instead of following
+//! Windows; [`set_mode`] applies it to menus and [`app_dark`] tells the
+//! app's own windows which palette to use.
+
+use crate::appearance::ThemeMode;
 
 use windows::Win32::Foundation::{COLORREF, HWND};
 use windows::Win32::Graphics::Dwm::{
@@ -32,6 +38,22 @@ pub fn is_dark() -> bool {
 
 thread_local! {
     static DARK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static MODE: std::cell::Cell<ThemeMode> = const { std::cell::Cell::new(ThemeMode::Dark) };
+}
+
+/// Sets the theme setting and re-themes popup menus to match.
+pub fn set_mode(mode: ThemeMode) {
+    MODE.with(|m| m.set(mode));
+    allow_dark_menus();
+}
+
+/// Whether the app's windows and menus are dark under the current setting.
+pub fn app_dark() -> bool {
+    match MODE.with(|m| m.get()) {
+        ThemeMode::System => is_dark_cached(),
+        ThemeMode::Dark => true,
+        ThemeMode::Light => false,
+    }
 }
 
 /// [`is_dark`], read once and then cached until [`forget_cached`].
@@ -51,15 +73,21 @@ pub fn forget_cached() {
     DARK.with(|d| d.set(None));
 }
 
-/// Makes popup menus follow the system theme. Call once at startup and again
-/// when the theme changes.
+/// Makes popup menus follow the theme setting. Call once at startup and again
+/// when the system theme changes.
 pub fn allow_dark_menus() {
+    // SetPreferredAppMode: 1 = follow Windows, 2 = force dark, 3 = force light.
+    let mode = match MODE.with(|m| m.get()) {
+        ThemeMode::System => 1,
+        ThemeMode::Dark => 2,
+        ThemeMode::Light => 3,
+    };
     unsafe {
         let Ok(lib) = LoadLibraryW(w!("uxtheme.dll")) else { return };
-        // SetPreferredAppMode(1 = AllowDark), then FlushMenuThemes.
+        // SetPreferredAppMode, then FlushMenuThemes.
         if let Some(f) = GetProcAddress(lib, PCSTR(135 as *const u8)) {
             let set_mode: extern "system" fn(i32) -> i32 = std::mem::transmute(f);
-            set_mode(1);
+            set_mode(mode);
         }
         if let Some(f) = GetProcAddress(lib, PCSTR(136 as *const u8)) {
             let flush: extern "system" fn() = std::mem::transmute(f);

@@ -1,8 +1,12 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
-//! Horizontal layout of the icon strip: the launcher button on the left, then
-//! the root categories and pinned apps centered on the strip (as on the
-//! Windows 11 taskbar), shifted right if centering would overlap the launcher.
+//! Geometry for the icon strip and its flyouts, kept free of Win32 so it can
+//! be unit-tested.
+//!
+//! The bar has three zones, as in the original FlexTaskbar: buttons on the
+//! left ("All"), the root categories and pinned apps centred, and buttons on
+//! the right ("Link", settings). In `fit` mode the bar shrinks to its content
+//! and is centred on the screen like a floating dock.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Slot {
@@ -14,55 +18,120 @@ impl Slot {
     pub fn contains(&self, x: i32) -> bool {
         x >= self.x && x < self.x + self.w
     }
+
+    pub fn right(&self) -> i32 {
+        self.x + self.w
+    }
 }
 
-pub struct Layout {
-    pub launcher: Slot,
-    /// One slot per item that fits; items beyond the strip's width are left out.
+pub struct Metrics {
+    /// Padding inside the bar's left and right ends.
+    pub pad: i32,
+    /// Width of one category / pinned-app button.
+    pub item_w: i32,
+    /// Space between buttons.
+    pub gap: i32,
+    /// Widths of the left-hand buttons, in order.
+    pub left: Vec<i32>,
+    /// Widths of the right-hand buttons, in order.
+    pub right: Vec<i32>,
+}
+
+pub struct BarLayout {
+    /// The bar's visible extent within the window.
+    pub bar: Slot,
+    pub left: Vec<Slot>,
+    /// One slot per item that fits; items that don't fit are left out.
     pub items: Vec<Slot>,
+    pub right: Vec<Slot>,
 }
 
-pub fn layout(width: i32, pad: i32, item_w: i32, gap: i32, count: usize) -> Layout {
-    let launcher = Slot { x: pad, w: item_w };
-    let first_free = launcher.x + launcher.w + gap * 2;
-    let room = (width - pad - first_free).max(0);
-    let fits = if item_w <= 0 { 0 } else { ((room + gap) / (item_w + gap)).max(0) as usize };
-    let n = count.min(fits);
-    let total = n as i32 * item_w + (n as i32 - 1).max(0) * gap;
-    let start = ((width - total) / 2).max(first_free);
-    let items = (0..n).map(|i| Slot { x: start + i as i32 * (item_w + gap), w: item_w }).collect();
-    Layout { launcher, items }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hit {
+    Left(usize),
+    Item(usize),
+    Right(usize),
 }
 
-/// Which slot is under `x`: `Some(None)` for the launcher, `Some(Some(i))` for
-/// item `i`, `None` for empty strip.
-pub fn hit(layout: &Layout, x: i32) -> Option<Option<usize>> {
-    if layout.launcher.contains(x) {
-        return Some(None);
+fn run(start: i32, widths: &[i32], gap: i32) -> Vec<Slot> {
+    let mut x = start;
+    widths
+        .iter()
+        .map(|&w| {
+            let s = Slot { x, w };
+            x += w + gap;
+            s
+        })
+        .collect()
+}
+
+fn run_width(widths: &[i32], gap: i32) -> i32 {
+    widths.iter().sum::<i32>() + gap * (widths.len() as i32 - 1).max(0)
+}
+
+pub fn bar_layout(width: i32, m: &Metrics, count: usize, fit: bool) -> BarLayout {
+    let zone_gap = m.gap * 4;
+    let left_w = run_width(&m.left, m.gap);
+    let right_w = run_width(&m.right, m.gap);
+    let item_w = |n: usize| n as i32 * m.item_w + (n as i32 - 1).max(0) * m.gap;
+
+    if fit {
+        // Shrink to content, centred; drop items only if even that won't fit.
+        let fixed = m.pad * 2 + left_w + right_w + zone_gap * 2;
+        let room = (width - fixed).max(0);
+        let n = count.min(((room + m.gap) / (m.item_w + m.gap)).max(0) as usize);
+        let bar_w = (fixed + item_w(n)).min(width);
+        let bar = Slot { x: (width - bar_w) / 2, w: bar_w };
+        let left = run(bar.x + m.pad, &m.left, m.gap);
+        let items_x = bar.x + m.pad + left_w + zone_gap;
+        let items = (0..n).map(|i| Slot { x: items_x + i as i32 * (m.item_w + m.gap), w: m.item_w }).collect();
+        let right = run(bar.right() - m.pad - right_w, &m.right, m.gap);
+        return BarLayout { bar, left, items, right };
     }
-    layout.items.iter().position(|s| s.contains(x)).map(Some)
+
+    let bar = Slot { x: 0, w: width };
+    let left = run(m.pad, &m.left, m.gap);
+    let right = run(width - m.pad - right_w, &m.right, m.gap);
+    let lo = m.pad + left_w + zone_gap;
+    let hi = width - m.pad - right_w - zone_gap;
+    let room = (hi - lo).max(0);
+    let n = count.min(((room + m.gap) / (m.item_w + m.gap)).max(0) as usize);
+    let total = item_w(n);
+    // Centred on the whole bar, nudged inward if that would overlap a side zone.
+    let start = ((width - total) / 2).max(lo).min(hi - total);
+    let items = (0..n).map(|i| Slot { x: start + i as i32 * (m.item_w + m.gap), w: m.item_w }).collect();
+    BarLayout { bar, left, items, right }
 }
 
-/// Order in which `count` tiles go into a native menu so they read left to
-/// right, top to bottom, in rows of at most `max_cols`.
-///
-/// Native menus fill columns top to bottom and start a new column at an item
-/// marked MFT_MENUBREAK, so the grid is fed column by column. Each entry is
-/// (tile index, starts a new column).
-pub fn tile_order(count: usize, max_cols: usize) -> Vec<(usize, bool)> {
-    if count == 0 {
-        return Vec::new();
+pub fn hit(layout: &BarLayout, x: i32) -> Option<Hit> {
+    if let Some(i) = layout.left.iter().position(|s| s.contains(x)) {
+        return Some(Hit::Left(i));
     }
-    let cols = count.min(max_cols.max(1));
-    let rows = count.div_ceil(cols);
-    let mut out = Vec::with_capacity(count);
-    for c in 0..cols {
-        for r in 0..rows {
-            let idx = r * cols + c;
-            if idx < count {
-                out.push((idx, r == 0 && c > 0));
-            }
+    if let Some(i) = layout.right.iter().position(|s| s.contains(x)) {
+        return Some(Hit::Right(i));
+    }
+    layout.items.iter().position(|s| s.contains(x)).map(Hit::Item)
+}
+
+/// Rows of tiles in a flyout: `count` tiles, at most `cols` per row. Returns
+/// (column, row) for each tile, reading left to right.
+pub fn grid(count: usize, cols: usize) -> Vec<(usize, usize)> {
+    let cols = cols.max(1);
+    (0..count).map(|i| (i % cols, i / cols)).collect()
+}
+
+/// Wraps buttons of the given widths into rows no wider than `max_w`.
+/// Returns (x, row) per button.
+pub fn wrap(widths: &[i32], gap: i32, max_w: i32) -> Vec<(i32, usize)> {
+    let mut out = Vec::with_capacity(widths.len());
+    let (mut x, mut row) = (0, 0);
+    for &w in widths {
+        if x > 0 && x + w > max_w {
+            x = 0;
+            row += 1;
         }
+        out.push((x, row));
+        x += w + gap;
     }
     out
 }
@@ -71,54 +140,61 @@ pub fn tile_order(count: usize, max_cols: usize) -> Vec<(usize, bool)> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn tiles_in_one_row_when_they_fit() {
-        assert_eq!(tile_order(3, 8), vec![(0, false), (1, true), (2, true)]);
-        assert!(tile_order(0, 8).is_empty());
+    fn metrics() -> Metrics {
+        Metrics { pad: 8, item_w: 44, gap: 4, left: vec![40], right: vec![60, 30] }
     }
 
     #[test]
-    fn tiles_wrap_row_major() {
-        // 5 tiles, 3 per row:  0 1 2 / 3 4
-        assert_eq!(tile_order(5, 3), vec![(0, false), (3, false), (1, true), (4, false), (2, true)]);
-        let order = tile_order(17, 8);
-        assert_eq!(order.len(), 17);
-        let mut idx: Vec<usize> = order.iter().map(|o| o.0).collect();
-        idx.sort();
-        assert_eq!(idx, (0..17).collect::<Vec<_>>());
-        assert_eq!(order.iter().filter(|o| o.1).count(), 7); // 8 columns
-    }
-
-    #[test]
-    fn items_are_centered() {
-        let l = layout(1000, 8, 40, 4, 3);
-        assert_eq!(l.launcher, Slot { x: 8, w: 40 });
-        let total = 3 * 40 + 2 * 4;
+    fn full_width_has_three_zones() {
+        let l = bar_layout(1000, &metrics(), 3, false);
+        assert_eq!(l.bar, Slot { x: 0, w: 1000 });
+        assert_eq!(l.left, vec![Slot { x: 8, w: 40 }]);
+        assert_eq!(l.right.last().unwrap().right(), 1000 - 8);
+        let total = 3 * 44 + 2 * 4;
         assert_eq!(l.items[0].x, (1000 - total) / 2);
-        assert_eq!(l.items[2].x + l.items[2].w, (1000 - total) / 2 + total);
     }
 
     #[test]
-    fn crowded_strip_starts_after_the_launcher_and_drops_overflow() {
-        let l = layout(300, 8, 40, 4, 50);
-        assert!(l.items[0].x >= 8 + 40);
-        assert!(l.items.last().unwrap().x + 40 <= 300 - 8);
-        assert!(l.items.len() < 50);
+    fn crowded_bar_keeps_clear_of_the_side_buttons() {
+        let l = bar_layout(400, &metrics(), 50, false);
+        assert!(!l.items.is_empty() && l.items.len() < 50);
+        assert!(l.items[0].x >= l.left[0].right());
+        assert!(l.items.last().unwrap().right() <= l.right[0].x);
+    }
+
+    #[test]
+    fn fit_mode_shrinks_and_centres() {
+        let l = bar_layout(1000, &metrics(), 3, true);
+        assert!(l.bar.w < 1000);
+        assert_eq!(l.bar.x, (1000 - l.bar.w) / 2);
+        assert_eq!(l.left[0].x, l.bar.x + 8);
+        assert_eq!(l.right.last().unwrap().right(), l.bar.right() - 8);
+        assert!(l.items[0].x > l.left[0].right());
+        assert!(l.items[2].right() < l.right[0].x);
     }
 
     #[test]
     fn hit_testing() {
-        let l = layout(1000, 8, 40, 4, 2);
-        assert_eq!(hit(&l, 10), Some(None));
-        assert_eq!(hit(&l, l.items[1].x + 5), Some(Some(1)));
-        assert_eq!(hit(&l, l.items[0].x + 40 + 1), None); // the gap
-        assert_eq!(hit(&l, 999), None);
+        let l = bar_layout(1000, &metrics(), 2, false);
+        assert_eq!(hit(&l, 10), Some(Hit::Left(0)));
+        assert_eq!(hit(&l, l.items[1].x + 1), Some(Hit::Item(1)));
+        assert_eq!(hit(&l, l.right[1].x + 1), Some(Hit::Right(1)));
+        assert_eq!(hit(&l, 300), None);
     }
 
     #[test]
-    fn empty_strip() {
-        let l = layout(1000, 8, 40, 4, 0);
+    fn empty_bar() {
+        let l = bar_layout(1000, &metrics(), 0, true);
         assert!(l.items.is_empty());
-        assert_eq!(hit(&l, 500), None);
+        assert_eq!(hit(&l, 100), None); // outside the shrunken bar
+    }
+
+    #[test]
+    fn grid_and_wrap() {
+        assert_eq!(grid(5, 4), vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]);
+        assert_eq!(grid(2, 0), vec![(0, 0), (0, 1)]);
+        assert_eq!(wrap(&[100, 100, 100], 4, 250), vec![(0, 0), (104, 0), (0, 1)]);
+        // A button wider than the row still gets a row of its own.
+        assert_eq!(wrap(&[400, 50], 4, 250), vec![(0, 0), (0, 1)]);
     }
 }

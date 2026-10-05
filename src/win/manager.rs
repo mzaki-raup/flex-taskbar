@@ -83,6 +83,7 @@ const LBL_HINT: u16 = 65;
 const STRIP_SHOW: u16 = 66;
 const STRIP_RESERVE: u16 = 67;
 const ALL_PIN: u16 = 68;
+const APPEARANCE: u16 = 69;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -134,6 +135,14 @@ pub fn show() {
         return;
     }
     create();
+}
+
+/// Opens the window with a category selected.
+pub fn show_category(id: u64) {
+    show();
+    if hwnd().is_some() {
+        rebuild_tree(Some(id));
+    }
 }
 
 pub fn destroy() {
@@ -318,6 +327,7 @@ fn create() {
             ("Rescan apps", RESCAN),
             ("Import old settings…", IMPORT),
             ("Open data folder", OPEN_DATA),
+            ("Appearance…", APPEARANCE),
             ("Close", CLOSE),
         ] {
             controls.insert(id, button(text, id));
@@ -438,9 +448,9 @@ fn layout() {
 
     // Status + actions row.
     let y2 = y1 + bh + gap;
-    let actions_w = s(4 * 130 + 3 * 6);
+    let actions_w = s(5 * 130 + 4 * 6);
     place(STATUS, m, y2 + s(5), width - actions_w - gap, lh);
-    row(&[RESCAN, IMPORT, OPEN_DATA, CLOSE], rc.right - m - actions_w, y2, actions_w);
+    row(&[RESCAN, IMPORT, OPEN_DATA, APPEARANCE, CLOSE], rc.right - m - actions_w, y2, actions_w);
 
     for lv in [APPS, ALL] {
         let mut lrc = RECT::default();
@@ -1360,6 +1370,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 RESCAN => app::start_scan(),
                 IMPORT => import_old(hwnd),
                 OPEN_DATA => app::open_data_folder(),
+                APPEARANCE => super::appearancewin::show(),
                 REFRESH_LABEL => refresh_category_apps(),
                 CLOSE => unsafe {
                     let _ = DestroyWindow(hwnd);

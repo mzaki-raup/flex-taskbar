@@ -3,11 +3,13 @@
 A portable application launcher for Windows 10 (version 1703 or later) and
 Windows 11, for people with a lot of apps installed. You file apps into
 categories nested as deeply as you like. Your categories and pinned apps then
-sit as a strip of icons docked against the Windows taskbar. Rest the pointer on
-a category and its apps pop up as a row of tiles, with subcategories cascading
-on hover. The
-same categories are also available from the tray icon, a hotkey menu, and a
-type-to-search window.
+sit in a bar docked against the Windows taskbar, in the look of the original
+FlexTaskbar. Rest the pointer on a category and a flyout pops up: its
+subcategories as a row of buttons, its apps as tiles. Click a subcategory to open
+it in the same flyout. Theme (dark, light or Windows default), colours,
+transparency, border and rounded corners are all adjustable. The same categories
+are also available from the tray icon, a hotkey menu, and a type-to-search
+window.
 
 FlexTaskbar does **not** replace or change the Windows taskbar. The strip sits
 next to it (just above, or below a top taskbar), and can be turned off.
@@ -28,61 +30,96 @@ next to it (just above, or below a top taskbar), and can be turned off.
 
 ## Screenshots
 
-![Hovering categories on the icon strip, sliding between them, launching a pinned app, the full menu, search, and the Manage window](screenshots/flow.gif)
+![Hovering a category, opening a subcategory and going back, sliding between categories, launching a pinned app, All apps, and changing the appearance live](screenshots/flow.gif)
 
-**The icon strip**: the FlexTaskbar button, then root categories and pinned apps.
+**The bar**: *All* on the left, root categories (▾) and pinned apps in the
+centre, *Link* and settings (⚙) on the right. These are the defaults, which
+match the original .NET version.
 
-![Icon strip with category and app icons](screenshots/strip.png)
+![The bar with All, category and app icons, Link and the settings gear](screenshots/strip.png)
 
-| Hover a category: apps as tiles | Subcategories cascade, also as tiles |
+| Hover a category: subcategories and app tiles | Click a subcategory: it opens in place |
 |---|---|
-| ![System category open as a row of app tiles](screenshots/tiles.png) | ![Development open: app tiles, a column of subcategories, and Editors cascaded](screenshots/strip-menu.png) |
-| **FlexTaskbar button / tray: the full menu** | |
-| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | |
-| **Search (empty box: recent apps first)** | **Custom app (a browser web app)** |
+| ![Development open: Editors, Terminals and Tools buttons, two app tiles, Manage Category](screenshots/tiles.png) | ![Editors open inside the flyout, with Back](screenshots/subcategory.png) |
+| **All: every app** | **Light theme, rounded floating dock** |
+| ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge](screenshots/light-dock.png) |
+| **Appearance window** | **Right-click: the full menu** |
+| ![Appearance window with theme, bar width, colours and sliders](screenshots/appearance.png) | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) |
+| **Search** | **Custom app (a browser web app)** |
 | ![Search window listing apps with their category paths](screenshots/search.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
 
 ![Manage window with category tree, apps in the category, all apps, and strip settings](screenshots/manage.png)
 
 These were captured under Wine on Linux, using a demo setup: Wine's built-in
 programs filed into example categories, with custom icons. On Windows you see
-your own apps with their real icons, in Windows' own control styling.
+your own apps with their real icons, in Windows' own control styling. Wine has
+no compositor, so translucent parts of the bar blend against black there; on
+Windows they show the desktop behind them.
 
 ## Features
 
 **Nested categories.** Categories can contain subcategories to any depth, plus
 apps. The same app can be filed in several categories. In the tray and hotkey
 menu a category is a submenu listing its subcategories, then its apps. From the
-strip, a category opens as app tiles (below).
+bar, a category opens as a flyout (below).
 
-**The icon strip** is a bar docked against the Windows taskbar on the primary
-monitor:
-- **Layout.** The FlexTaskbar button is on the left. Your root categories and
-  pinned apps are centred, like the Windows 11 taskbar.
-- **Categories open on hover.** Resting the pointer on a category for a moment
-  opens its contents upward:
-  - Apps appear as **tiles**, each a large icon with the name underneath, in a
-    horizontal row. Long categories wrap into rows of 8.
-  - The category's subcategories are listed in a column at the right end.
-    Hovering one opens it the same way, at any depth. The column sits at the
-    right edge so each cascade opens beside the popup, not over its tiles.
-  - Arrow keys, Enter and Esc work as in any menu.
-- **Slide between categories.** While a category is open, moving along the
-  strip switches to the next one, like a menu bar.
+**The bar** is docked against the Windows taskbar on the primary monitor, laid
+out like the original FlexTaskbar:
+- **Left: *All*.** Click it for a list of every app (scroll with the wheel;
+  right-click an app to pin or unpin it).
+- **Centre: root categories and pinned apps.** A small ▾ marks a category.
+- **Right: *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
+  path and pins it to the bar. ⚙ opens the Manage window.
+- **Category flyouts.** Resting the pointer on a category opens a flyout above
+  it:
+  - its **subcategories** as a row of buttons; click one to open it in the same
+    flyout, at any depth, with *‹ Back* to go up again (or, if you prefer,
+    set them to open on hover);
+  - its **apps as tiles**, each a large icon with the name underneath, 4 per row
+    by default;
+  - *No apps in this category* when it's empty, and **Manage Category** at the
+    bottom, which opens the Manage window on that category.
+  - The flyout closes shortly after the pointer leaves it and its button.
+- **Slide between categories.** While a flyout is open, moving along the bar
+  switches to the next category straight away.
 - **Pinned apps** launch with a click. You can pin an app from the Manage
-  window (*Pin to strip*), or drag `.exe`/`.lnk` files onto the strip.
-- **Right-click** an icon to move it left or right, unpin it, or hide the strip.
-- **Screen space.** By default the strip reserves its space like the taskbar
+  window (*Pin to strip*), from the *All* list, with *Link*, or by dragging
+  `.exe`/`.lnk` files onto the bar.
+- **Right-click** an icon to move it left or right, unpin it, manage it or
+  change the appearance; right-click anywhere else for the full menu.
+- **Screen space.** By default the bar reserves its space like the taskbar
   does, so maximized windows stop above it. You can turn that off in the Manage
-  window, and then the strip floats on top instead.
+  window, and then the bar floats on top instead.
 - **Full-screen apps.** It hides while a full-screen app (a game or a video) is
   in front.
+
+**Appearance.** Right-click the bar (or use the menu) and pick *Appearance…*.
+Every change shows on the bar straight away:
+
+| Setting | Choices | Default |
+|---|---|---|
+| Theme | Windows default, Dark, Light | Dark (the original look) |
+| Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
+| Open subcategories | On click, On hover | On click |
+| Accent colour | Any colour (marks the open button) | Light blue `#60CDFF` |
+| Background colour | Any colour; the text turns dark or light to stay readable | Theme's colour |
+| Border colour | Any colour | A faint line in the text colour |
+| Background opacity | 10–100 % (icons and text stay solid) | 87 % |
+| Border width | 0–6 | 1 |
+| Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
+| Gap from screen edge | 0–24 | 0 (docked flush) |
+| Icon size | 16–48 | 32 |
+| Bar height | 32–96 | 48 |
+| App tiles per row | 1–12 | 4 |
+
+The theme also applies to the menus and the search window. *Reset to defaults*
+brings back the original look.
 
 **Four ways to launch:**
 
 | How | What you get |
 |---|---|
-| The icon strip | Hover a category, click a pinned app; the FlexTaskbar button shows the full menu |
+| The bar | Hover a category, click a pinned app, or click *All*; right-click for the full menu |
 | Left- or right-click the tray icon | The full menu |
 | **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
 | **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
@@ -108,9 +145,6 @@ To add apps quickly, drag `.exe` or `.lnk` files onto the Manage window.
 files. A copy of the image is kept in the data folder, so moving or deleting the
 original doesn't break the icon.
 
-**Theme.** Menus and the search window follow the Windows light or dark app
-theme.
-
 **Import from the old FlexTaskbar.** In the Manage window, *Import old
 settings…* reads `%APPDATA%\FlexTaskbar\categories.json` and
 `applications.json` from the .NET version. It adds those categories and apps
@@ -119,9 +153,10 @@ custom icons are copied over.
 
 ### What changed from the .NET version
 
-The docked bar is back as the icon strip, with the same idea as before:
-category and app icons in a row, with category contents popping up from them
-as horizontal app tiles.
+The docked bar is back in its original look: *All* on the left, category and
+app icons in the centre, *Link* and ⚙ on the right, and category flyouts with
+subcategory buttons, app tiles and *Manage Category*. Its colours, transparency,
+border and corners are now adjustable.
 It now sits beside the Windows taskbar instead of trying to replace it, so these
 old taskbar features are gone on purpose:
 - running-window buttons
@@ -158,7 +193,7 @@ Your old categories can be imported (see above).
      click *Pin to strip*.
 3. Close the window. Your root categories now appear on the strip, and
    FlexTaskbar keeps running in the tray. To open the window again, use
-   *Manage categories…* from the FlexTaskbar button or the tray menu, or just
+   ⚙ on the bar, *Manage categories…* in the right-click or tray menu, or just
    run the exe again.
 
 ## Portable data
@@ -233,12 +268,11 @@ These can be edited in `data\config.json` while FlexTaskbar is not running:
 | `max_recents` | `10` | How many recently used apps are remembered |
 | `show_recents_in_menu` | `true` | Show the *Recent* submenu |
 | `group_all_apps_above` | `40` | Above this many apps, *All apps* is split into A–Z submenus |
-| `strip_height` | `48` | Strip height in DIPs (48 matches the Windows 11 taskbar; 24–96) |
-| `hover_delay_ms` | `250` | How long the pointer rests on a category before it opens |
-| `tile_menus` | `true` | Strip category popups show apps as tiles; `false` gives a plain list |
-| `tile_columns` | `8` | Tiles per row before a category popup wraps |
+| `hover_delay_ms` | `100` | How long the pointer rests on a category before its flyout opens |
 
-Showing the strip and reserving its space are checkboxes in the Manage window.
+Showing the bar and reserving its space are checkboxes in the Manage window.
+Everything about its look is in the Appearance window and is stored under
+`settings.appearance`.
 
 The hotkeys are set in the Manage window. To turn a hotkey off, clear its box
 with Backspace and click *Apply hotkeys*.
@@ -246,14 +280,17 @@ with Backspace and click *Apply hotkeys*.
 ## Performance
 
 The launcher is built to cost almost nothing while idle:
-- It waits on Windows messages and never polls. The strip's only timer is the
-  short hover delay, started when the pointer enters a category icon. The
+- It waits on Windows messages and never polls. The bar's only timers are the
+  short hover delay, started when the pointer enters a category icon, and the
+  flyout's close delay. The
   supervisor wakes every 5 seconds to check that the launcher is still
   responding.
 - The app scan and icon loading happen on background threads. Icons come from
   Windows' own icon cache and are kept in memory after the first load.
-- Menus are native Windows popup menus. The strip paints a handful of icons
-  with GDI, and it uses no animation, composition or GPU.
+- The bar and its flyouts are drawn in software (anti-aliased, with
+  tiny-skia) only when something changes, and handed to Windows as
+  per-pixel-alpha layered windows. There's no animation and no GPU work.
+  Menus are native Windows popup menus.
 - The search list is virtual, so it only creates rows for what's on screen.
 - The Manage window is fully destroyed when you close it.
 - The release build uses LTO and is stripped.
@@ -265,29 +302,33 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 29 unit tests cover:
+The 34 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
 - category tree operations at any depth: add, remove, reorder, indent/outdent,
   app membership
 - search ranking
-- strip layout (centring, overflow, hit testing), tile grid ordering, and
-  pinning
+- bar layout (the three zones, centring, overflow, the fitted dock, hit
+  testing), flyout tile grids and button wrapping, and pinning
+- appearance settings: the default colours matching the original, the three
+  themes, readable text on a custom background, opacity, colour parsing and
+  clamping
 - the old-settings importer, including cycles in old data and bad JSON
 
 **Manually, under Wine 9 on Linux** (not real Windows):
-- the icon strip:
-  - hover-to-open categories as app tiles, with subcategories cascading from
-    the folder column
-  - launching from a tile
-  - sliding between open categories
-  - launching a pinned app
-  - the FlexTaskbar button
-  - the right-click menu (move, unpin)
+- the bar and its flyouts (drawn as layered windows):
+  - hover a category: subcategory buttons and app tiles
+  - click a subcategory, then *‹ Back*
+  - launching from a tile, sliding between categories, launching a pinned app
+  - the *All* list
+  - the right-click menus (move, unpin)
   - *Pin to strip*
   - showing and hiding it
   - coming back after a crash
+- the Appearance window: Light and Dark themes, fitted dock, corner radius,
+  gap, opacity and accent colour (via the colour picker) all applied live and
+  saved
 - first-run Manage window
 - creating three levels of nested categories, including renaming them
 - the custom-app dialog
@@ -306,7 +347,8 @@ The 29 unit tests cover:
 - the Apps folder scan
 - shell app icons
 - the global hotkeys
-- dark mode, including the colours of the tile popups
+- *Windows default* theme following a live light/dark switch
+- translucency over the desktop (Wine has no compositor)
 - high-DPI scaling
 - *Start with Windows*
 - hang detection
@@ -348,8 +390,11 @@ src/win/mod.rs       process model, single instance, command forwarding
 src/win/supervisor.rs  crash/hang restart
 src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon cache
 src/win/menu.rs      nested popup menus (full menu, one category)
-src/win/strip.rs     the icon strip: AppBar docking, painting, hover menus
-src/win/tiles.rs     owner-drawn app tiles in category popups
+src/appearance.rs    appearance settings and colours                  (tested)
+src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
+src/win/flyout.rs    category and All flyouts
+src/win/canvas.rs    anti-aliased drawing into layered windows
+src/win/appearancewin.rs  Appearance window
 src/win/searchwin.rs search window
 src/win/manager.rs   Manage categories window
 src/win/appdialog.rs custom-app dialog
@@ -358,7 +403,7 @@ src/win/icons.rs     shell, WIC and SVG icon loading
 src/win/launch.rs    ShellExecuteEx launching
 src/win/autostart.rs Run-key toggle
 src/win/paths.rs     portable data folder
-src/win/theme.rs     light/dark support
+src/win/theme.rs     light/dark support (menus, search window)
 src/win/ui.rs        small Win32 helpers
 assets/              icon, manifest, resource script
 ```

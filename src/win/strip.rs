@@ -1,39 +1,38 @@
-//! The icon strip: a horizontal bar docked against the Windows taskbar (just
-//! above it, or below it when the taskbar is at the top of the screen).
+//! The icon strip: a bar docked against the Windows taskbar (just above it, or
+//! below it when the taskbar is at the top of the screen), styled after the
+//! original FlexTaskbar bar:
 //!
-//! Left to right: the FlexTaskbar button (the full menu), then every root
-//! category and every pinned app, centered like the Windows 11 taskbar.
+//! - left: **All** (every app, as a list);
+//! - centre: the root categories (marked ▾) and pinned apps;
+//! - right: **Link** (add an app, file, URL or web app) and ⚙ (settings).
 //!
-//! - Resting the pointer on a category opens its contents upward as a native
-//!   menu; subcategories cascade on hover, at any depth.
-//! - While a menu is open, moving along the strip switches to the category
-//!   under the pointer, the way a menu bar works.
-//! - Clicking a pinned app launches it.
+//! Resting the pointer on a category opens its flyout (see `flyout`). Pinned
+//! apps launch with a click. The look — theme, colours, transparency, border,
+//! corners, floating margin, width, sizes — comes from the Appearance
+//! settings. The bar is a per-pixel-alpha layered window drawn with `canvas`.
 //!
-//! By default the strip reserves its screen space as an AppBar, so maximized
-//! windows stop above it. It hides while a full-screen app is active.
+//! By default it reserves its screen space as an AppBar, so maximized windows
+//! stop above it, and it hides while a full-screen app is in front.
 
 use super::app;
-use super::icons::{self, Source as IconSource};
+use super::canvas::{self, Canvas};
+use super::flyout;
 use super::menu;
 use super::theme;
 use super::ui::{self, scale, wide};
+use crate::appearance::{Appearance, Colors, DockWidth};
 use crate::config::CustomApp;
-use crate::striplayout::{self, Layout};
+use crate::striplayout::{self, BarLayout, Hit, Metrics, Slot};
+use resvg::tiny_skia::Pixmap;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::time::Instant;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BLENDFUNCTION, BeginPaint, BitBlt, ClientToScreen, CreateCompatibleBitmap,
-    CreateCompatibleDC, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW,
-    EndPaint, FillRect, GetMonitorInfoW, GetStockObject, HBITMAP, HGDIOBJ, InvalidateRect, MONITOR_DEFAULTTOPRIMARY,
-    MONITORINFO, MonitorFromPoint, NULL_PEN, PAINTSTRUCT, RoundRect, SRCCOPY, ScreenToClient, SelectObject, SetBkMode,
-    SetTextColor, TRANSPARENT,
+    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ, MONITOR_DEFAULTTOPRIMARY,
+    MONITORINFO, MonitorFromPoint,
 };
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{
-    TTF_SUBCLASS, TTM_ADDTOOLW, TTM_DELTOOLW, TTM_POP, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
+    TTF_SUBCLASS, TTM_ADDTOOLW, TTM_DELTOOLW, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::Shell::{
@@ -41,15 +40,12 @@ use windows::Win32::UI::Shell::{
     ABN_POSCHANGED, ABN_STATECHANGE, APPBARDATA, DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHAppBarMessage,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CreatePopupMenu, CreateWindowExW, DI_NORMAL, DefWindowProcW, DestroyIcon, DestroyMenu,
-    DestroyWindow, DrawIconEx, EndMenu, GetClientRect, GetCursorPos, GetWindowRect, HICON, HWND_TOPMOST, InsertMenuW,
-    KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MSGF_MENU, PostMessageW,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HWND_TOPMOST,
+    InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING, PostMessageW,
     RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SendMessageW, SetForegroundWindow, SetTimer,
-    SetWindowPos, SetWindowsHookExW, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TPM_TOPALIGN, TPM_VERNEGANIMATION, TPM_VERPOSANIMATION, TPMPARAMS, TrackPopupMenuEx, UnhookWindowsHookEx,
-    WH_MSGFILTER, WINDOW_STYLE, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_ERASEBKGND, WM_LBUTTONUP,
-    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_PAINT, WM_RBUTTONUP, WM_SIZE, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WINDOW_STYLE, WM_APP,
+    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP,
+    WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -57,11 +53,12 @@ const WM_APP_APPBAR: u32 = WM_APP + 20;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_HOVER: usize = 1;
 
-/// A strip button: `None` is the FlexTaskbar button, `Some(i)` is item `i`.
-type Button = Option<usize>;
+const LEFT_ALL: usize = 0;
+const RIGHT_LINK: usize = 0;
+const RIGHT_SETTINGS: usize = 1;
 
 #[derive(Clone, PartialEq)]
-enum Item {
+pub enum Item {
     Category(u64),
     App(String),
 }
@@ -71,32 +68,27 @@ struct Strip {
     tooltip: HWND,
     items: Vec<Item>,
     names: Vec<String>,
-    layout: Layout,
-    /// Strip-sized icons, keyed like the app's icon cache.
-    icons: HashMap<String, Option<HBITMAP>>,
-    launcher_icon: HICON,
-    icon_size: i32,
+    layout: BarLayout,
+    /// Bar-sized icons, keyed like the app's icon cache.
+    icons: HashMap<String, Option<Pixmap>>,
+    look: Appearance,
+    colors: Colors,
+    font: HFONT,
     dpi: u32,
-    hover: Option<Button>,
-    /// The button whose menu is open.
-    open: Option<Button>,
-    /// Hovering this button won't open it again until the pointer leaves it
-    /// (set right after its menu closed).
-    suppress: Option<Button>,
-    closed_at: Option<(Button, Instant)>,
+    /// Window rectangle on screen.
+    win: RECT,
+    hover: Option<Hit>,
+    /// The button whose flyout is open.
+    open: Option<Hit>,
     tracking_leave: bool,
     reserved: bool,
     edge: u32,
-    dark: bool,
     tools: usize,
 }
 
 thread_local! {
     static STRIP: RefCell<Option<Strip>> = const { RefCell::new(None) };
     static REPOSITIONING: Cell<bool> = const { Cell::new(false) };
-    // Menu-switching state, read by the message-filter hook while a menu is open.
-    static HOOK_CURRENT: Cell<Option<Button>> = const { Cell::new(None) };
-    static HOOK_SWITCH: Cell<Option<Button>> = const { Cell::new(None) };
 }
 
 fn hwnd() -> Option<HWND> {
@@ -107,24 +99,46 @@ fn with<R>(f: impl FnOnce(&mut Strip) -> R) -> Option<R> {
     STRIP.with(|s| s.borrow_mut().as_mut().map(f))
 }
 
+/// The appearance settings and the colours they resolve to right now.
+pub fn current_look() -> (Appearance, Colors) {
+    let look = app::with(|s| s.cfg.settings.appearance.clamped());
+    let colors = look.colors(theme::is_dark_cached());
+    (look, colors)
+}
+
 // ---------------------------------------------------------------- lifecycle
 
 /// Creates or removes the strip to match the settings.
 pub fn apply_settings() {
-    let (show, reserve) = app::with(|s| (s.cfg.settings.show_strip, s.cfg.settings.reserve_space));
+    let show = app::with(|s| s.cfg.settings.show_strip);
     match (show, hwnd().is_some()) {
         (true, false) => create(),
         (false, true) => destroy(),
-        (true, true) => {
-            with(|s| s.reserved = reserve);
-            reposition();
-        }
+        (true, true) => apply_appearance(),
         (false, false) => {}
     }
 }
 
+/// The appearance (or bar height / reservation) changed: rebuild everything.
+pub fn apply_appearance() {
+    if hwnd().is_none() {
+        return;
+    }
+    flyout::close();
+    let (look, colors) = current_look();
+    with(|s| {
+        if s.look.icon_size != look.icon_size {
+            s.icons.clear();
+        }
+        s.look = look;
+        s.colors = colors;
+    });
+    reposition();
+}
+
 fn create() {
     let class = wide("FlexTaskbar.Strip");
+    let (look, colors) = current_look();
     let hwnd = unsafe {
         let wc = WNDCLASSW {
             lpfnWndProc: Some(proc_),
@@ -141,7 +155,7 @@ fn create() {
         // Start on the primary monitor so the window gets that monitor's DPI.
         let wa = primary_monitor().1;
         match CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_ACCEPTFILES,
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_ACCEPTFILES | WS_EX_LAYERED,
             PCWSTR(class.as_ptr()),
             w!("FlexTaskbar strip"),
             WS_POPUP,
@@ -160,27 +174,24 @@ fn create() {
     };
     let tooltip = ui::child_popup(hwnd, "tooltips_class32", WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX));
     let dpi = ui::dpi_of(hwnd);
-    let reserve = app::with(|s| s.cfg.settings.reserve_space);
-    let icon_size = scale(24, dpi);
     STRIP.with(|s| {
         *s.borrow_mut() = Some(Strip {
             hwnd,
             tooltip,
             items: Vec::new(),
             names: Vec::new(),
-            layout: striplayout::layout(0, 0, 1, 0, 0),
+            layout: striplayout::bar_layout(0, &empty_metrics(), 0, false),
             icons: HashMap::new(),
-            launcher_icon: app::app_icon(icon_size),
-            icon_size,
+            look,
+            colors,
+            font: canvas::font(scale(13, dpi), false),
             dpi,
+            win: RECT::default(),
             hover: None,
             open: None,
-            suppress: None,
-            closed_at: None,
             tracking_leave: false,
-            reserved: reserve,
+            reserved: false,
             edge: ABE_BOTTOM,
-            dark: theme::is_dark(),
             tools: 0,
         })
     });
@@ -198,16 +209,14 @@ fn create() {
 
 /// Removes the strip, releasing its reserved screen space.
 pub fn destroy() {
+    flyout::close();
     let taken = STRIP.with(|s| s.borrow_mut().take());
     if let Some(s) = taken {
         unsafe {
             let mut abd = appbar_data(s.hwnd);
             SHAppBarMessage(ABM_REMOVE, &mut abd);
             let _ = DestroyWindow(s.hwnd);
-            let _ = DestroyIcon(s.launcher_icon);
-        }
-        for bmp in s.icons.into_values().flatten() {
-            icons::free(bmp);
+            let _ = DeleteObject(HGDIOBJ(s.font.0));
         }
     }
 }
@@ -224,17 +233,17 @@ pub fn shell_restarted() {
 }
 
 pub fn theme_changed() {
-    if with(|s| s.dark = theme::is_dark()).is_some() {
-        invalidate();
+    let (_, colors) = current_look();
+    if with(|s| s.colors = colors).is_some() {
+        render();
     }
+    flyout::close();
 }
 
 /// An icon was replaced (custom icon picked or reset).
 pub fn icon_changed(key: &str) {
-    let old = with(|s| s.icons.remove(key)).flatten().flatten();
-    if let Some(bmp) = old {
-        icons::free(bmp);
-    }
+    with(|s| s.icons.remove(key));
+    flyout::icon_changed(key);
     refresh();
 }
 
@@ -259,61 +268,82 @@ pub fn refresh() {
                 names.push(a.name.clone());
             }
         }
-        let sources: Vec<(String, Option<IconSource>)> = items
-            .iter()
-            .map(|it| {
-                let key = key_of(it);
-                let src = app::icon_source_for(s, &key);
-                (key, src)
-            })
-            .collect();
+        let sources: Vec<_> = items.iter().map(|it| (key_of(it), app::icon_source_for(s, &key_of(it)))).collect();
         (items, names, sources)
     });
-    // Load any icons not cached yet (a handful, from Windows' own icon cache).
-    let (size, missing): (i32, Vec<(String, Option<IconSource>)>) = with(|st| {
-        let missing = sources.into_iter().filter(|(k, _)| !st.icons.contains_key(k)).collect();
-        (st.icon_size, missing)
+    let (size, missing) = with(|st| {
+        let size = scale(st.look.icon_size as i32, st.dpi);
+        let missing: Vec<_> = sources.into_iter().filter(|(k, _)| !st.icons.contains_key(k)).collect();
+        (size, missing)
     })
     .unwrap_or_default();
-    let loaded: Vec<(String, Option<HBITMAP>)> =
-        missing.into_iter().map(|(k, src)| (k, src.and_then(|src| icons::load(&src, size)))).collect();
+    // A handful of icons, from Windows' own icon cache.
+    let loaded: Vec<_> =
+        missing.into_iter().map(|(k, src)| (k, src.and_then(|src| canvas::icon_pixmap(&src, size)))).collect();
     with(|st| {
-        for (k, b) in loaded {
-            st.icons.insert(k, b);
-        }
+        st.icons.extend(loaded);
         st.items = items;
         st.names = names;
     });
     relayout();
+    flyout::refresh();
 }
 
-fn key_of(item: &Item) -> String {
+pub fn key_of(item: &Item) -> String {
     match item {
         Item::Category(id) => format!("cat:{id}"),
         Item::App(id) => id.clone(),
     }
 }
 
+fn empty_metrics() -> Metrics {
+    Metrics { pad: 0, item_w: 1, gap: 0, left: Vec::new(), right: Vec::new() }
+}
+
+fn metrics(s: &Strip) -> Metrics {
+    let d = s.dpi;
+    let all = canvas::measure("All", s.font).0 + scale(20, d);
+    let link = scale(16 + 6, d) + canvas::measure("Link", s.font).0 + scale(20, d);
+    let settings = scale(36, d);
+    Metrics {
+        pad: scale(8, d),
+        item_w: scale(s.look.icon_size as i32 + 14, d),
+        gap: scale(4, d),
+        left: vec![all],
+        right: vec![link, settings],
+    }
+}
+
+/// Margin around the bar inside the window, in pixels.
+fn margin(s: &Strip) -> i32 {
+    scale(s.look.margin as i32, s.dpi)
+}
+
+fn bar_height(s: &Strip) -> i32 {
+    ui::rect_h(&s.win) - 2 * margin(s)
+}
+
 fn relayout() {
     let Some(h) = hwnd() else { return };
-    let mut rc = RECT::default();
-    unsafe {
-        let _ = GetClientRect(h, &mut rc);
-    }
     let tools = with(|s| {
-        let d = s.dpi;
-        s.layout = striplayout::layout(rc.right, scale(6, d), scale(44, d), scale(4, d), s.items.len());
-        let mut tools = vec![("FlexTaskbar".to_string(), s.layout.launcher)];
+        let m = margin(s);
+        let width = ui::rect_w(&s.win) - 2 * m;
+        s.layout = striplayout::bar_layout(width, &metrics(s), s.items.len(), s.look.dock_width == DockWidth::Fit);
+        let mut tools: Vec<(String, Slot)> = vec![
+            ("All apps".into(), s.layout.left[LEFT_ALL]),
+            ("Add an app, file, website or web app".into(), s.layout.right[RIGHT_LINK]),
+            ("Settings".into(), s.layout.right[RIGHT_SETTINGS]),
+        ];
         // Categories open on hover, so only apps get a name tooltip.
         for (i, slot) in s.layout.items.iter().enumerate() {
             if matches!(s.items[i], Item::App(_)) {
                 tools.push((s.names[i].clone(), *slot));
             }
         }
-        (s.tooltip, std::mem::replace(&mut s.tools, tools.len()), tools)
+        let bottom = m + bar_height(s);
+        (s.tooltip, std::mem::replace(&mut s.tools, tools.len()), tools, m, bottom)
     });
-    if let Some((tooltip, old_count, tools)) = tools {
-        // Tooltips: one tool per button, rebuilt with the layout.
+    if let Some((tooltip, old_count, tools, m, bottom)) = tools {
         unsafe {
             for id in 0..old_count {
                 let ti = TTTOOLINFOW {
@@ -331,7 +361,7 @@ fn relayout() {
                     uFlags: TTF_SUBCLASS,
                     hwnd: h,
                     uId: id + 1,
-                    rect: RECT { left: slot.x, top: 0, right: slot.x + slot.w, bottom: rc.bottom },
+                    rect: RECT { left: slot.x + m, top: m, right: slot.right() + m, bottom },
                     lpszText: PWSTR(text.as_mut_ptr()),
                     ..Default::default()
                 };
@@ -339,51 +369,72 @@ fn relayout() {
             }
         }
     }
-    invalidate();
+    render();
 }
 
-/// Tooltips off while a menu is open (so a name tip can't sit on top of the
-/// menu), back on afterwards. Removing the tools is more reliable than
-/// TTM_ACTIVATE across tooltip implementations.
-fn tooltips(on: bool) {
-    if on {
-        relayout(); // re-adds the tools
-        return;
+/// The button under a client-area point.
+fn hit_at(x: i32, y: i32) -> Option<Hit> {
+    STRIP.with(|s| {
+        let b = s.borrow();
+        let s = b.as_ref()?;
+        let m = margin(s);
+        if y < m || y >= m + bar_height(s) {
+            return None;
+        }
+        striplayout::hit(&s.layout, x - m)
+    })
+}
+
+fn slot_of(s: &Strip, hit: Hit) -> Option<Slot> {
+    match hit {
+        Hit::Left(i) => s.layout.left.get(i).copied(),
+        Hit::Item(i) => s.layout.items.get(i).copied(),
+        Hit::Right(i) => s.layout.right.get(i).copied(),
     }
-    let Some((h, tip, count)) = with(|s| (s.hwnd, s.tooltip, std::mem::replace(&mut s.tools, 0))) else { return };
+}
+
+/// Screen rectangle of a button (flyouts open from it).
+pub fn button_rect(hit: Hit) -> Option<RECT> {
+    STRIP.with(|s| {
+        let b = s.borrow();
+        let s = b.as_ref()?;
+        let slot = slot_of(s, hit)?;
+        let m = margin(s);
+        Some(RECT {
+            left: s.win.left + m + slot.x,
+            top: s.win.top + m,
+            right: s.win.left + m + slot.right(),
+            bottom: s.win.top + m + bar_height(s),
+        })
+    })
+}
+
+pub fn edge_is_top() -> bool {
+    with(|s| s.edge == ABE_TOP).unwrap_or(false)
+}
+
+pub fn item(hit: Hit) -> Option<Item> {
+    match hit {
+        Hit::Item(i) => STRIP.with(|s| s.borrow().as_ref().and_then(|s| s.items.get(i).cloned())),
+        _ => None,
+    }
+}
+
+/// The flyout tells the strip which button it hangs from (drawn pressed).
+pub fn set_open(hit: Option<Hit>) {
+    if with(|s| std::mem::replace(&mut s.open, hit) != hit).unwrap_or(false) {
+        render();
+    }
+}
+
+/// Whether the pointer is over a given button.
+pub fn pointer_over(hit: Hit) -> bool {
+    let Some(rc) = button_rect(hit) else { return false };
+    let mut pt = POINT::default();
     unsafe {
-        SendMessageW(tip, TTM_POP, Some(WPARAM(0)), Some(LPARAM(0)));
-        for id in 0..count {
-            let ti = TTTOOLINFOW {
-                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
-                hwnd: h,
-                uId: id + 1,
-                ..Default::default()
-            };
-            SendMessageW(tip, TTM_DELTOOLW, Some(WPARAM(0)), Some(LPARAM(&ti as *const _ as isize)));
-        }
+        let _ = GetCursorPos(&mut pt);
     }
-}
-
-fn invalidate() {
-    if let Some(h) = hwnd() {
-        unsafe {
-            let _ = InvalidateRect(Some(h), None, false);
-        }
-    }
-}
-
-fn button_at(x: i32) -> Option<Button> {
-    STRIP.with(|s| s.borrow().as_ref().and_then(|s| striplayout::hit(&s.layout, x)))
-}
-
-fn is_menu_button(b: Button) -> bool {
-    match b {
-        None => true,
-        Some(i) => {
-            STRIP.with(|s| s.borrow().as_ref().is_some_and(|s| matches!(s.items.get(i), Some(Item::Category(_)))))
-        }
-    }
+    pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom
 }
 
 // ---------------------------------------------------------------- docking
@@ -416,7 +467,9 @@ fn reposition() {
     let (height_dip, reserve) =
         app::with(|s| (s.cfg.settings.strip_height.clamp(24, 96), s.cfg.settings.reserve_space));
     let dpi = ui::dpi_of(h);
-    let height = scale(height_dip as i32, dpi);
+    let margin_dip = with(|s| s.look.margin).unwrap_or(0) as i32;
+    // The window is the bar plus its floating margin on every side.
+    let height = scale(height_dip as i32, dpi) + 2 * scale(margin_dip, dpi);
     let (monitor, work) = primary_monitor();
     let mut abd = appbar_data(h);
     // The Windows taskbar's edge; a vertical taskbar still gets a bottom strip.
@@ -461,20 +514,20 @@ fn reposition() {
             RECT { top: work.bottom - height, ..work }
         }
     };
-    let icon_size = scale(24, dpi);
-    let size_changed = with(|s| {
+    let dpi_changed = with(|s| {
         s.edge = edge;
-        s.dpi = dpi;
-        std::mem::replace(&mut s.icon_size, icon_size) != icon_size
+        s.win = rect;
+        let changed = std::mem::replace(&mut s.dpi, dpi) != dpi;
+        if changed {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(s.font.0));
+            }
+            s.font = canvas::font(scale(13, dpi), false);
+            s.icons.clear();
+        }
+        changed
     })
     .unwrap_or(false);
-    if size_changed {
-        // DPI changed: icons must be reloaded at the new size.
-        let old: Vec<HBITMAP> = with(|s| s.icons.drain().filter_map(|(_, b)| b).collect()).unwrap_or_default();
-        for b in old {
-            icons::free(b);
-        }
-    }
     unsafe {
         let _ = SetWindowPos(
             h,
@@ -487,292 +540,183 @@ fn reposition() {
         );
     }
     REPOSITIONING.with(|r| r.set(false));
-    if size_changed {
+    let icons_missing = with(|s| s.icons.is_empty() && !s.items.is_empty()).unwrap_or(false);
+    if dpi_changed || icons_missing {
         refresh();
     } else {
         relayout();
     }
 }
 
-// ---------------------------------------------------------------- painting
+// ---------------------------------------------------------------- drawing
 
-fn paint(hwnd: HWND) {
-    let mut ps = PAINTSTRUCT::default();
-    let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
-    let mut rc = RECT::default();
-    unsafe {
-        let _ = GetClientRect(hwnd, &mut rc);
-    }
+fn render() {
     STRIP.with(|cell| {
         let b = cell.borrow();
         let Some(s) = b.as_ref() else { return };
-        unsafe {
-            let mem = CreateCompatibleDC(Some(hdc));
-            let bmp = CreateCompatibleBitmap(hdc, rc.right.max(1), rc.bottom.max(1));
-            let old = SelectObject(mem, HGDIOBJ(bmp.0));
+        let (w, h) = (ui::rect_w(&s.win), ui::rect_h(&s.win));
+        let Some(mut cv) = Canvas::new(w, h) else { return };
+        let d = s.dpi;
+        let c = &s.colors;
+        let m = margin(s) as f32;
+        let bh = bar_height(s) as f32;
+        let bar = s.layout.bar;
+        let (bx, bw) = (m + bar.x as f32, bar.w as f32);
+        let radius = scale(s.look.corner_radius as i32, d) as f32;
+        let border =
+            scale(s.look.border_width as i32, d).min(if s.look.border_width > 0 { i32::MAX } else { 0 }) as f32;
+        let border = if s.look.border_width > 0 { border.max(1.0) } else { 0.0 };
 
-            let (bg, line, hl, text) = if s.dark {
-                (theme::rgb(28, 28, 28), theme::rgb(58, 58, 58), theme::rgb(58, 58, 58), theme::rgb(240, 240, 240))
+        cv.fill_round_rect(bx, m, bw, bh, radius, c.background);
+        let docked_flush = radius == 0.0 && m == 0.0 && s.look.dock_width == DockWidth::Full;
+        if border > 0.0 {
+            if docked_flush {
+                // Like the Windows taskbar: just a line on the side facing the desktop.
+                let y = if s.edge == ABE_TOP { bh - border } else { 0.0 };
+                cv.fill_round_rect(bx, y, bw, border, 0.0, c.border);
             } else {
-                (
-                    theme::rgb(238, 240, 243),
-                    theme::rgb(210, 212, 216),
-                    theme::rgb(222, 225, 230),
-                    theme::rgb(30, 30, 30),
-                )
-            };
-            let brush = CreateSolidBrush(bg);
-            FillRect(mem, &rc, brush);
-            let _ = DeleteObject(HGDIOBJ(brush.0));
-            // Hairline on the side facing the desktop.
-            let line_brush = CreateSolidBrush(line);
-            let edge_rc = if s.edge == ABE_TOP { RECT { top: rc.bottom - 1, ..rc } } else { RECT { bottom: 1, ..rc } };
-            FillRect(mem, &edge_rc, line_brush);
-            let _ = DeleteObject(HGDIOBJ(line_brush.0));
-
-            let pad = scale(5, s.dpi);
-            let radius = scale(8, s.dpi);
-            let draw_highlight = |slot: &striplayout::Slot| {
-                let hb = CreateSolidBrush(hl);
-                let old_b = SelectObject(mem, HGDIOBJ(hb.0));
-                let old_p = SelectObject(mem, GetStockObject(NULL_PEN));
-                let _ = RoundRect(mem, slot.x, pad, slot.x + slot.w, rc.bottom - pad + 1, radius, radius);
-                SelectObject(mem, old_p);
-                SelectObject(mem, old_b);
-                let _ = DeleteObject(HGDIOBJ(hb.0));
-            };
-            let active = |b: Button| s.hover == Some(b) || s.open == Some(b);
-
-            let size = s.icon_size;
-            let y = (rc.bottom - size) / 2;
-            let launcher = s.layout.launcher;
-            if active(None) {
-                draw_highlight(&launcher);
+                cv.stroke_round_rect(bx, m, bw, bh, radius, border, c.border);
             }
-            let _ = DrawIconEx(
-                mem,
-                launcher.x + (launcher.w - size) / 2,
-                y,
-                s.launcher_icon,
-                size,
-                size,
-                0,
-                None,
-                DI_NORMAL,
-            );
-
-            let src = CreateCompatibleDC(Some(mem));
-            for (i, slot) in s.layout.items.iter().enumerate() {
-                if active(Some(i)) {
-                    draw_highlight(slot);
-                }
-                let x = slot.x + (slot.w - size) / 2;
-                match s.icons.get(&key_of(&s.items[i])).copied().flatten() {
-                    Some(icon) => {
-                        let prev = SelectObject(src, HGDIOBJ(icon.0));
-                        let blend = BLENDFUNCTION {
-                            BlendOp: AC_SRC_OVER as u8,
-                            BlendFlags: 0,
-                            SourceConstantAlpha: 255,
-                            AlphaFormat: AC_SRC_ALPHA as u8,
-                        };
-                        let _ = AlphaBlend(mem, x, y, size, size, src, 0, 0, size, size, blend);
-                        SelectObject(src, prev);
-                    }
-                    None => {
-                        // No icon: show the first letter instead of an empty slot.
-                        let letter: String =
-                            s.names[i].chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
-                        let mut w = wide(&letter);
-                        let len = w.len() - 1;
-                        let mut r = RECT { left: x, top: y, right: x + size, bottom: y + size };
-                        SetBkMode(mem, TRANSPARENT);
-                        SetTextColor(mem, text);
-                        DrawTextW(mem, &mut w[..len], &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    }
-                }
-            }
-            let _ = DeleteDC(src);
-
-            let _ = BitBlt(hdc, 0, 0, rc.right, rc.bottom, Some(mem), 0, 0, SRCCOPY);
-            SelectObject(mem, old);
-            let _ = DeleteObject(HGDIOBJ(bmp.0));
-            let _ = DeleteDC(mem);
         }
+
+        let inset = scale(5, d) as f32;
+        let r4 = scale(4, d) as f32;
+        let draw_state = |cv: &mut Canvas, hit: Hit, slot: Slot| {
+            let open = s.open == Some(hit);
+            let hover = s.hover == Some(hit);
+            if open || hover {
+                let fill = if open { c.pressed } else { c.hover };
+                cv.fill_round_rect(m + slot.x as f32, m + inset, slot.w as f32, bh - 2.0 * inset, r4, fill);
+            }
+            if open {
+                // Accent pill under the button whose flyout is open.
+                let pw = scale(16, d) as f32;
+                let ph = scale(3, d) as f32;
+                let x = m + slot.x as f32 + (slot.w as f32 - pw) / 2.0;
+                let y = if s.edge == ABE_TOP { m + inset - ph / 2.0 } else { m + bh - inset - ph / 2.0 };
+                cv.fill_round_rect(x, y, pw, ph, ph / 2.0, c.accent);
+            }
+        };
+        let text_rect = |slot: Slot| RECT {
+            left: m as i32 + slot.x,
+            top: m as i32,
+            right: m as i32 + slot.right(),
+            bottom: (m + bh) as i32,
+        };
+
+        // Left: All.
+        let all = s.layout.left[LEFT_ALL];
+        draw_state(&mut cv, Hit::Left(LEFT_ALL), all);
+        cv.text("All", text_rect(all), s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        // Centre: categories and pinned apps.
+        let size = scale(s.look.icon_size as i32, d);
+        let cy = m + bh / 2.0;
+        for (i, slot) in s.layout.items.iter().enumerate() {
+            draw_state(&mut cv, Hit::Item(i), *slot);
+            let x = m as i32 + slot.x + (slot.w - size) / 2;
+            let y = (cy - size as f32 / 2.0) as i32;
+            let is_cat = matches!(s.items[i], Item::Category(_));
+            match s.icons.get(&key_of(&s.items[i])).and_then(|p| p.as_ref()) {
+                Some(img) => cv.image(img, x, y, size, 1.0),
+                None if is_cat => cv.folder(x as f32, y as f32, size as f32, c.accent),
+                None => {
+                    let letter: String =
+                        s.names[i].chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
+                    let rc = RECT { left: x, top: y, right: x + size, bottom: y + size };
+                    cv.text(&letter, rc, s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                }
+            }
+            if is_cat {
+                let cs = scale(7, d) as f32;
+                cv.chevron(
+                    x as f32 + size as f32 + scale(2, d) as f32,
+                    y as f32 + size as f32 - cs / 2.0,
+                    cs,
+                    c.subtle,
+                );
+            }
+        }
+
+        // Right: Link, settings.
+        let link = s.layout.right[RIGHT_LINK];
+        draw_state(&mut cv, Hit::Right(RIGHT_LINK), link);
+        let glyph = scale(16, d) as f32;
+        let lx = m + link.x as f32 + scale(10, d) as f32;
+        cv.link(lx + glyph / 2.0, cy, glyph, c.text);
+        let mut rc = text_rect(link);
+        rc.left = (lx + glyph) as i32 + scale(6, d);
+        cv.text("Link", rc, s.font, c.text, DT_VCENTER | DT_SINGLELINE);
+        let gear = s.layout.right[RIGHT_SETTINGS];
+        draw_state(&mut cv, Hit::Right(RIGHT_SETTINGS), gear);
+        cv.gear(m + gear.x as f32 + gear.w as f32 / 2.0, cy, scale(8, d) as f32, c.text);
+
+        cv.present(s.hwnd, s.win.left, s.win.top);
     });
-    unsafe {
-        let _ = EndPaint(hwnd, &ps);
+}
+
+// ---------------------------------------------------------------- actions
+
+fn click(hit: Hit) {
+    match hit {
+        Hit::Left(LEFT_ALL) => flyout::toggle_all(hit),
+        Hit::Item(_) => match item(hit) {
+            Some(Item::Category(id)) => flyout::open_category(id, hit),
+            Some(Item::App(id)) => {
+                flyout::close();
+                app::launch_app(&id);
+            }
+            None => {}
+        },
+        Hit::Right(RIGHT_LINK) => {
+            flyout::close();
+            add_link();
+        }
+        Hit::Right(_) => {
+            flyout::close();
+            super::manager::show();
+        }
+        Hit::Left(_) => {}
     }
 }
 
-// ---------------------------------------------------------------- menus
-
-fn button_screen_rect(b: Button) -> Option<RECT> {
-    let (h, slot) = STRIP.with(|s| {
-        let st = s.borrow();
-        let st = st.as_ref()?;
-        let slot = match b {
-            None => st.layout.launcher,
-            Some(i) => *st.layout.items.get(i)?,
-        };
-        Some((st.hwnd, slot))
-    })?;
-    let mut rc = RECT::default();
-    unsafe {
-        let _ = GetClientRect(h, &mut rc);
-        let mut tl = POINT { x: slot.x, y: 0 };
-        let mut br = POINT { x: slot.x + slot.w, y: rc.bottom };
-        let _ = ClientToScreen(h, &mut tl);
-        let _ = ClientToScreen(h, &mut br);
-        Some(RECT { left: tl.x, top: tl.y, right: br.x, bottom: br.y })
-    }
+/// "Link": add an app, file, URL or web app and pin it to the strip.
+fn add_link() {
+    let Some(h) = hwnd() else { return };
+    let Some(fields) = super::appdialog::edit(h, &CustomApp::default(), "Add to the strip") else { return };
+    let id = app::with(|s| {
+        let id = format!("custom:{}", s.cfg.alloc_id());
+        s.cfg.custom_apps.push(CustomApp { id: id.clone(), ..fields });
+        s.cfg.pin(&id);
+        id
+    });
+    app::rebuild_catalog();
+    app::reload_icon(&id);
+    app::save();
+    super::searchwin::catalog_changed();
+    super::manager::catalog_changed();
 }
 
-/// Opens a button's menu. While it is open, moving the pointer onto another
-/// category (or the FlexTaskbar button) switches to that one's menu.
-fn open_menu(first: Button) {
-    let Some(strip_hwnd) = hwnd() else { return };
-    let owner = app::main_hwnd();
-    let mut current = first;
-    loop {
-        let built = match current {
-            None => Some(menu::build_main()),
-            Some(i) => match STRIP.with(|s| s.borrow().as_ref().and_then(|s| s.items.get(i).cloned())) {
-                Some(Item::Category(id)) => menu::build_category(id),
-                _ => None,
-            },
-        };
-        let (Some(built), Some(btn)) = (built, button_screen_rect(current)) else { return };
-        let mut strip_rc = RECT::default();
-        unsafe {
-            let _ = GetWindowRect(strip_hwnd, &mut strip_rc);
-        }
-        let top_edge = with(|s| s.edge == ABE_TOP).unwrap_or(false);
-        let (y, flags) = if top_edge {
-            (strip_rc.bottom, TPM_TOPALIGN | TPM_VERPOSANIMATION)
-        } else {
-            (strip_rc.top, TPM_BOTTOMALIGN | TPM_VERNEGANIMATION)
-        };
-        let params = TPMPARAMS { cbSize: std::mem::size_of::<TPMPARAMS>() as u32, rcExclude: strip_rc };
-
-        tooltips(false);
-        with(|s| s.open = Some(current));
-        invalidate();
-        HOOK_CURRENT.with(|c| c.set(Some(current)));
-        HOOK_SWITCH.with(|c| c.set(None));
-        let chosen = unsafe {
-            let hook = SetWindowsHookExW(WH_MSGFILTER, Some(menu_filter), None, GetCurrentThreadId()).ok();
-            let _ = SetForegroundWindow(owner);
-            let id = TrackPopupMenuEx(
-                built.menu,
-                (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | flags).0,
-                btn.left,
-                y,
-                owner,
-                Some(&params),
-            )
-            .0 as usize;
-            if let Some(hook) = hook {
-                let _ = UnhookWindowsHookEx(hook);
-            }
-            let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
-            id
-        };
-        HOOK_CURRENT.with(|c| c.set(None));
-        tooltips(true);
-        let switch = HOOK_SWITCH.with(|c| c.take());
-        with(|s| {
-            s.open = None;
-            s.closed_at = Some((current, Instant::now()));
-        });
-        invalidate();
-
-        if let Some(action) = built.finish(chosen) {
-            app::perform(action);
-            return;
-        }
-        match switch {
-            Some(next) => current = next,
-            None => {
-                // Closed without choosing: don't pop the same menu straight back
-                // open while the pointer is still resting on its button.
-                let under = cursor_button();
-                with(|s| {
-                    s.suppress = under;
-                    s.hover = under;
-                });
-                invalidate();
-                return;
-            }
-        }
-    }
-}
-
-fn cursor_button() -> Option<Button> {
-    let h = hwnd()?;
-    unsafe {
-        let mut pt = POINT::default();
-        let _ = GetCursorPos(&mut pt);
-        let _ = ScreenToClient(h, &mut pt);
-        let mut rc = RECT::default();
-        let _ = GetClientRect(h, &mut rc);
-        if pt.y < 0 || pt.y >= rc.bottom || pt.x < 0 || pt.x >= rc.right {
-            return None;
-        }
-        button_at(pt.x)
-    }
-}
-
-/// While a strip menu is open: if the pointer moves onto another menu button,
-/// close this menu and remember which one to open next.
-unsafe extern "system" fn menu_filter(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code == MSGF_MENU as i32 && lparam.0 != 0 {
-        let msg = unsafe { &*(lparam.0 as *const MSG) };
-        // Only when the strip itself is under the pointer, not a (sub)menu
-        // that happens to overlap it.
-        if msg.message == WM_MOUSEMOVE
-            && let (Some(h), Some(current)) = (hwnd(), HOOK_CURRENT.with(|c| c.get()))
-            && unsafe { windows::Win32::UI::WindowsAndMessaging::WindowFromPoint(msg.pt) } == h
-        {
-            let mut pt = msg.pt;
-            unsafe {
-                let _ = ScreenToClient(h, &mut pt);
-            }
-            let mut rc = RECT::default();
-            unsafe {
-                let _ = GetClientRect(h, &mut rc);
-            }
-            if pt.y >= 0
-                && pt.y < rc.bottom
-                && let Some(b) = button_at(pt.x)
-                && b != current
-                && is_menu_button(b)
-            {
-                HOOK_SWITCH.with(|c| c.set(Some(b)));
-                unsafe {
-                    let _ = EndMenu();
-                }
-            }
-        }
-    }
-    unsafe { CallNextHookEx(None, code, wparam, lparam) }
-}
-
-/// Right-click menu for one button.
-fn context_menu(b: Button) {
-    let item = match b {
-        None => None,
-        Some(i) => STRIP.with(|s| s.borrow().as_ref().and_then(|s| s.items.get(i).cloned())),
-    };
+/// Right-click menu for one button; the full menu elsewhere.
+fn context_menu(hit: Option<Hit>) {
+    flyout::close();
+    let item = hit.and_then(item);
     let Some(item) = item else {
-        open_menu(None); // the FlexTaskbar button or empty strip: the full menu
+        let mut pt = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut pt);
+        }
+        if let Some(action) = menu::track(app::main_hwnd(), pt) {
+            app::perform(action);
+        }
         return;
     };
     const LEFT: usize = 1;
     const RIGHT: usize = 2;
     const UNPIN: usize = 3;
     const MANAGE: usize = 4;
-    const HIDE: usize = 5;
+    const LOOK: usize = 5;
+    const HIDE: usize = 6;
     let (can_left, can_right) = app::with(|s| match &item {
         Item::Category(id) => {
             let pos = s.cfg.categories.iter().position(|c| c.id == *id).unwrap_or(0);
@@ -784,32 +728,37 @@ fn context_menu(b: Button) {
         }
     });
     let chosen = unsafe {
-        let m = CreatePopupMenu().unwrap_or_default();
-        let add = |pos: u32, id: usize, text: &str, enabled: bool| {
+        let menu = CreatePopupMenu().unwrap_or_default();
+        let mut pos = 0;
+        let mut add = |id: usize, text: &str, enabled: bool| {
             let t = wide(text);
             let flags = if enabled { MF_BYPOSITION | MF_STRING } else { MF_BYPOSITION | MF_STRING | MF_GRAYED };
-            let _ = InsertMenuW(m, pos, flags, id, PCWSTR(t.as_ptr()));
-        };
-        add(0, LEFT, "Move left", can_left);
-        add(1, RIGHT, "Move right", can_right);
-        let _ = InsertMenuW(m, 2, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
-        let mut pos = 3;
-        if matches!(item, Item::App(_)) {
-            add(pos, UNPIN, "Unpin from strip", true);
+            let _ = InsertMenuW(menu, pos, flags, id, PCWSTR(t.as_ptr()));
             pos += 1;
+        };
+        add(LEFT, "Move left", can_left);
+        add(RIGHT, "Move right", can_right);
+        if matches!(item, Item::App(_)) {
+            add(UNPIN, "Unpin from strip", true);
         }
-        add(pos, MANAGE, "Manage categories…", true);
-        add(pos + 1, HIDE, "Hide icon strip", true);
+        let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+        pos += 1;
+        let mut add = |id: usize, text: &str| {
+            let t = wide(text);
+            let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_STRING, id, PCWSTR(t.as_ptr()));
+            pos += 1;
+        };
+        add(MANAGE, "Manage categories…");
+        add(LOOK, "Appearance…");
+        add(HIDE, "Hide icon strip");
         let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);
         let owner = app::main_hwnd();
-        tooltips(false);
         let _ = SetForegroundWindow(owner);
-        let id = TrackPopupMenuEx(m, (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN).0, pt.x, pt.y, owner, None).0
-            as usize;
+        let id = TrackPopupMenuEx(menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN).0, pt.x, pt.y, owner, None)
+            .0 as usize;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(m);
-        tooltips(true);
+        let _ = DestroyMenu(menu);
         id
     };
     match chosen {
@@ -827,7 +776,11 @@ fn context_menu(b: Button) {
                 app::save();
             }
         }
-        MANAGE => super::manager::show(),
+        MANAGE => match &item {
+            Item::Category(id) => super::manager::show_category(*id),
+            Item::App(_) => super::manager::show(),
+        },
+        LOOK => super::appearancewin::show(),
         HIDE => app::perform(menu::Action::ToggleStrip),
         _ => {}
     }
@@ -872,31 +825,22 @@ fn on_drop(drop: HDROP) {
 
 // ---------------------------------------------------------------- window proc
 
+fn mouse_xy(lparam: LPARAM) -> (i32, i32) {
+    ((lparam.0 & 0xFFFF) as i16 as i32, ((lparam.0 >> 16) & 0xFFFF) as i16 as i32)
+}
+
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
-        WM_PAINT => {
-            paint(hwnd);
-            LRESULT(0)
-        }
-        WM_ERASEBKGND => LRESULT(1),
-        WM_SIZE => {
-            relayout();
-            LRESULT(0)
-        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEMOVE => {
-            let x = (lparam.0 & 0xFFFF) as i16 as i32;
-            let under = button_at(x);
-            let (changed, start_leave, suppressed) = with(|s| {
+            let (x, y) = mouse_xy(lparam);
+            let under = hit_at(x, y);
+            let (changed, start_leave) = with(|s| {
                 let changed = s.hover != under;
                 s.hover = under;
-                if s.suppress.is_some() && s.suppress != under {
-                    s.suppress = None;
-                }
-                let start_leave = !std::mem::replace(&mut s.tracking_leave, true);
-                (changed, start_leave, s.suppress == under && under.is_some())
+                (changed, !std::mem::replace(&mut s.tracking_leave, true))
             })
-            .unwrap_or((false, false, false));
+            .unwrap_or((false, false));
             if start_leave {
                 let mut tme = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -909,19 +853,24 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 }
             }
             if changed {
-                invalidate();
+                render();
                 unsafe {
                     let _ = KillTimer(Some(hwnd), TIMER_HOVER);
                 }
-                // Categories open on hover; the FlexTaskbar button and apps need a click.
-                if let Some(Some(i)) = under
-                    && !suppressed
-                    && is_menu_button(Some(i))
-                {
-                    let ms = app::with(|s| s.cfg.settings.hover_delay_ms);
-                    unsafe {
-                        SetTimer(Some(hwnd), TIMER_HOVER, ms.max(1), None);
+                match under.and_then(|h| item(h).map(|it| (h, it))) {
+                    // Categories open on hover (immediately if another flyout is
+                    // already open, so moving along the bar switches between them).
+                    Some((h, Item::Category(id))) => {
+                        if flyout::is_open() {
+                            flyout::open_category(id, h);
+                        } else {
+                            let ms = app::with(|s| s.cfg.settings.hover_delay_ms);
+                            unsafe {
+                                SetTimer(Some(hwnd), TIMER_HOVER, ms.max(1), None);
+                            }
+                        }
                     }
+                    _ => flyout::pointer_left_anchor(),
                 }
             }
             LRESULT(0)
@@ -929,49 +878,42 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_MOUSELEAVE => {
             with(|s| {
                 s.hover = None;
-                s.suppress = None;
                 s.tracking_leave = false;
             });
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
             }
-            invalidate();
+            render();
+            flyout::pointer_left_anchor();
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_HOVER => {
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
             }
-            if let Some(b) = cursor_button() {
-                let suppressed = with(|s| s.suppress == Some(b)).unwrap_or(false);
-                if b.is_some() && is_menu_button(b) && !suppressed {
-                    open_menu(b);
-                }
+            if let Some(h) = with(|s| s.hover).flatten()
+                && let Some(Item::Category(id)) = item(h)
+                && pointer_over(h)
+            {
+                flyout::open_category(id, h);
             }
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            let x = (lparam.0 & 0xFFFF) as i16 as i32;
-            let Some(b) = button_at(x) else { return LRESULT(0) };
+            let (x, y) = mouse_xy(lparam);
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
             }
-            // A click that just closed this button's menu shouldn't reopen it.
-            let just_closed =
-                with(|s| s.closed_at.is_some_and(|(cb, t)| cb == b && t.elapsed().as_millis() < 300)).unwrap_or(false);
-            if just_closed {
-                return LRESULT(0);
-            }
-            let item = b.and_then(|i| STRIP.with(|s| s.borrow().as_ref().and_then(|s| s.items.get(i).cloned())));
-            match item {
-                Some(Item::App(id)) => app::launch_app(&id),
-                _ => open_menu(b),
+            if let Some(h) = hit_at(x, y) {
+                click(h);
+            } else {
+                flyout::close();
             }
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            let x = (lparam.0 & 0xFFFF) as i16 as i32;
-            context_menu(button_at(x).flatten());
+            let (x, y) = mouse_xy(lparam);
+            context_menu(hit_at(x, y));
             LRESULT(0)
         }
         WM_DROPFILES => {
@@ -983,6 +925,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 ABN_POSCHANGED | ABN_STATECHANGE => reposition(),
                 ABN_FULLSCREENAPP => unsafe {
                     // Get out of the way of games and full-screen video.
+                    flyout::close();
                     let _ = ShowWindow(hwnd, if lparam.0 != 0 { SW_HIDE } else { SW_SHOWNOACTIVATE });
                 },
                 _ => {}
