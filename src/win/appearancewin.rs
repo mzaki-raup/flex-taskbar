@@ -5,7 +5,7 @@
 use super::app;
 use super::ui::{self, scale, wide};
 use super::{searchwin, strip, theme};
-use crate::appearance::{Appearance, DockWidth, Rgba, SubcategoryOpen, ThemeMode};
+use crate::appearance::{Appearance, DockWidth, Rgba, ThemeMode};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
@@ -22,7 +22,6 @@ use windows::core::{PCWSTR, w};
 // Combo boxes.
 const THEME: u16 = 10;
 const DOCK: u16 = 11;
-const SUBOPEN: u16 = 12;
 // Colour buttons, and their "Default" buttons (+100).
 const ACCENT: u16 = 20;
 const BACKGROUND: u16 = 21;
@@ -178,10 +177,9 @@ fn create() {
             let _ = SetWindowPos(h, None, x, y + (row_h - height) / 2, w, height, SWP_NOZORDER);
         };
 
-        let combos: [(u16, &str, &[&str]); 3] = [
+        let combos: [(u16, &str, &[&str]); 2] = [
             (THEME, "Theme", &["Windows default", "Dark", "Light"]),
             (DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
-            (SUBOPEN, "Open subcategories", &["On click", "On hover"]),
         ];
         for (id, text, items) in combos {
             place(label(&mut controls, text), m, label_w, s(18), y);
@@ -266,7 +264,6 @@ fn load() {
     };
     sel(THEME, a.theme as usize);
     sel(DOCK, a.dock_width as usize);
-    sel(SUBOPEN, a.subcategory_open as usize);
     for (id, value) in [
         (OPACITY, a.opacity as u32),
         (BORDER_WIDTH, a.border_width),
@@ -377,12 +374,11 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             let id = ui::loword(wparam.0);
             let code = ui::hiword(wparam.0);
             match (id, code) {
-                (THEME | DOCK | SUBOPEN, CBN_SELCHANGE) => {
+                (THEME | DOCK, CBN_SELCHANGE) => {
                     let i = combo(id);
                     change(|a, _| match id {
                         THEME => a.theme = [ThemeMode::System, ThemeMode::Dark, ThemeMode::Light][i.min(2)],
-                        DOCK => a.dock_width = [DockWidth::Full, DockWidth::Fit][i.min(1)],
-                        _ => a.subcategory_open = [SubcategoryOpen::Click, SubcategoryOpen::Hover][i.min(1)],
+                        _ => a.dock_width = [DockWidth::Full, DockWidth::Fit][i.min(1)],
                     });
                 }
                 (ACCENT | BACKGROUND | BORDER, BN_CLICKED) => pick_colour(hwnd, id),

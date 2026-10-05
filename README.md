@@ -4,9 +4,9 @@ A portable application launcher for Windows 10 (version 1703 or later) and
 Windows 11, for people with a lot of apps installed. You file apps into
 categories nested as deeply as you like. Your categories and pinned apps then
 sit in a bar docked against the Windows taskbar, in the look of the original
-FlexTaskbar. Rest the pointer on a category and a flyout pops up: its
-subcategories as a row of buttons, its apps as tiles. Click a subcategory to open
-it in the same flyout. Theme (dark, light or Windows default), colours,
+FlexTaskbar. Rest the pointer on a category and a flyout pops up with
+its subcategories and apps as tiles. Rest on a subcategory and its own flyout
+floats above, the same way, as many levels deep as your categories go. Theme (dark, light or Windows default), colours,
 transparency, border and rounded corners are all adjustable. The same categories
 are also available from the tray icon, a hotkey menu, and a type-to-search
 window.
@@ -30,7 +30,7 @@ next to it (just above, or below a top taskbar), and can be turned off.
 
 ## Screenshots
 
-![Hovering a category, opening a subcategory and going back, sliding between categories, launching a pinned app, All apps, and changing the appearance live](screenshots/flow.gif)
+![Hovering a category, subcategory flyouts floating above it three levels deep, sliding between categories, launching a pinned app, All apps, and changing the appearance live](screenshots/flow.gif)
 
 **The bar**: *All* on the left, root categories (▾) and pinned apps in the
 centre, *Link* and settings (⚙) on the right. These are the defaults, which
@@ -38,11 +38,11 @@ match the original .NET version.
 
 ![The bar with All, category and app icons, Link and the settings gear](screenshots/strip.png)
 
-| Hover a category: subcategories and app tiles | Click a subcategory: it opens in place |
+| Hover a category: subcategories and apps as tiles | Hover a subcategory: its flyout floats above |
 |---|---|
-| ![Development open: Editors, Terminals and Tools buttons, two app tiles, Manage Category](screenshots/tiles.png) | ![Editors open inside the flyout, with Back](screenshots/subcategory.png) |
+| ![Development open: Editors, Terminals and Tools subcategory tiles, two app tiles, Manage Category](screenshots/tiles.png) | ![Development, then Tools above it, then Debugging above that](screenshots/subcategory.png) |
 | **All: every app** | **Light theme, rounded floating dock** |
-| ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge](screenshots/light-dock.png) |
+| ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
 | **Appearance window** | **Right-click: the full menu** |
 | ![Appearance window with theme, bar width, colours and sliders](screenshots/appearance.png) | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) |
 | **Search** | **Custom app (a browser web app)** |
@@ -72,14 +72,16 @@ out like the original FlexTaskbar:
   path and pins it to the bar. ⚙ opens the Manage window.
 - **Category flyouts.** Resting the pointer on a category opens a flyout above
   it:
-  - its **subcategories** as a row of buttons; click one to open it in the same
-    flyout, at any depth, with *‹ Back* to go up again (or, if you prefer,
-    set them to open on hover);
-  - its **apps as tiles**, each a large icon with the name underneath, 4 per row
-    by default;
+  - its **subcategories and apps as tiles**, each a large icon with the name
+    underneath, 4 per row by default. Subcategories come first and are marked
+    with ▾, like categories on the bar;
+  - resting the pointer on a subcategory opens **its flyout floating above**
+    this one, and so on at any depth. Moving to another subcategory switches
+    the flyout above; resting on an app tile closes it;
   - *No apps in this category* when it's empty, and **Manage Category** at the
     bottom, which opens the Manage window on that category.
-  - The flyout closes shortly after the pointer leaves it and its button.
+  - The flyouts close shortly after the pointer leaves all of them and the
+    bar button.
 - **Slide between categories.** While a flyout is open, moving along the bar
   switches to the next category straight away.
 - **Pinned apps** launch with a click. You can pin an app from the Manage
@@ -100,7 +102,6 @@ Every change shows on the bar straight away:
 |---|---|---|
 | Theme | Windows default, Dark, Light | Dark (the original look) |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
-| Open subcategories | On click, On hover | On click |
 | Accent colour | Any colour (marks the open button) | Light blue `#60CDFF` |
 | Background colour | Any colour; the text turns dark or light to stay readable | Theme's colour |
 | Border colour | Any colour | A faint line in the text colour |
@@ -155,7 +156,8 @@ custom icons are copied over.
 
 The docked bar is back in its original look: *All* on the left, category and
 app icons in the centre, *Link* and ⚙ on the right, and category flyouts with
-subcategory buttons, app tiles and *Manage Category*. Its colours, transparency,
+subcategory and app tiles and *Manage Category*. Subcategory flyouts float above
+the one they open from, like the bar's own categories. Its colours, transparency,
 border and corners are now adjustable.
 It now sits beside the Windows taskbar instead of trying to replace it, so these
 old taskbar features are gone on purpose:
@@ -310,7 +312,7 @@ The 34 unit tests cover:
   app membership
 - search ranking
 - bar layout (the three zones, centring, overflow, the fitted dock, hit
-  testing), flyout tile grids and button wrapping, and pinning
+  testing), flyout tile grids, and pinning
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, colour parsing and
   clamping
@@ -318,9 +320,10 @@ The 34 unit tests cover:
 
 **Manually, under Wine 9 on Linux** (not real Windows):
 - the bar and its flyouts (drawn as layered windows):
-  - hover a category: subcategory buttons and app tiles
-  - click a subcategory, then *‹ Back*
-  - launching from a tile, sliding between categories, launching a pinned app
+  - hover a category: subcategory and app tiles
+  - hover subcategories three levels deep, each flyout floating above the
+    last; switching to another subcategory; an app tile closing the level above
+  - launching from a tile on the third level, sliding between categories, launching a pinned app
   - the *All* list
   - the right-click menus (move, unpin)
   - *Pin to strip*

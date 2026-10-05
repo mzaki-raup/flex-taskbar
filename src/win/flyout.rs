@@ -1,21 +1,23 @@
 //! Flyouts from the icon strip, in the original FlexTaskbar style:
 //!
-//! - a **category** flyout: its subcategories as a row of buttons, its apps as
-//!   tiles (large icon, name underneath, `flyout_columns` per row), and
-//!   "Manage Category" at the bottom. Clicking (or, if set, resting on) a
-//!   subcategory opens it in the same flyout, with a Back button;
+//! - a **category** flyout: its subcategories and apps as tiles (large icon,
+//!   name underneath, `flyout_columns` per row; subcategories first, marked
+//!   with ▾), and "Manage Category" at the bottom. Resting the pointer on a
+//!   subcategory opens *its* flyout floating above this one, the same way a
+//!   category on the strip opens, at any depth;
 //! - the **All** flyout: every app as a scrollable list.
 //!
-//! A flyout opens just above its button (below it for a top strip) and closes
-//! shortly after the pointer has left both, as the original's did. It is a
-//! per-pixel-alpha layered window drawn with `canvas`, using the strip's
+//! The open flyouts form a stack of levels: level 0 hangs off a strip button,
+//! each further level off a subcategory tile of the level below. They close
+//! shortly after the pointer has left all of them and the strip button. Each is
+//! a per-pixel-alpha layered window drawn with `canvas`, using the strip's
 //! appearance settings.
 
 use super::app;
 use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
-use crate::appearance::{Appearance, Colors, SubcategoryOpen};
+use crate::appearance::{Appearance, Colors};
 use crate::striplayout::{self, Hit};
 use resvg::tiny_skia::Pixmap;
 use std::cell::RefCell;
@@ -36,26 +38,22 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCWSTR, w};
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
+/// Timers, all on the level-0 window.
 const TIMER_CLOSE: usize = 1;
-const TIMER_SUB: usize = 2;
+const TIMER_HOVER: usize = 2;
 const CLOSE_DELAY_MS: u32 = 300;
-const SUB_HOVER_MS: u32 = 400;
+/// How long the pointer rests on a tile before the levels above follow it
+/// (a subcategory opens; anything else closes what was open above).
+const HOVER_DELAY_MS: u32 = 200;
 
 #[derive(Clone, PartialEq)]
 enum View {
-    /// A category; `back` holds the categories drilled through to get here.
-    Category {
-        id: u64,
-        back: Vec<u64>,
-    },
-    All {
-        first_row: usize,
-    },
+    Category(u64),
+    All { first_row: usize },
 }
 
 #[derive(Clone, PartialEq)]
 enum Elem {
-    Back,
     Sub(u64),
     Tile(String),
     Manage(u64),
@@ -71,14 +69,24 @@ struct Placed {
     icon: Option<String>,
 }
 
-struct Flyout {
+struct Level {
     hwnd: HWND,
     view: View,
-    anchor: Hit,
+    /// For levels above 0: the index of the subcategory tile in the level
+    /// below that opened this one.
+    source: Option<usize>,
     elems: Vec<Placed>,
     hover: Option<usize>,
     /// Window rectangle on screen.
     win: RECT,
+    tracking_leave: bool,
+    /// Total rows in the All list, and how many fit.
+    rows: (usize, usize),
+}
+
+struct Flyouts {
+    levels: Vec<Level>,
+    anchor: Hit,
     look: Appearance,
     colors: Colors,
     dpi: u32,
@@ -86,16 +94,13 @@ struct Flyout {
     small: HFONT,
     /// Icons by (cache key, pixel size).
     icons: HashMap<(String, i32), Option<Pixmap>>,
-    tracking_leave: bool,
-    /// Total rows in the All list, and how many fit.
-    rows: (usize, usize),
 }
 
 thread_local! {
-    static FLYOUT: RefCell<Option<Flyout>> = const { RefCell::new(None) };
+    static FLYOUT: RefCell<Option<Flyouts>> = const { RefCell::new(None) };
 }
 
-fn with<R>(f: impl FnOnce(&mut Flyout) -> R) -> Option<R> {
+fn with<R>(f: impl FnOnce(&mut Flyouts) -> R) -> Option<R> {
     FLYOUT.with(|s| s.borrow_mut().as_mut().map(f))
 }
 
@@ -103,25 +108,30 @@ pub fn is_open() -> bool {
     FLYOUT.with(|f| f.borrow().is_some())
 }
 
-fn hwnd() -> Option<HWND> {
-    FLYOUT.with(|f| f.borrow().as_ref().map(|f| f.hwnd))
+/// The level-0 window, which owns the timers.
+fn base() -> Option<HWND> {
+    with(|f| f.levels.first().map(|l| l.hwnd)).flatten()
+}
+
+/// Which level `hwnd` is. Uses `try_borrow`: window messages can arrive while
+/// the state is borrowed (for example while a window is being drawn).
+fn level_of(hwnd: HWND) -> Option<usize> {
+    FLYOUT.with(|f| f.try_borrow().ok()?.as_ref()?.levels.iter().position(|l| l.hwnd == hwnd))
 }
 
 // ---------------------------------------------------------------- opening
 
 pub fn open_category(id: u64, anchor: Hit) {
-    let already = FLYOUT
-        .with(|f| f.borrow().as_ref().is_some_and(|f| f.anchor == anchor && matches!(&f.view, View::Category { .. })));
-    if already {
+    let already = with(|f| f.anchor == anchor && f.levels.first().is_some_and(|l| l.view == View::Category(id)));
+    if already == Some(true) {
         cancel_close();
         return;
     }
-    show(View::Category { id, back: Vec::new() }, anchor);
+    show(View::Category(id), anchor);
 }
 
 pub fn toggle_all(anchor: Hit) {
-    let open_here = FLYOUT.with(|f| f.borrow().as_ref().is_some_and(|f| f.anchor == anchor));
-    if open_here {
+    if with(|f| f.anchor == anchor) == Some(true) {
         close();
     } else {
         show(View::All { first_row: 0 }, anchor);
@@ -129,23 +139,36 @@ pub fn toggle_all(anchor: Hit) {
 }
 
 fn show(view: View, anchor: Hit) {
-    if hwnd().is_none() && !create(anchor) {
+    if !is_open() {
+        let (look, colors) = strip::current_look();
+        let dpi = strip::dpi();
+        FLYOUT.with(|f| {
+            *f.borrow_mut() = Some(Flyouts {
+                levels: Vec::new(),
+                anchor,
+                look,
+                colors,
+                dpi,
+                font: canvas::font(scale(13, dpi), false),
+                small: canvas::font(scale(11, dpi), false),
+                icons: HashMap::new(),
+            })
+        });
+    }
+    truncate(0);
+    with(|f| f.anchor = anchor);
+    if !push_level(view, None) {
+        close();
         return;
     }
-    with(|f| {
-        f.view = view;
-        f.anchor = anchor;
-        f.hover = None;
-    });
     strip::set_open(Some(anchor));
     cancel_close();
-    rebuild();
+    rebuild(0);
 }
 
-fn create(anchor: Hit) -> bool {
+fn create_window() -> Option<HWND> {
     let class = wide("FlexTaskbar.Flyout");
-    let (look, colors) = strip::current_look();
-    let hwnd = unsafe {
+    unsafe {
         let wc = WNDCLASSW {
             lpfnWndProc: Some(proc_),
             hInstance: app::instance(),
@@ -158,7 +181,7 @@ fn create(anchor: Hit) -> bool {
             ..Default::default()
         };
         RegisterClassW(&wc);
-        match CreateWindowExW(
+        CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED,
             PCWSTR(class.as_ptr()),
             w!("FlexTaskbar flyout"),
@@ -171,26 +194,21 @@ fn create(anchor: Hit) -> bool {
             None,
             Some(app::instance()),
             None,
-        ) {
-            Ok(h) => h,
-            Err(_) => return false,
-        }
-    };
-    let dpi = ui::dpi_of(hwnd);
-    FLYOUT.with(|f| {
-        *f.borrow_mut() = Some(Flyout {
+        )
+        .ok()
+    }
+}
+
+fn push_level(view: View, source: Option<usize>) -> bool {
+    let Some(hwnd) = create_window() else { return false };
+    with(|f| {
+        f.levels.push(Level {
             hwnd,
-            view: View::All { first_row: 0 },
-            anchor,
+            view,
+            source,
             elems: Vec::new(),
             hover: None,
             win: RECT::default(),
-            look,
-            colors,
-            dpi,
-            font: canvas::font(scale(13, dpi), false),
-            small: canvas::font(scale(11, dpi), false),
-            icons: HashMap::new(),
             tracking_leave: false,
             rows: (0, 0),
         })
@@ -198,11 +216,27 @@ fn create(anchor: Hit) -> bool {
     true
 }
 
-pub fn close() {
-    let taken = FLYOUT.with(|f| f.borrow_mut().take());
-    if let Some(f) = taken {
+/// Closes every level from `keep` up, leaving `keep` levels open.
+fn truncate(keep: usize) {
+    let gone: Vec<HWND> =
+        with(|f| f.levels.drain(keep.min(f.levels.len())..).map(|l| l.hwnd).collect()).unwrap_or_default();
+    for h in gone {
         unsafe {
-            let _ = DestroyWindow(f.hwnd);
+            let _ = DestroyWindow(h);
+        }
+    }
+}
+
+pub fn close() {
+    if let Some(base) = base() {
+        unsafe {
+            let _ = KillTimer(Some(base), TIMER_CLOSE);
+            let _ = KillTimer(Some(base), TIMER_HOVER);
+        }
+    }
+    truncate(0);
+    if let Some(f) = FLYOUT.with(|f| f.borrow_mut().take()) {
+        unsafe {
             let _ = DeleteObject(HGDIOBJ(f.font.0));
             let _ = DeleteObject(HGDIOBJ(f.small.0));
         }
@@ -210,10 +244,22 @@ pub fn close() {
     }
 }
 
-/// The configuration changed: redraw the open flyout's content.
+/// The configuration changed: redraw the open flyouts' content.
 pub fn refresh() {
-    if is_open() {
-        rebuild();
+    if !is_open() {
+        return;
+    }
+    let (look, colors) = strip::current_look();
+    with(|f| {
+        f.look = look;
+        f.colors = colors;
+    });
+    let n = with(|f| f.levels.len()).unwrap_or(0);
+    for i in 0..n {
+        if with(|f| i < f.levels.len()) != Some(true) {
+            break;
+        }
+        rebuild(i);
     }
 }
 
@@ -222,9 +268,13 @@ pub fn icon_changed(key: &str) {
 }
 
 /// The pointer left the flyout's button on the strip: close soon, unless it
-/// arrives in the flyout.
+/// arrives in a flyout.
 pub fn pointer_left_anchor() {
-    if let Some(h) = hwnd() {
+    start_close_timer();
+}
+
+fn start_close_timer() {
+    if let Some(h) = base() {
         unsafe {
             SetTimer(Some(h), TIMER_CLOSE, CLOSE_DELAY_MS, None);
         }
@@ -232,7 +282,7 @@ pub fn pointer_left_anchor() {
 }
 
 fn cancel_close() {
-    if let Some(h) = hwnd() {
+    if let Some(h) = base() {
         unsafe {
             let _ = KillTimer(Some(h), TIMER_CLOSE);
         }
@@ -241,134 +291,115 @@ fn cancel_close() {
 
 // ---------------------------------------------------------------- layout
 
-fn icon_for(f: &Flyout, key: &str, size: i32) -> Option<Pixmap> {
+fn icon_for(f: &Flyouts, key: &str, size: i32) -> Option<Pixmap> {
     f.icons.get(&(key.to_string(), size)).cloned().flatten()
 }
 
-/// Lays out the current view, sizes and positions the window, and draws it.
-fn rebuild() {
-    let Some(view) = with(|f| f.view.clone()) else { return };
-    let Some(anchor_rc) = with(|f| f.anchor).and_then(strip::button_rect) else {
-        close();
+/// Lays out level `idx`, sizes and positions its window, and draws it. A
+/// category that no longer exists closes that level and those above it.
+fn rebuild(idx: usize) {
+    let Some((view, source)) = with(|f| f.levels.get(idx).map(|l| (l.view.clone(), l.source))).flatten() else {
         return;
     };
-    let (look, colors) = strip::current_look();
-    // Gather what to show (outside any borrow of the flyout).
+    // What this level hangs off, on screen.
+    let anchor_rc = if idx == 0 {
+        with(|f| f.anchor).and_then(strip::button_rect)
+    } else {
+        // The tile must still be this subcategory (the level below may
+        // have been rebuilt).
+        with(|f| {
+            let below = &f.levels[idx - 1];
+            source
+                .and_then(|i| below.elems.get(i))
+                .filter(|p| matches!((&p.elem, &view), (Elem::Sub(a), View::Category(b)) if a == b))
+                .map(|p| (p.rect, below.win))
+        })
+        .flatten()
+        .map(|(rc, win)| RECT {
+            left: win.left + rc.left,
+            top: win.top,
+            right: win.left + rc.right,
+            bottom: win.bottom,
+        })
+    };
+    let Some(anchor_rc) = anchor_rc else {
+        if idx == 0 {
+            close()
+        } else {
+            truncate(idx)
+        }
+        return;
+    };
+
     struct Content {
-        /// The category's name, shown after Back once drilled in.
-        back: Option<String>,
         subs: Vec<(u64, String)>,
         tiles: Vec<(String, String)>,
         manage: Option<u64>,
         empty: bool,
         rows: Vec<(String, String)>,
-        missing: bool,
     }
     let content = app::with(|s| match &view {
-        View::Category { id, back } => match crate::tree::find(&s.cfg.categories, *id) {
-            Some(c) => Content {
-                back: (!back.is_empty()).then(|| c.name.clone()),
-                subs: c.children.iter().map(|ch| (ch.id, ch.name.clone())).collect(),
-                tiles: c.apps.iter().filter_map(|a| s.catalog.get(a).map(|e| (a.clone(), e.name.clone()))).collect(),
-                manage: Some(*id),
-                empty: c.children.is_empty() && c.apps.is_empty(),
-                rows: Vec::new(),
-                missing: false,
-            },
-            None => Content {
-                back: None,
-                subs: Vec::new(),
-                tiles: Vec::new(),
-                manage: None,
-                empty: false,
-                rows: Vec::new(),
-                missing: true,
-            },
-        },
-        View::All { .. } => Content {
-            back: None,
+        View::Category(id) => crate::tree::find(&s.cfg.categories, *id).map(|c| Content {
+            subs: c.children.iter().map(|ch| (ch.id, ch.name.clone())).collect(),
+            tiles: c.apps.iter().filter_map(|a| s.catalog.get(a).map(|e| (a.clone(), e.name.clone()))).collect(),
+            manage: Some(*id),
+            empty: c.children.is_empty() && c.apps.is_empty(),
+            rows: Vec::new(),
+        }),
+        View::All { .. } => Some(Content {
             subs: Vec::new(),
             tiles: Vec::new(),
             manage: None,
             empty: false,
             rows: s.catalog.apps.iter().map(|a| (a.id.clone(), a.name.clone())).collect(),
-            missing: false,
-        },
+        }),
     });
-    if content.missing {
-        close();
-        return;
-    }
-
-    let Some((dpi, font)) = with(|f| {
-        f.look = look.clone();
-        f.colors = colors;
-        (f.dpi, f.font)
-    }) else {
+    let Some(content) = content else {
+        if idx == 0 {
+            close()
+        } else {
+            truncate(idx)
+        }
         return;
     };
+
+    let Some((look, dpi, font)) = with(|f| (f.look.clone(), f.dpi, f.font)) else { return };
     let s = |v: i32| scale(v, dpi);
     let border = if look.border_width > 0 { s(look.border_width as i32).max(1) } else { 0 };
     let pad = s(4) + border;
     let mut elems: Vec<Placed> = Vec::new();
     let mut y = pad;
     let inner_w;
+    let mut all_rows = None;
 
     match &view {
-        View::Category { .. } => {
+        View::Category(_) => {
             let tile = (s(84), s(76));
             let tm = s(2);
             let cols = (look.flyout_columns as usize).max(1);
-            let tiles_w = cols.min(content.tiles.len().max(1)) as i32 * (tile.0 + 2 * tm);
-            let max_w = (cols as i32 * (tile.0 + 2 * tm)).max(s(360));
-            // Subcategory buttons (and Back), wrapped.
-            let mut pills: Vec<(Elem, String, Option<String>)> = Vec::new();
-            if let Some(name) = &content.back {
-                pills.push((Elem::Back, "‹  Back".into(), None));
-                pills.push((Elem::Label, name.clone(), None));
-            }
-            for (id, name) in &content.subs {
-                pills.push((Elem::Sub(*id), name.clone(), Some(format!("cat:{id}"))));
-            }
-            let widths: Vec<i32> = pills
+            // Subcategories first, so they sit in the top row, nearest to
+            // the flyouts they open above.
+            let items: Vec<(Elem, String, String)> = content
+                .subs
                 .iter()
-                .map(|(e, t, _)| {
-                    let icon = if matches!(e, Elem::Sub(_)) { s(16) + s(6) } else { 0 };
-                    s(10) + icon + canvas::measure(t, font).0 + s(10)
-                })
+                .map(|(id, name)| (Elem::Sub(*id), name.clone(), format!("cat:{id}")))
+                .chain(content.tiles.iter().map(|(id, name)| (Elem::Tile(id.clone()), name.clone(), id.clone())))
                 .collect();
-            let pill_h = s(28);
-            let wrapped = striplayout::wrap(&widths, s(4), max_w);
-            let pills_w = wrapped.iter().zip(&widths).map(|((x, _), w)| x + w).max().unwrap_or(0);
-            inner_w = tiles_w.max(pills_w).max(canvas::measure("Manage Category", font).0 + s(48)).max(s(180));
-            let rows = wrapped.last().map(|(_, r)| r + 1).unwrap_or(0);
-            for ((x, row), (elem, text, icon)) in wrapped.iter().zip(pills) {
-                let top = y + *row as i32 * (pill_h + s(4));
-                let w = widths[elems.len()];
-                elems.push(Placed {
-                    rect: RECT { left: pad + x, top, right: pad + x + w, bottom: top + pill_h },
-                    elem,
-                    text,
-                    icon,
-                });
-            }
-            if rows > 0 {
-                y += rows as i32 * (pill_h + s(4));
-            }
-            // App tiles.
-            for ((col, row), (id, name)) in striplayout::grid(content.tiles.len(), cols).into_iter().zip(&content.tiles)
-            {
+            let tiles_w = cols.min(items.len().max(1)) as i32 * (tile.0 + 2 * tm);
+            inner_w = tiles_w.max(canvas::measure("Manage Category", font).0 + s(48)).max(s(180));
+            let n = items.len();
+            for ((col, row), (elem, text, icon)) in striplayout::grid(n, cols).into_iter().zip(items) {
                 let left = pad + col as i32 * (tile.0 + 2 * tm) + tm;
                 let top = y + row as i32 * (tile.1 + 2 * tm) + tm;
                 elems.push(Placed {
                     rect: RECT { left, top, right: left + tile.0, bottom: top + tile.1 },
-                    elem: Elem::Tile(id.clone()),
-                    text: name.clone(),
-                    icon: Some(id.clone()),
+                    elem,
+                    text,
+                    icon: Some(icon),
                 });
             }
-            if !content.tiles.is_empty() {
-                y += content.tiles.len().div_ceil(cols) as i32 * (tile.1 + 2 * tm);
+            if n > 0 {
+                y += n.div_ceil(cols) as i32 * (tile.1 + 2 * tm);
             }
             if content.empty {
                 elems.push(Placed {
@@ -381,19 +412,20 @@ fn rebuild() {
             }
             if let Some(id) = content.manage {
                 y += s(4);
+                let h = s(28);
                 elems.push(Placed {
-                    rect: RECT { left: pad, top: y, right: pad + inner_w, bottom: y + pill_h },
+                    rect: RECT { left: pad, top: y, right: pad + inner_w, bottom: y + h },
                     elem: Elem::Manage(id),
                     text: "Manage Category".into(),
                     icon: None,
                 });
-                y += pill_h;
+                y += h;
             }
         }
         View::All { first_row } => {
             inner_w = s(280) - 2 * pad;
             elems.push(Placed {
-                rect: RECT { left: pad + s(8), top: y + s(4), right: pad + inner_w, bottom: y + s(22) },
+                rect: RECT { left: pad + s(4), top: y + s(4), right: pad + inner_w, bottom: y + s(22) },
                 elem: Elem::Label,
                 text: if content.rows.is_empty() { "No apps found".into() } else { "All apps".into() },
                 icon: None,
@@ -402,12 +434,7 @@ fn rebuild() {
             let row_h = s(28);
             let visible = ((s(480) - y - pad) / row_h).max(1) as usize;
             let first = (*first_row).min(content.rows.len().saturating_sub(visible));
-            with(|f| {
-                f.rows = (content.rows.len(), visible);
-                if let View::All { first_row } = &mut f.view {
-                    *first_row = first;
-                }
-            });
+            all_rows = Some((content.rows.len(), visible, first));
             for (id, name) in content.rows.iter().skip(first).take(visible) {
                 elems.push(Placed {
                     rect: RECT { left: pad, top: y, right: pad + inner_w, bottom: y + row_h },
@@ -422,7 +449,7 @@ fn rebuild() {
     let w = inner_w + 2 * pad;
     let h = y + pad;
 
-    // Above the button (below it for a top strip), kept on the monitor.
+    // Above what it hangs off (below it for a top strip), kept on the monitor.
     let top_strip = strip::edge_is_top();
     let mon = unsafe {
         let m = MonitorFromPoint(POINT { x: anchor_rc.left, y: anchor_rc.top }, MONITOR_DEFAULTTONEAREST);
@@ -432,7 +459,8 @@ fn rebuild() {
     };
     let gap = s(4);
     let x = anchor_rc.left.min(mon.right - w).max(mon.left);
-    let y = if top_strip { anchor_rc.bottom + gap } else { anchor_rc.top - gap - h };
+    let y =
+        if top_strip { (anchor_rc.bottom + gap).min(mon.bottom - h) } else { (anchor_rc.top - gap - h).max(mon.top) };
     let win = RECT { left: x, top: y, right: x + w, bottom: y + h };
 
     // Icons for everything on show, loaded once per size.
@@ -440,7 +468,7 @@ fn rebuild() {
         .iter()
         .filter_map(|p| {
             let size = match p.elem {
-                Elem::Tile(_) => s(look.icon_size as i32),
+                Elem::Tile(_) | Elem::Sub(_) => s(look.icon_size as i32),
                 Elem::Row(_) => s(20),
                 _ => s(16),
             };
@@ -459,27 +487,38 @@ fn rebuild() {
         with(|f| f.icons.extend(loaded));
     }
 
-    let h_win = with(|f| {
-        f.elems = elems;
-        f.win = win;
-        f.hwnd
+    let hwnd = with(|f| {
+        let l = &mut f.levels[idx];
+        l.elems = elems;
+        l.win = win;
+        if let Some((total, visible, first)) = all_rows {
+            l.rows = (total, visible);
+            l.view = View::All { first_row: first };
+        }
+        if l.hover.is_some_and(|i| i >= l.elems.len()) {
+            l.hover = None;
+        }
+        l.hwnd
     });
-    if let Some(hw) = h_win {
+    if let Some(hw) = hwnd {
         unsafe {
             let _ = SetWindowPos(hw, Some(HWND_TOPMOST), win.left, win.top, w, h, SWP_NOACTIVATE);
             let _ = ShowWindow(hw, SW_SHOWNOACTIVATE);
         }
     }
-    render();
+    render(idx);
 }
 
 // ---------------------------------------------------------------- drawing
 
-fn render() {
+fn render(idx: usize) {
     FLYOUT.with(|cell| {
-        let mut b = cell.borrow_mut();
-        let Some(f) = b.as_mut() else { return };
-        let (w, h) = (ui::rect_w(&f.win), ui::rect_h(&f.win));
+        let b = cell.borrow();
+        let Some(f) = b.as_ref() else { return };
+        let Some(l) = f.levels.get(idx) else { return };
+        // The tile whose flyout is open above this one stays highlighted.
+        let open_child = f.levels.get(idx + 1).and_then(|c| c.source);
+        let (w, h) = (ui::rect_w(&l.win), ui::rect_h(&l.win));
         let Some(mut cv) = Canvas::new(w, h) else { return };
         let d = f.dpi;
         let s = |v: i32| scale(v, d);
@@ -490,17 +529,14 @@ fn render() {
         cv.stroke_round_rect(0.0, 0.0, w as f32, h as f32, radius, border, c.border);
 
         let r4 = s(4) as f32;
-        let elems: Vec<(RECT, Elem, String, Option<String>)> =
-            f.elems.iter().map(|p| (p.rect, p.elem.clone(), p.text.clone(), p.icon.clone())).collect();
-        for (i, (rc, elem, text, icon)) in elems.into_iter().enumerate() {
-            let hovered = f.hover == Some(i) && elem != Elem::Label;
-            // Subcategories and Back are buttons, as in the original: a faint
-            // fill that strengthens on hover.
-            let pill = matches!(elem, Elem::Sub(_) | Elem::Back);
-            let fill = match (pill, hovered) {
-                (true, true) => Some(c.pressed),
-                (true, false) | (false, true) => Some(c.hover),
-                (false, false) => None,
+        for (i, p) in l.elems.iter().enumerate() {
+            let rc = p.rect;
+            let fill = if open_child == Some(i) {
+                Some(c.pressed)
+            } else if l.hover == Some(i) && p.elem != Elem::Label {
+                Some(c.hover)
+            } else {
+                None
             };
             if let Some(fill) = fill {
                 cv.fill_round_rect(
@@ -512,59 +548,55 @@ fn render() {
                     fill,
                 );
             }
-            match &elem {
-                Elem::Back => {
-                    cv.text(&text, rc, f.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                }
-                Elem::Sub(_) => {
-                    let size = s(16);
-                    let x = rc.left + s(10);
-                    let y = rc.top + (ui::rect_h(&rc) - size) / 2;
-                    match icon.as_ref().and_then(|k| icon_for(f, k, size)) {
-                        Some(img) => cv.image(&img, x, y, size, 1.0),
-                        None => cv.folder(x as f32, y as f32, size as f32, c.accent),
-                    }
-                    let trc = RECT { left: x + size + s(6), ..rc };
-                    cv.text(&text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE);
-                }
-                Elem::Tile(_) => {
-                    let size = s(f.look.icon_size as i32).min(ui::rect_w(&rc) - s(8));
+            let icon = p.icon.as_deref();
+            match &p.elem {
+                Elem::Tile(_) | Elem::Sub(_) => {
+                    let want = s(f.look.icon_size as i32);
+                    let size = want.min(ui::rect_w(&rc) - s(16));
                     let x = rc.left + (ui::rect_w(&rc) - size) / 2;
                     let y = rc.top + s(4);
-                    if let Some(img) = icon.as_ref().and_then(|k| icon_for(f, k, s(f.look.icon_size as i32))) {
-                        cv.image(&img, x, y, size, 1.0);
+                    let is_sub = matches!(p.elem, Elem::Sub(_));
+                    match icon.and_then(|k| icon_for(f, k, want)) {
+                        Some(img) => cv.image(&img, x, y, size, 1.0),
+                        None if is_sub => cv.folder(x as f32, y as f32, size as f32, c.accent),
+                        None => {}
+                    }
+                    if is_sub {
+                        // ▾, as on the strip's category buttons.
+                        let cs = s(7) as f32;
+                        cv.chevron(x as f32 + size as f32 + s(2) as f32, y as f32 + size as f32 - cs / 2.0, cs, c.text);
                     }
                     // Two lines reserved for the name, as in the original.
                     let trc =
                         RECT { left: rc.left + s(4), top: y + size + s(4), right: rc.right - s(4), bottom: rc.bottom };
-                    cv.text(&text, trc, f.small, c.text, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+                    cv.text(&p.text, trc, f.small, c.text, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
                 }
                 Elem::Manage(_) => {
                     let gx = rc.left as f32 + s(18) as f32;
                     let gy = (rc.top + rc.bottom) as f32 / 2.0;
                     cv.gear(gx, gy, s(7) as f32, c.text);
                     let trc = RECT { left: rc.left + s(32), ..rc };
-                    cv.text(&text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE);
+                    cv.text(&p.text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE);
                 }
                 Elem::Row(_) => {
                     let size = s(20);
                     let x = rc.left + s(8);
                     let y = rc.top + (ui::rect_h(&rc) - size) / 2;
-                    if let Some(img) = icon.as_ref().and_then(|k| icon_for(f, k, size)) {
+                    if let Some(img) = icon.and_then(|k| icon_for(f, k, size)) {
                         cv.image(&img, x, y, size, 1.0);
                     }
                     let trc = RECT { left: x + size + s(8), right: rc.right - s(4), ..rc };
-                    cv.text(&text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    cv.text(&p.text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
                 Elem::Label => {
                     let trc = RECT { left: rc.left + s(4), ..rc };
-                    cv.text(&text, trc, f.font, c.subtle, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    cv.text(&p.text, trc, f.font, c.subtle, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
             }
         }
         // A thin scroll indicator for a long All list.
-        let (total, visible) = f.rows;
-        if let View::All { first_row } = f.view
+        let (total, visible) = l.rows;
+        if let View::All { first_row } = l.view
             && total > visible
         {
             let track_top = s(28) as f32;
@@ -573,54 +605,71 @@ fn render() {
             let y = track_top + (track_h - thumb_h) * first_row as f32 / (total - visible) as f32;
             cv.fill_round_rect(w as f32 - s(6) as f32, y, s(3) as f32, thumb_h, s(2) as f32, c.subtle);
         }
-        cv.present(f.hwnd, f.win.left, f.win.top);
+        cv.present(l.hwnd, l.win.left, l.win.top);
     });
 }
 
 // ---------------------------------------------------------------- input
 
-fn elem_at(x: i32, y: i32) -> Option<usize> {
-    FLYOUT.with(|f| {
-        let b = f.borrow();
-        let f = b.as_ref()?;
-        f.elems.iter().position(|p| {
+fn elem_at(idx: usize, x: i32, y: i32) -> Option<usize> {
+    with(|f| {
+        f.levels.get(idx)?.elems.iter().position(|p| {
             p.elem != Elem::Label && x >= p.rect.left && x < p.rect.right && y >= p.rect.top && y < p.rect.bottom
         })
     })
+    .flatten()
 }
 
-fn activate(elem: Elem) {
-    match elem {
-        Elem::Back => {
-            with(|f| {
-                if let View::Category { id, back } = &mut f.view
-                    && let Some(prev) = back.pop()
-                {
-                    *id = prev;
-                }
-                f.hover = None;
-            });
-            rebuild();
+fn elem(idx: usize, i: usize) -> Option<Elem> {
+    with(|f| f.levels.get(idx)?.elems.get(i).map(|p| p.elem.clone())).flatten()
+}
+
+/// Makes the levels above `idx` match what the pointer rests on in it: the
+/// flyout of a hovered subcategory opens above; anything else closes what was
+/// open above.
+fn follow_hover(idx: usize) {
+    let Some((hover, child)) =
+        with(|f| f.levels.get(idx).map(|l| (l.hover, f.levels.get(idx + 1).and_then(|c| c.source)))).flatten()
+    else {
+        return;
+    };
+    match hover.and_then(|i| elem(idx, i).map(|e| (i, e))) {
+        Some((i, Elem::Sub(id))) => open_sub(idx, i, id),
+        // Pointer on something else here: close what's above it. Resting on
+        // empty space or padding keeps it, so the pointer can travel to it.
+        Some(_) if child.is_some() => {
+            truncate(idx + 1);
+            render(idx);
         }
-        Elem::Sub(sub) => {
-            with(|f| {
-                if let View::Category { id, back } = &mut f.view {
-                    back.push(*id);
-                    *id = sub;
-                }
-                f.hover = None;
-            });
-            rebuild();
-        }
-        Elem::Tile(id) | Elem::Row(id) => {
+        _ => {}
+    }
+}
+
+/// Opens the flyout of subcategory `id` (tile `i` of level `idx`) above it.
+fn open_sub(idx: usize, i: usize, id: u64) {
+    let child = with(|f| f.levels.get(idx + 1).map(|c| c.source)).flatten();
+    if child == Some(Some(i)) {
+        return; // already open
+    }
+    truncate(idx + 1);
+    if push_level(View::Category(id), Some(i)) {
+        rebuild(idx + 1);
+    }
+    render(idx);
+}
+
+fn activate(idx: usize, i: usize) {
+    match elem(idx, i) {
+        Some(Elem::Sub(id)) => open_sub(idx, i, id),
+        Some(Elem::Tile(id) | Elem::Row(id)) => {
             close();
             app::launch_app(&id);
         }
-        Elem::Manage(id) => {
+        Some(Elem::Manage(id)) => {
             close();
             super::manager::show_category(id);
         }
-        Elem::Label => {}
+        _ => {}
     }
 }
 
@@ -660,11 +709,10 @@ fn pointer_inside() -> bool {
     unsafe {
         let _ = GetCursorPos(&mut pt);
     }
-    let over_flyout = FLYOUT.with(|f| {
-        f.borrow()
-            .as_ref()
-            .is_some_and(|f| pt.x >= f.win.left && pt.x < f.win.right && pt.y >= f.win.top && pt.y < f.win.bottom)
-    });
+    let over_flyout = with(|f| {
+        f.levels.iter().any(|l| pt.x >= l.win.left && pt.x < l.win.right && pt.y >= l.win.top && pt.y < l.win.bottom)
+    })
+    .unwrap_or(false);
     over_flyout || with(|f| f.anchor).is_some_and(strip::pointer_over)
 }
 
@@ -672,21 +720,26 @@ fn mouse_xy(lparam: LPARAM) -> (i32, i32) {
     ((lparam.0 & 0xFFFF) as i16 as i32, ((lparam.0 >> 16) & 0xFFFF) as i16 as i32)
 }
 
+thread_local! {
+    /// Which level the pending hover timer is for.
+    static HOVER_LEVEL: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    match msg {
-        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
-        WM_MOUSEMOVE => {
+    let level = level_of(hwnd);
+    match (msg, level) {
+        (WM_MOUSEACTIVATE, _) => LRESULT(MA_NOACTIVATE as isize),
+        (WM_MOUSEMOVE, Some(idx)) => {
             cancel_close();
             let (x, y) = mouse_xy(lparam);
-            let under = elem_at(x, y);
-            let (changed, start_leave, hover_sub) = with(|f| {
-                let changed = f.hover != under;
-                f.hover = under;
-                let hover_sub = f.look.subcategory_open == SubcategoryOpen::Hover
-                    && under.is_some_and(|i| matches!(f.elems[i].elem, Elem::Sub(_) | Elem::Back));
-                (changed, !std::mem::replace(&mut f.tracking_leave, true), hover_sub)
+            let under = elem_at(idx, x, y);
+            let (changed, start_leave) = with(|f| {
+                let l = &mut f.levels[idx];
+                let changed = l.hover != under;
+                l.hover = under;
+                (changed, !std::mem::replace(&mut l.tracking_leave, true))
             })
-            .unwrap_or((false, false, false));
+            .unwrap_or((false, false));
             if start_leave {
                 let mut tme = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -699,72 +752,67 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 }
             }
             if changed {
-                render();
-                unsafe {
-                    let _ = KillTimer(Some(hwnd), TIMER_SUB);
-                    if hover_sub {
-                        SetTimer(Some(hwnd), TIMER_SUB, SUB_HOVER_MS, None);
+                render(idx);
+                if let Some(b) = base() {
+                    HOVER_LEVEL.with(|h| h.set(idx));
+                    unsafe {
+                        SetTimer(Some(b), TIMER_HOVER, HOVER_DELAY_MS, None);
                     }
                 }
             }
             LRESULT(0)
         }
-        WM_MOUSELEAVE => {
+        (WM_MOUSELEAVE, Some(idx)) => {
             with(|f| {
-                f.tracking_leave = false;
-                f.hover = None;
+                let l = &mut f.levels[idx];
+                l.tracking_leave = false;
+                l.hover = None;
             });
-            render();
-            unsafe {
-                SetTimer(Some(hwnd), TIMER_CLOSE, CLOSE_DELAY_MS, None);
-            }
+            render(idx);
+            start_close_timer();
             LRESULT(0)
         }
-        WM_TIMER => {
+        (WM_TIMER, Some(0)) => {
             unsafe {
                 let _ = KillTimer(Some(hwnd), wparam.0);
             }
             match wparam.0 {
                 TIMER_CLOSE if !pointer_inside() => close(),
-                TIMER_SUB => {
-                    let elem = with(|f| f.hover.map(|i| f.elems[i].elem.clone())).flatten();
-                    if let Some(e @ (Elem::Sub(_) | Elem::Back)) = elem {
-                        activate(e);
-                    }
-                }
+                TIMER_HOVER => follow_hover(HOVER_LEVEL.with(|h| h.get())),
                 _ => {}
             }
             LRESULT(0)
         }
-        WM_LBUTTONUP => {
+        (WM_LBUTTONUP, Some(idx)) => {
             let (x, y) = mouse_xy(lparam);
-            if let Some(elem) = elem_at(x, y).and_then(|i| with(|f| f.elems[i].elem.clone())) {
-                activate(elem);
+            if let Some(i) = elem_at(idx, x, y) {
+                activate(idx, i);
             }
             LRESULT(0)
         }
-        WM_RBUTTONUP => {
+        (WM_RBUTTONUP, Some(idx)) => {
             let (x, y) = mouse_xy(lparam);
-            if let Some(Elem::Tile(id) | Elem::Row(id)) = elem_at(x, y).and_then(|i| with(|f| f.elems[i].elem.clone()))
-            {
+            if let Some(Elem::Tile(id) | Elem::Row(id)) = elem_at(idx, x, y).and_then(|i| elem(idx, i)) {
                 row_menu(&id);
             }
             LRESULT(0)
         }
-        WM_MOUSEWHEEL => {
+        (WM_MOUSEWHEEL, Some(idx)) => {
             let delta = ((wparam.0 >> 16) & 0xFFFF) as i16 as i32;
-            let changed = with(|f| match &mut f.view {
-                View::All { first_row } => {
-                    let step = 3usize;
-                    let max = f.rows.0.saturating_sub(f.rows.1);
-                    let new = if delta > 0 { first_row.saturating_sub(step) } else { (*first_row + step).min(max) };
-                    std::mem::replace(first_row, new) != new
+            let changed = with(|f| {
+                let l = &mut f.levels[idx];
+                match &mut l.view {
+                    View::All { first_row } => {
+                        let max = l.rows.0.saturating_sub(l.rows.1);
+                        let new = if delta > 0 { first_row.saturating_sub(3) } else { (*first_row + 3).min(max) };
+                        std::mem::replace(first_row, new) != new
+                    }
+                    _ => false,
                 }
-                _ => false,
             })
             .unwrap_or(false);
             if changed {
-                rebuild();
+                rebuild(idx);
             }
             LRESULT(0)
         }

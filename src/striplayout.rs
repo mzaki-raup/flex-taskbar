@@ -120,22 +120,6 @@ pub fn grid(count: usize, cols: usize) -> Vec<(usize, usize)> {
     (0..count).map(|i| (i % cols, i / cols)).collect()
 }
 
-/// Wraps buttons of the given widths into rows no wider than `max_w`.
-/// Returns (x, row) per button.
-pub fn wrap(widths: &[i32], gap: i32, max_w: i32) -> Vec<(i32, usize)> {
-    let mut out = Vec::with_capacity(widths.len());
-    let (mut x, mut row) = (0, 0);
-    for &w in widths {
-        if x > 0 && x + w > max_w {
-            x = 0;
-            row += 1;
-        }
-        out.push((x, row));
-        x += w + gap;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,11 +174,8 @@ mod tests {
     }
 
     #[test]
-    fn grid_and_wrap() {
+    fn flyout_grid() {
         assert_eq!(grid(5, 4), vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]);
         assert_eq!(grid(2, 0), vec![(0, 0), (0, 1)]);
-        assert_eq!(wrap(&[100, 100, 100], 4, 250), vec![(0, 0), (104, 0), (0, 1)]);
-        // A button wider than the row still gets a row of its own.
-        assert_eq!(wrap(&[400, 50], 4, 250), vec![(0, 0), (0, 1)]);
     }
 }

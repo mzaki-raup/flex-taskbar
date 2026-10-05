@@ -24,15 +24,6 @@ pub enum DockWidth {
     Fit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SubcategoryOpen {
-    /// Click a subcategory to open it (the original behaviour).
-    Click,
-    /// Rest the pointer on a subcategory to open it.
-    Hover,
-}
-
 /// An sRGB colour with alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba {
@@ -111,7 +102,6 @@ pub struct Appearance {
     pub dock_width: DockWidth,
     /// Icon size on the bar and in flyout tiles, in DIPs.
     pub icon_size: u32,
-    pub subcategory_open: SubcategoryOpen,
     /// App tiles per row in a category flyout.
     pub flyout_columns: u32,
 }
@@ -129,7 +119,6 @@ impl Default for Appearance {
             margin: 0,
             dock_width: DockWidth::Full,
             icon_size: 32,
-            subcategory_open: SubcategoryOpen::Click,
             flyout_columns: 4,
         }
     }

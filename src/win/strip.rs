@@ -409,6 +409,11 @@ pub fn button_rect(hit: Hit) -> Option<RECT> {
     })
 }
 
+/// The strip's DPI (96 if it isn't shown).
+pub fn dpi() -> u32 {
+    with(|s| s.dpi).unwrap_or(96)
+}
+
 pub fn edge_is_top() -> bool {
     with(|s| s.edge == ABE_TOP).unwrap_or(false)
 }
