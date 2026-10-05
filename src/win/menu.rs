@@ -9,10 +9,9 @@ use crate::config::Category;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, DestroyMenu, GetMenuItemCount, HMENU, InsertMenuItemW, MENU_ITEM_STATE, MENUINFO, MENUITEMINFOW,
+    CreatePopupMenu, DestroyMenu, GetMenuItemCount, HMENU, InsertMenuItemW, MENU_ITEM_STATE, MENUITEMINFOW,
     MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
-    MIIM_SUBMENU, MIM_STYLE, MNS_CHECKORBMP, PostMessageW, SetForegroundWindow, SetMenuInfo, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_NULL,
+    MIIM_SUBMENU, PostMessageW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_NULL,
 };
 use windows::core::PWSTR;
 
@@ -34,17 +33,10 @@ struct Builder {
 
 impl Builder {
     fn popup() -> HMENU {
-        unsafe {
-            let m = CreatePopupMenu().unwrap_or_default();
-            let info = MENUINFO {
-                cbSize: std::mem::size_of::<MENUINFO>() as u32,
-                fMask: MIM_STYLE,
-                dwStyle: MNS_CHECKORBMP,
-                ..Default::default()
-            };
-            let _ = SetMenuInfo(m, &info);
-            m
-        }
+        // No MNS_CHECKORBMP: giving icons their own column (the standard Vista+
+        // layout) keeps them from overlapping the text when the check column is
+        // narrower than the icon.
+        unsafe { CreatePopupMenu().unwrap_or_default() }
     }
 
     fn command(&mut self, action: Action) -> u32 {

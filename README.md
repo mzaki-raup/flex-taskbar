@@ -1,7 +1,7 @@
 # FlexTaskbar
 
-A portable application launcher for Windows 10 and 11, for people with a lot of
-apps installed. You file apps into categories nested as deeply as you like, then
+A portable application launcher for Windows 10 (version 1703 or later) and
+Windows 11, for people with a lot of apps installed. You file apps into categories nested as deeply as you like, then
 launch them from a tray menu, a hotkey menu, or a type-to-search window.
 
 FlexTaskbar does **not** replace or change the Windows taskbar. It is a tray
@@ -20,6 +20,20 @@ app that sits next to it.
 > [What has been tested](#what-has-been-tested)), but **it has not yet been run on
 > a real Windows machine**. Treat it as a first release candidate. If something
 > misbehaves, `data\crash.log` next to the exe is the first place to look.
+
+## Screenshots
+
+![Launching an app from the nested category menu, searching by name and by category, and the Manage window](screenshots/flow.gif)
+
+| Nested category menu | Search (empty box: recent apps first) |
+|---|---|
+| ![Category menu three levels deep](screenshots/menu.png) | ![Search window listing apps with their category paths](screenshots/search.png) |
+| **Manage categories** | **Custom app (a browser web app)** |
+| ![Manage window with category tree, apps in the category, and all apps](screenshots/manage.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
+
+These were captured under Wine on Linux, using a demo setup: Wine's built-in
+programs filed into example categories, with custom icons. On Windows you see
+your own apps with their real icons, in Windows' own control styling.
 
 ## Features
 
@@ -64,6 +78,25 @@ settings…* reads `%APPDATA%\FlexTaskbar\categories.json` and
 `applications.json` from the .NET version. It adds those categories and apps
 next to your current ones. Each imported app keeps its exact launch command, and
 custom icons are copied over.
+
+### What changed from the .NET version
+
+The old version tried to be a full taskbar replacement. This one is only a
+launcher, so these features are gone on purpose:
+- the docked bar and screen-space reservation
+- running-window buttons
+- the tray-icon mirror, clock and status indicators
+
+Everything about organising and launching apps carried over:
+- categories, now nested to any depth
+- custom category and app icons
+- custom and web apps
+- search
+- recents
+- hotkeys
+- crash recovery
+
+Your old categories can be imported (see above).
 
 ## Getting started
 
@@ -172,7 +205,9 @@ claimed here.
 
 ## What has been tested
 
-**Automated, on every build.** 22 unit tests cover:
+**Automated, on every build.** CI builds the release exe on a Windows runner
+(MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
+The 22 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -194,6 +229,7 @@ claimed here.
 - `--menu`, `--search`, `--manage` and `--exit` reaching the running copy
 - restart after the launcher process was killed, and the crash-loop stop after
   5 kills
+- the screenshots and the GIF above come from a scripted run of this flow
 
 **Not yet verified**, because Wine can't show it, so expect rough edges here:
 - the Apps folder scan
