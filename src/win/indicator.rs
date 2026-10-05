@@ -17,8 +17,9 @@ thread_local! {
     static IMAGES: RefCell<HashMap<(String, i32), Option<Pixmap>>> = RefCell::new(HashMap::new());
 }
 
-/// The picture for `Indicator::Image` at `size` pixels, loaded once.
-fn image(file: &str, size: i32) -> Option<Pixmap> {
+/// A picture from the data folder's `icons` at `size` pixels, loaded once
+/// (the indicator's picture, the *All* button's).
+pub fn image(file: &str, size: i32) -> Option<Pixmap> {
     let key = (file.to_string(), size);
     if let Some(p) = IMAGES.with(|m| m.borrow().get(&key).cloned()) {
         return p;

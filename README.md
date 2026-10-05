@@ -114,6 +114,14 @@ original FlexTaskbar:
     *Not in a category* covers the rest, and *Show everything* turns it all
     back on. While anything is hidden the title reads e.g. "12 of 15 apps".
   - Both choices are saved (`settings.all_apps`).
+  - **Your own picture instead of the word "All".** In the Appearance window,
+    *All button picture* → *Choose…* takes any PNG, JPEG, BMP, GIF, ICO or
+    SVG file. A copy is kept in the data folder (`data\icons\`), so it
+    travels with the portable settings and the original can be moved or
+    deleted. *Use text* goes back to the word (and deletes the copy), as does
+    *Reset to defaults*.
+
+    ![The bar with a four-squares picture on the All button](screenshots/all-icon.png)
 - **Centre: root categories and pinned apps.** A category carries a
   bright badge in the accent colour on its icon's corner, with an arrow pointing
   where its flyout opens (up from a bottom bar, down from a top bar, sideways
@@ -149,6 +157,23 @@ original FlexTaskbar:
     right-click a category and pick *Manage categories…*).
   - The flyouts close shortly after the pointer leaves all of them and the
     bar button.
+  - **Opening animation.** Every flyout (category, subcategory and *All*)
+    can animate as it opens. Pick one in the Appearance window
+    (*Opening animation*), with its length (60–600 ms, 180 by default):
+    - *Fade* (the default): fades in;
+    - *Slide*: fades in, moving out a little from the bar;
+    - *Scale*: grows out of the button it opens from;
+    - *Drawer*: pulled out of the bar, the far end first;
+    - *Genie*: stretched out of its button like the macOS genie effect, the
+      far end widening first and the end at the bar staying as narrow as the
+      button until last;
+    - *Off*: shown at once.
+
+    Each frame is made from the finished flyout, so it is drawn only once;
+    the frames run only while it opens, and the flyout can be used straight
+    away.
+
+    ![A category flyout opening with the Genie animation (slowed to 600 ms)](screenshots/flyout-genie.gif)
 - **Hover animations**, in the spirit of the macOS Dock, on every icon of the
   bar (categories and pinned apps). Pick one in the Appearance window, or turn
   them off:
@@ -210,11 +235,14 @@ Every change shows on the bar straight away:
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
 | Gap from screen edge | 0–24 | 0 (docked flush) |
 | Bar thickness | 32–96 (its height, or its width on a side edge) | 48 |
+| All button picture | Any PNG, JPEG, BMP, GIF, ICO or SVG instead of the word; copied into `data\icons\`; *Use text* goes back | The word "All" |
 | **Category flyouts** | | |
 | App tiles per row | 1–12 (top and bottom bars; on a side bar a flyout is one column) | 4 |
 | Border colour | Any colour | Same as the bar |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 | 6 |
+| Opening animation | Off, Fade, Slide, Scale, Drawer, Genie (like macOS) | Fade |
+| Animation length | 60–600 ms | 180 ms |
 
 The theme also applies to the menus and the search window. *Reset to defaults*
 brings back the original look.
@@ -438,16 +466,17 @@ with Backspace and click *Apply hotkeys*.
 The launcher is built to cost almost nothing while idle:
 - It waits on Windows messages and never polls. The bar's only timers are the
   short hover delay, started when the pointer enters a category icon, the
-  flyout's close delay, and the hover animation's frame timer, which runs
-  only while an icon is moving. The
+  flyout's close delay, and the animations' frame timers, which run only
+  while an icon is moving or a flyout is opening. The
   supervisor wakes every 5 seconds to check that the launcher is still
   responding.
 - The app scan and icon loading happen on background threads. Icons come from
   Windows' own icon cache and are kept in memory after the first load.
 - The bar and its flyouts are drawn in software (anti-aliased, with
   tiny-skia) only when something changes, and handed to Windows as
-  per-pixel-alpha layered windows. Apart from the hover animation there's no
-  animation, and no GPU work.
+  per-pixel-alpha layered windows. Apart from the hover and opening
+  animations nothing moves, and there's no GPU work. An opening animation's
+  frames are stretched copies of the finished flyout, not redrawn.
   Menus are native Windows popup menus.
 - The search list is virtual, so it only creates rows for what's on screen.
 - The Manage window is fully destroyed when you close it.
@@ -460,7 +489,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 60 unit tests cover:
+The 66 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -475,6 +504,10 @@ The 60 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- flyout opening animations: every style ending on the finished flyout,
+  Scale growing out of its button, Drawer showing the far end first, Genie
+  narrowing towards the button with no gaps between its slices, Fade and
+  Slide fading in
 - hover animations: the Dock-style magnification falling off with distance,
   smoothing that settles the same whatever the frame rate, the bounce and
   pulse ending, and each style's effect
@@ -511,6 +544,14 @@ The 60 unit tests cover:
     and when the chosen item lies outside it
   - the hover animations: Magnify following the pointer along the bar,
     Lift, Bounce and Pulse
+  - the flyout opening animations: Genie from bottom, top and right bars,
+    Scale, Drawer and Slide frame by frame, choosing one in the Appearance
+    window. Wine without a compositor shows only fully opaque or clear
+    pixels, so Fade and Slide look like darkening there instead of
+    see-through.
+  - a picture on the *All* button: uploading it from the Appearance window
+    (copied into `data\icons\` and saved), on a bottom and a side bar, and
+    *Use text* bringing the word back and deleting the copy
   - each category indicator style, uploading a PNG as the indicator (copied
     into `data\icons\` and shown on the bar), and removing it
   - apps from winget, Scoop, Chocolatey and npm folders listed with their
@@ -594,6 +635,7 @@ src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon ca
 src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
+src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/pkgsources.rs    package managers' folders and console programs   (tested)
 src/allview.rs       sorting and filtering the All list               (tested)

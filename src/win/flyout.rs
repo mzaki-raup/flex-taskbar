@@ -18,7 +18,8 @@ use super::app;
 use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
-use crate::appearance::{Appearance, Colors};
+use crate::appearance::{Appearance, Colors, FlyoutAnim};
+use crate::flyanim;
 use crate::striplayout::{self, Edge, Hit};
 use resvg::tiny_skia::Pixmap;
 use std::cell::RefCell;
@@ -43,6 +44,9 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 /// Timers, all on the level-0 window.
 const TIMER_CLOSE: usize = 1;
 const TIMER_HOVER: usize = 2;
+/// Frames of the opening animation.
+const TIMER_ANIM: usize = 3;
+const ANIM_FRAME_MS: u32 = 10;
 const CLOSE_DELAY_MS: u32 = 300;
 /// After a menu from a flyout closes, the pointer is often outside the
 /// flyout (where the menu was): give it this long to come back.
@@ -111,6 +115,13 @@ struct Level {
     tracking_leave: bool,
     /// Total rows in the All list, and how many fit.
     rows: (usize, usize),
+    /// The finished drawing, which the opening animation is made from.
+    frame: Option<Pixmap>,
+    /// Whether the window has been placed on screen yet.
+    shown: bool,
+    /// The opening animation under way: when it began, and where the
+    /// button it opens from lies across the flyout (window pixels).
+    anim: Option<(std::time::Instant, (f32, f32))>,
 }
 
 struct Flyouts {
@@ -240,6 +251,9 @@ fn push_level(view: View, source: Option<usize>) -> bool {
             win: RECT::default(),
             tracking_leave: false,
             rows: (0, 0),
+            frame: None,
+            shown: false,
+            anim: None,
         })
     });
     true
@@ -261,6 +275,7 @@ pub fn close() {
         unsafe {
             let _ = KillTimer(Some(base), TIMER_CLOSE);
             let _ = KillTimer(Some(base), TIMER_HOVER);
+            let _ = KillTimer(Some(base), TIMER_ANIM);
         }
     }
     truncate(0);
@@ -557,6 +572,27 @@ fn rebuild(idx: usize) {
         with(|f| f.icons.extend(loaded));
     }
 
+    let animated = look.flyout_animation != FlyoutAnim::Off;
+    let starts = with(|f| {
+        let l = &mut f.levels[idx];
+        let first = !std::mem::replace(&mut l.shown, true);
+        if first && animated {
+            // Where the button lies across the flyout (along the bar).
+            let across = if strip::edge().vertical() {
+                ((anchor_rc.top - win.top) as f32, (anchor_rc.bottom - win.top) as f32)
+            } else {
+                ((anchor_rc.left - win.left) as f32, (anchor_rc.right - win.left) as f32)
+            };
+            l.anim = Some((std::time::Instant::now(), across));
+        }
+        first && animated
+    })
+    .unwrap_or(false);
+    if starts && let Some(b) = base() {
+        unsafe {
+            SetTimer(Some(b), TIMER_ANIM, ANIM_FRAME_MS, None);
+        }
+    }
     let hwnd = with(|f| {
         let l = &mut f.levels[idx];
         l.elems = elems;
@@ -582,14 +618,14 @@ fn rebuild(idx: usize) {
 // ---------------------------------------------------------------- drawing
 
 fn render(idx: usize) {
-    FLYOUT.with(|cell| {
+    let drawn = FLYOUT.with(|cell| {
         let b = cell.borrow();
-        let Some(f) = b.as_ref() else { return };
-        let Some(l) = f.levels.get(idx) else { return };
+        let f = b.as_ref()?;
+        let l = f.levels.get(idx)?;
         // The tile whose flyout is open above this one stays highlighted.
         let open_child = f.levels.get(idx + 1).and_then(|c| c.source);
         let (w, h) = (ui::rect_w(&l.win), ui::rect_h(&l.win));
-        let Some(mut cv) = Canvas::new(w, h) else { return };
+        let mut cv = Canvas::new(w, h)?;
         let d = f.dpi;
         let s = |v: i32| scale(v, d);
         let c = f.colors;
@@ -709,8 +745,88 @@ fn render(idx: usize) {
             let y = track_top + (track_h - thumb_h) * first_row as f32 / (total - visible) as f32;
             cv.fill_round_rect(w as f32 - s(6) as f32, y, s(3) as f32, thumb_h, s(2) as f32, c.subtle);
         }
-        cv.present(l.hwnd, l.win.left, l.win.top);
+        Some(cv.pix)
     });
+    if let Some(pix) = drawn {
+        with(|f| f.levels.get_mut(idx).map(|l| l.frame = Some(pix)));
+        present(idx);
+    }
+}
+
+/// Puts level `idx` on screen: its finished drawing, or the opening
+/// animation's current frame made from it. Returns whether it is still
+/// animating.
+fn present(idx: usize) -> bool {
+    FLYOUT.with(|cell| {
+        let mut b = cell.borrow_mut();
+        let Some(f) = b.as_mut() else { return false };
+        let (style, ms) = (f.look.flyout_animation, f.look.flyout_animation_ms.clamp(60, 600));
+        let Some(l) = f.levels.get_mut(idx) else { return false };
+        let Some(pix) = &l.frame else { return false };
+        let t = l.anim.map(|(start, _)| start.elapsed().as_secs_f32() * 1000.0 / ms as f32).unwrap_or(1.0);
+        let anim = l.anim.filter(|_| t < 1.0);
+        l.anim = anim;
+        let cv = match anim {
+            Some((_, across)) => animation_frame(pix, style, t, across),
+            None => Canvas { pix: pix.clone() },
+        };
+        cv.present(l.hwnd, l.win.left, l.win.top);
+        anim.is_some()
+    })
+}
+
+/// One frame of the opening animation, drawn from the finished flyout.
+fn animation_frame(pix: &Pixmap, style: FlyoutAnim, t: f32, across: (f32, f32)) -> Canvas {
+    use resvg::tiny_skia::{FilterQuality, Paint, Pattern, Rect, SpreadMode, Transform};
+    let (w, h) = (pix.width() as f32, pix.height() as f32);
+    let (dx, dy) = strip::edge().opening();
+    let vertical = dy != 0.0; // opens up or down: "along" is y
+    let (len, width) = if vertical { (h, w) } else { (w, h) };
+    let frame = flyanim::frame(style, t, len, width, across);
+    let mut out = Canvas { pix: Pixmap::new(pix.width(), pix.height()).unwrap_or_else(|| pix.clone()) };
+    // "Along" counts from the bar's side: flip it when opening up or left.
+    let flip = if vertical { dy < 0.0 } else { dx < 0.0 };
+    let span = |(a, b): (f32, f32)| if flip { (len - b, len - a) } else { (a, b) };
+    for band in &frame.bands {
+        let (s0, s1) = span(band.src);
+        let (d0, d1) = span(band.along);
+        let (c0, c1) = band.across;
+        if s1 - s0 < 0.01 || d1 - d0 < 0.01 || c1 - c0 < 0.01 {
+            continue;
+        }
+        // Source slice (window pixels) → destination rectangle.
+        let ka = (d1 - d0) / (s1 - s0);
+        let kc = (c1 - c0) / width;
+        let (rect, t) = if vertical {
+            (Rect::from_ltrb(c0, d0, c1, d1), Transform::from_row(kc, 0.0, 0.0, ka, c0, d0 - s0 * ka))
+        } else {
+            (Rect::from_ltrb(d0, c0, d1, c1), Transform::from_row(ka, 0.0, 0.0, kc, d0 - s0 * ka, c0))
+        };
+        let Some(rect) = rect else { continue };
+        let paint = Paint {
+            shader: Pattern::new(pix.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, frame.opacity, t),
+            anti_alias: false,
+            ..Default::default()
+        };
+        out.pix.fill_rect(rect, &paint, Transform::identity(), None);
+    }
+    out
+}
+
+/// Advances every opening animation by a frame.
+fn animate() {
+    let n = with(|f| f.levels.len()).unwrap_or(0);
+    let mut running = false;
+    for i in 0..n {
+        if with(|f| f.levels.get(i).is_some_and(|l| l.anim.is_some())) == Some(true) {
+            running |= present(i);
+        }
+    }
+    if !running && let Some(b) = base() {
+        unsafe {
+            let _ = KillTimer(Some(b), TIMER_ANIM);
+        }
+    }
 }
 
 // ---------------------------------------------------------------- input
@@ -994,6 +1110,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             });
             render(idx);
             start_close_timer();
+            LRESULT(0)
+        }
+        (WM_TIMER, Some(0)) if wparam.0 == TIMER_ANIM => {
+            animate();
             LRESULT(0)
         }
         (WM_TIMER, Some(0)) => {

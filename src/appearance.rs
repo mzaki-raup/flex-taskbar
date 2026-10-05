@@ -39,6 +39,23 @@ pub enum HoverAnim {
     Pulse,
 }
 
+/// How a flyout appears when it opens (see `flyanim`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FlyoutAnim {
+    /// Shown at once.
+    Off,
+    Fade,
+    /// Fades in, moving out a little from the bar.
+    Slide,
+    /// Grows out of its button.
+    Scale,
+    /// Pulled out of the bar, far end first.
+    Drawer,
+    /// Stretched out of its button, like macOS's genie effect.
+    Genie,
+}
+
 /// The mark on a category (and subcategory) icon that says "this opens a
 /// flyout".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,6 +172,13 @@ pub struct Appearance {
     pub flyout_border_width: u32,
     /// Border colour of the flyouts. `None`: the same as the bar's border.
     pub flyout_border: Option<Rgba>,
+    /// How flyouts appear.
+    pub flyout_animation: FlyoutAnim,
+    /// How long that takes, in milliseconds.
+    pub flyout_animation_ms: u32,
+    /// File name (in the data folder's `icons`) of a picture shown on the
+    /// *All* button instead of the word. `None`: the word "All".
+    pub all_icon: Option<String>,
 }
 
 impl Default for Appearance {
@@ -178,6 +202,9 @@ impl Default for Appearance {
             flyout_corner_radius: 6,
             flyout_border_width: 1,
             flyout_border: None,
+            flyout_animation: FlyoutAnim::Fade,
+            flyout_animation_ms: 180,
+            all_icon: None,
         }
     }
 }
@@ -252,6 +279,7 @@ impl Appearance {
             flyout_corner_radius: self.flyout_corner_radius.min(24),
             flyout_border_width: self.flyout_border_width.min(6),
             indicator_size: self.indicator_size.clamp(25, 80),
+            flyout_animation_ms: self.flyout_animation_ms.clamp(60, 600),
             // A picture that was never chosen falls back to the badge.
             indicator: if self.indicator == Indicator::Image && self.indicator_image.is_none() {
                 Indicator::Badge
@@ -348,6 +376,19 @@ mod tests {
         assert_eq!(a.clamped().indicator, Indicator::Image);
         let json = serde_json::to_string(&a).unwrap();
         assert!(json.contains("\"indicator\":\"image\"") && json.contains("\"indicator_image\":\"i.png\""));
+    }
+
+    #[test]
+    fn flyout_animation_and_all_icon() {
+        let a = Appearance::default();
+        assert_eq!((a.flyout_animation, a.flyout_animation_ms, a.all_icon.as_deref()), (FlyoutAnim::Fade, 180, None));
+        assert_eq!(Appearance { flyout_animation_ms: 5000, ..Default::default() }.clamped().flyout_animation_ms, 600);
+        let a = Appearance { flyout_animation: FlyoutAnim::Genie, all_icon: Some("all.png".into()), ..a };
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"flyout_animation\":\"genie\"") && json.contains("\"all_icon\":\"all.png\""));
+        // Older files without these keys get the defaults.
+        let old: Appearance = serde_json::from_str("{\"opacity\":50}").unwrap();
+        assert_eq!((old.flyout_animation, old.all_icon), (FlyoutAnim::Fade, None));
     }
 
     #[test]

@@ -5,6 +5,7 @@ mod anim;
 mod appearance;
 mod appkind;
 mod config;
+mod flyanim;
 mod migrate;
 mod pkgsources;
 mod search;

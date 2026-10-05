@@ -6,7 +6,7 @@ use super::app;
 use super::canvas;
 use super::ui::{self, scale, wide};
 use super::{searchwin, strip, theme};
-use crate::appearance::{Appearance, DockWidth, HoverAnim, Indicator, Rgba, ThemeMode};
+use crate::appearance::{Appearance, DockWidth, FlyoutAnim, HoverAnim, Indicator, Rgba, ThemeMode};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
@@ -26,8 +26,11 @@ const DOCK: u16 = 11;
 const POSITION: u16 = 12;
 const ANIMATION: u16 = 14;
 const INDICATOR: u16 = 15;
+const FLYOUT_ANIMATION: u16 = 16;
 // The indicator picture's button, and its Remove button (+100).
 const INDICATOR_IMAGE: u16 = 24;
+// The All button's picture, and its "Use text" button (+100).
+const ALL_ICON: u16 = 25;
 // Colour buttons, and their "Default" buttons (+100).
 const ACCENT: u16 = 20;
 const BACKGROUND: u16 = 21;
@@ -45,6 +48,7 @@ const COLUMNS: u16 = 36;
 const FLYOUT_RADIUS: u16 = 37;
 const FLYOUT_BORDER_WIDTH: u16 = 38;
 const INDICATOR_SIZE: u16 = 39;
+const FLYOUT_ANIMATION_MS: u16 = 40;
 const VALUE_OFFSET: u16 = 200;
 const RESET: u16 = 50;
 const CLOSE: u16 = 51;
@@ -83,7 +87,7 @@ fn hwnd() -> Option<HWND> {
 }
 
 /// (id, label, min, max) of every slider.
-const SLIDERS: [(u16, &str, u32, u32); 10] = [
+const SLIDERS: [(u16, &str, u32, u32); 11] = [
     (OPACITY, "Background opacity (%)", 10, 100),
     (BORDER_WIDTH, "Border width", 0, 6),
     (RADIUS, "Corner radius", 0, 24),
@@ -94,6 +98,7 @@ const SLIDERS: [(u16, &str, u32, u32); 10] = [
     (FLYOUT_RADIUS, "Corner radius", 0, 24),
     (FLYOUT_BORDER_WIDTH, "Border width", 0, 6),
     (INDICATOR_SIZE, "Size (% of the icon)", 25, 80),
+    (FLYOUT_ANIMATION_MS, "Animation length (ms)", 60, 600),
 ];
 
 const COLOURS: [(u16, &str); 4] = [
@@ -107,8 +112,8 @@ const COLOURS: [(u16, &str); 4] = [
 enum Row {
     /// Start the next column.
     Column,
-    /// A picture: a button showing the file, and Remove.
-    Picture(u16, &'static str),
+    /// A picture: a button to choose the file, and one to remove it.
+    Picture(u16, &'static str, &'static str),
     Heading(&'static str),
     Combo(u16, &'static str, &'static [&'static str]),
     Colour(u16),
@@ -116,7 +121,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 26] = [
+const ROWS: [Row; 29] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -129,6 +134,12 @@ const ROWS: [Row; 26] = [
     Row::Colour(FLYOUT_BORDER),
     Row::Slider(FLYOUT_BORDER_WIDTH),
     Row::Slider(FLYOUT_RADIUS),
+    Row::Combo(
+        FLYOUT_ANIMATION,
+        "Opening animation",
+        &["Off", "Fade", "Slide", "Scale", "Drawer", "Genie (like macOS)"],
+    ),
+    Row::Slider(FLYOUT_ANIMATION_MS),
     Row::Column,
     Row::Heading("Bar"),
     Row::Combo(
@@ -142,13 +153,14 @@ const ROWS: [Row; 26] = [
     Row::Slider(RADIUS),
     Row::Slider(MARGIN),
     Row::Slider(BAR_HEIGHT),
+    Row::Picture(ALL_ICON, "All button picture", "Use text"),
     Row::Heading("Category indicator"),
     Row::Combo(
         INDICATOR,
         "Style",
         &["Badge with arrow", "Arrow", "Dot", "Folded corner", "Underline", "Your own picture", "None"],
     ),
-    Row::Picture(INDICATOR_IMAGE, "Picture (PNG, JPEG…)"),
+    Row::Picture(INDICATOR_IMAGE, "Picture (PNG, JPEG…)", "Remove"),
     Row::Slider(INDICATOR_SIZE),
     Row::Heading(""),
 ];
@@ -279,12 +291,12 @@ fn create() {
                     place(d, (x0 + ctl_x) + s(166), ctl_w - s(166), ctl_h, y);
                     controls.insert(id + DEFAULT_OFFSET, d);
                 }
-                Row::Picture(id, text) => {
+                Row::Picture(id, text, remove) => {
                     place(label(&mut controls, text), x0 + m, label_w, s(18), y);
                     let h = button("Choose…", id);
                     place(h, x0 + ctl_x, s(160), ctl_h, y);
                     controls.insert(id, h);
-                    let d = button("Remove", id + DEFAULT_OFFSET);
+                    let d = button(remove, id + DEFAULT_OFFSET);
                     place(d, x0 + ctl_x + s(166), ctl_w - s(166), ctl_h, y);
                     controls.insert(id + DEFAULT_OFFSET, d);
                 }
@@ -374,6 +386,14 @@ fn load() {
     sel(DOCK, a.dock_width as usize);
     sel(ANIMATION, a.hover_animation as usize);
     sel(INDICATOR, a.indicator as usize);
+    sel(FLYOUT_ANIMATION, a.flyout_animation as usize);
+    ui::set_text(ctl(ALL_ICON), a.all_icon.as_deref().map(|_| "Change…").unwrap_or("Choose…"));
+    unsafe {
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
+            ctl(ALL_ICON + DEFAULT_OFFSET),
+            a.all_icon.is_some(),
+        );
+    }
     ui::set_text(ctl(INDICATOR_IMAGE), a.indicator_image.as_deref().map(|_| "Change…").unwrap_or("Choose…"));
     unsafe {
         let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
@@ -393,6 +413,7 @@ fn load() {
         (FLYOUT_RADIUS, a.flyout_corner_radius),
         (FLYOUT_BORDER_WIDTH, a.flyout_border_width),
         (INDICATOR_SIZE, a.indicator_size),
+        (FLYOUT_ANIMATION_MS, a.flyout_animation_ms),
     ] {
         unsafe {
             SendMessageW(ctl(id), TBM_SETPOS, Some(WPARAM(1)), Some(LPARAM(value as isize)));
@@ -486,29 +507,57 @@ fn pick_colour(owner: HWND, id: u16) {
 /// Lets the user pick a picture for the category indicator: it is copied into
 /// the data folder's `icons`, and the indicator switches to it.
 fn choose_indicator_image(owner: HWND) {
-    let Some(path) = super::manager::pick_image(owner) else { return };
-    let paths = super::paths::get();
-    let name = match super::icons::import_file(&path, &paths.icons) {
-        Ok(name) => name,
-        Err(e) => {
-            ui::error(Some(owner), &e);
-            return;
-        }
-    };
-    if canvas::icon_pixmap(&super::icons::Source::Image(paths.icons.join(&name)), 32).is_none() {
-        let _ = std::fs::remove_file(paths.icons.join(&name));
-        ui::warn(Some(owner), "That picture couldn't be read. Try a PNG, JPEG, BMP, GIF, ICO or SVG file.");
-        return;
-    }
+    let Some(name) = import_picture(owner) else { return };
     let old = app::with(|s| s.cfg.settings.appearance.indicator_image.clone());
     change(|a, _| {
         a.indicator_image = Some(name);
         a.indicator = Indicator::Image;
     });
+    forget_picture(old);
+}
+
+/// Lets the user pick a picture for the *All* button, shown instead of the
+/// word; copied into the data folder's `icons` like the indicator's.
+fn choose_all_icon(owner: HWND) {
+    let Some(name) = import_picture(owner) else { return };
+    let old = app::with(|s| s.cfg.settings.appearance.all_icon.clone());
+    change(|a, _| a.all_icon = Some(name));
+    forget_picture(old);
+}
+
+/// Deletes a picture that is no longer used (unless still in use elsewhere)
+/// and drops loaded copies.
+fn forget_picture(old: Option<String>) {
     if let Some(old) = old {
-        let _ = std::fs::remove_file(paths.icons.join(old));
+        let in_use = app::with(|s| {
+            let a = &s.cfg.settings.appearance;
+            a.indicator_image.as_deref() == Some(old.as_str()) || a.all_icon.as_deref() == Some(old.as_str())
+        });
+        if !in_use {
+            let _ = std::fs::remove_file(super::paths::get().icons.join(old));
+        }
     }
     super::indicator::forget_images();
+}
+
+/// Asks for a picture and copies it into the data folder's `icons`. Returns
+/// its file name there.
+fn import_picture(owner: HWND) -> Option<String> {
+    let path = super::manager::pick_image(owner)?;
+    let paths = super::paths::get();
+    let name = match super::icons::import_file(&path, &paths.icons) {
+        Ok(name) => name,
+        Err(e) => {
+            ui::error(Some(owner), &e);
+            return None;
+        }
+    };
+    if canvas::icon_pixmap(&super::icons::Source::Image(paths.icons.join(&name)), 32).is_none() {
+        let _ = std::fs::remove_file(paths.icons.join(&name));
+        ui::warn(Some(owner), "That picture couldn't be read. Try a PNG, JPEG, BMP, GIF, ICO or SVG file.");
+        return None;
+    }
+    Some(name)
 }
 
 fn save_now() {
@@ -558,11 +607,31 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                             a.indicator = Indicator::Badge;
                         }
                     });
-                    if let Some(old) = old {
-                        let _ = std::fs::remove_file(super::paths::get().icons.join(old));
-                    }
-                    super::indicator::forget_images();
+                    forget_picture(old);
                     load();
+                }
+                (ALL_ICON, BN_CLICKED) => {
+                    choose_all_icon(hwnd);
+                    load();
+                }
+                (i, BN_CLICKED) if i == ALL_ICON + DEFAULT_OFFSET => {
+                    // Back to the word "All".
+                    let old = app::with(|s| s.cfg.settings.appearance.all_icon.clone());
+                    change(|a, _| a.all_icon = None);
+                    forget_picture(old);
+                    load();
+                }
+                (FLYOUT_ANIMATION, CBN_SELCHANGE) => {
+                    let i = combo(id);
+                    let kind = [
+                        FlyoutAnim::Off,
+                        FlyoutAnim::Fade,
+                        FlyoutAnim::Slide,
+                        FlyoutAnim::Scale,
+                        FlyoutAnim::Drawer,
+                        FlyoutAnim::Genie,
+                    ][i.min(5)];
+                    change(|a, _| a.flyout_animation = kind);
                 }
                 (ANIMATION, CBN_SELCHANGE) => {
                     let i = combo(id);
@@ -597,12 +666,15 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     load();
                 }
                 (RESET, BN_CLICKED) => {
+                    let all_icon = app::with(|s| s.cfg.settings.appearance.all_icon.clone());
                     change(|a, h| {
-                        // The picture stays chosen (just not shown), so it isn't lost.
+                        // The indicator's picture stays chosen (just not shown), so
+                        // it isn't lost. The All button goes back to its word.
                         let picture = a.indicator_image.take();
                         *a = Appearance { indicator_image: picture, ..Appearance::default() };
                         *h = crate::config::Settings::default().strip_height;
                     });
+                    forget_picture(all_icon);
                     load();
                 }
                 (CLOSE, BN_CLICKED) => unsafe {
@@ -628,6 +700,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     INDICATOR_SIZE => a.indicator_size = v,
                     FLYOUT_RADIUS => a.flyout_corner_radius = v,
                     FLYOUT_BORDER_WIDTH => a.flyout_border_width = v,
+                    FLYOUT_ANIMATION_MS => a.flyout_animation_ms = v,
                     _ => a.flyout_columns = v,
                 });
             }

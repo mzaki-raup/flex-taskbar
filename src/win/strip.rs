@@ -348,7 +348,11 @@ fn metrics(s: &Strip) -> Metrics {
         (scale(32, d), scale(36, d))
     } else {
         (
-            canvas::measure("All", s.font).0 + scale(20, d),
+            if s.look.all_icon.is_some() {
+                scale(s.look.icon_size as i32 + 14, d)
+            } else {
+                canvas::measure("All", s.font).0 + scale(20, d)
+            },
             scale(16 + 6, d) + canvas::measure("Link", s.font).0 + scale(20, d),
         )
     };
@@ -843,7 +847,16 @@ fn render() {
         // Start: All.
         let all = s.layout.left[LEFT_ALL];
         draw_state(&mut cv, Hit::Left(LEFT_ALL), all);
-        cv.text("All", slot_rect(s, all), s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        let all_rc = slot_rect(s, all);
+        // The user's picture instead of the word, if one was chosen.
+        let all_size = scale(s.look.icon_size as i32, d).min(ui::rect_w(&all_rc)).min(ui::rect_h(&all_rc));
+        match s.look.all_icon.as_deref().and_then(|f| super::indicator::image(f, all_size)) {
+            Some(img) => {
+                let (cx, cy) = centre(&all_rc);
+                cv.image(&img, cx as i32 - all_size / 2, cy as i32 - all_size / 2, all_size, 1.0);
+            }
+            None => cv.text("All", all_rc, s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE),
+        }
 
         // Centre: categories and pinned apps.
         let size = scale(s.look.icon_size as i32, d);
