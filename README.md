@@ -4,7 +4,8 @@ A portable application launcher for Windows 10 (version 1703 or later) and
 Windows 11, for people with a lot of apps installed. You file apps into
 categories nested as deeply as you like. Your categories and pinned apps then
 sit as a strip of icons docked against the Windows taskbar. Rest the pointer on
-a category and its contents pop up, with subcategories cascading on hover. The
+a category and its apps pop up as a row of tiles, with subcategories cascading
+on hover. The
 same categories are also available from the tray icon, a hotkey menu, and a
 type-to-search window.
 
@@ -33,9 +34,11 @@ next to it (just above, or below a top taskbar), and can be turned off.
 
 ![Icon strip with category and app icons](screenshots/strip.png)
 
-| Hover a category: subcategories cascade | FlexTaskbar button / tray: the full menu |
+| Hover a category: apps as tiles | Subcategories cascade, also as tiles |
 |---|---|
-| ![Development › Editors › Notepad opened from the strip](screenshots/strip-menu.png) | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) |
+| ![System category open as a row of app tiles](screenshots/tiles.png) | ![Development open: app tiles, a column of subcategories, and Editors cascaded](screenshots/strip-menu.png) |
+| **FlexTaskbar button / tray: the full menu** | |
+| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | |
 | **Search (empty box: recent apps first)** | **Custom app (a browser web app)** |
 | ![Search window listing apps with their category paths](screenshots/search.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
 
@@ -48,15 +51,22 @@ your own apps with their real icons, in Windows' own control styling.
 ## Features
 
 **Nested categories.** Categories can contain subcategories to any depth, plus
-apps. The same app can be filed in several categories. In every menu a category
-is a submenu, with its subcategories first and then its apps.
+apps. The same app can be filed in several categories. In the tray and hotkey
+menu a category is a submenu listing its subcategories, then its apps. From the
+strip, a category opens as app tiles (below).
 
 **The icon strip** is a bar docked against the Windows taskbar on the primary
 monitor:
 - **Layout.** The FlexTaskbar button is on the left. Your root categories and
   pinned apps are centred, like the Windows 11 taskbar.
 - **Categories open on hover.** Resting the pointer on a category for a moment
-  opens its contents upward. Subcategories open as you hover them, at any depth.
+  opens its contents upward:
+  - Apps appear as **tiles**, each a large icon with the name underneath, in a
+    horizontal row. Long categories wrap into rows of 8.
+  - The category's subcategories are listed in a column at the right end.
+    Hovering one opens it the same way, at any depth. The column sits at the
+    right edge so each cascade opens beside the popup, not over its tiles.
+  - Arrow keys, Enter and Esc work as in any menu.
 - **Slide between categories.** While a category is open, moving along the
   strip switches to the next one, like a menu bar.
 - **Pinned apps** launch with a click. You can pin an app from the Manage
@@ -110,7 +120,8 @@ custom icons are copied over.
 ### What changed from the .NET version
 
 The docked bar is back as the icon strip, with the same idea as before:
-category and app icons in a row, with category contents popping up from them.
+category and app icons in a row, with category contents popping up from them
+as horizontal app tiles.
 It now sits beside the Windows taskbar instead of trying to replace it, so these
 old taskbar features are gone on purpose:
 - running-window buttons
@@ -224,6 +235,8 @@ These can be edited in `data\config.json` while FlexTaskbar is not running:
 | `group_all_apps_above` | `40` | Above this many apps, *All apps* is split into A–Z submenus |
 | `strip_height` | `48` | Strip height in DIPs (48 matches the Windows 11 taskbar; 24–96) |
 | `hover_delay_ms` | `250` | How long the pointer rests on a category before it opens |
+| `tile_menus` | `true` | Strip category popups show apps as tiles; `false` gives a plain list |
+| `tile_columns` | `8` | Tiles per row before a category popup wraps |
 
 Showing the strip and reserving its space are checkboxes in the Manage window.
 
@@ -252,19 +265,22 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 27 unit tests cover:
+The 29 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
 - category tree operations at any depth: add, remove, reorder, indent/outdent,
   app membership
 - search ranking
-- strip layout (centring, overflow, hit testing) and pinning
+- strip layout (centring, overflow, hit testing), tile grid ordering, and
+  pinning
 - the old-settings importer, including cycles in old data and bad JSON
 
 **Manually, under Wine 9 on Linux** (not real Windows):
 - the icon strip:
-  - hover-to-open categories with cascading subcategories
+  - hover-to-open categories as app tiles, with subcategories cascading from
+    the folder column
+  - launching from a tile
   - sliding between open categories
   - launching a pinned app
   - the FlexTaskbar button
@@ -290,7 +306,7 @@ The 27 unit tests cover:
 - the Apps folder scan
 - shell app icons
 - the global hotkeys
-- dark mode
+- dark mode, including the colours of the tile popups
 - high-DPI scaling
 - *Start with Windows*
 - hang detection
@@ -333,6 +349,7 @@ src/win/supervisor.rs  crash/hang restart
 src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon cache
 src/win/menu.rs      nested popup menus (full menu, one category)
 src/win/strip.rs     the icon strip: AppBar docking, painting, hover menus
+src/win/tiles.rs     owner-drawn app tiles in category popups
 src/win/searchwin.rs search window
 src/win/manager.rs   Manage categories window
 src/win/appdialog.rs custom-app dialog

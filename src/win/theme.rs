@@ -30,6 +30,27 @@ pub fn is_dark() -> bool {
     ok.is_ok() && value == 0
 }
 
+thread_local! {
+    static DARK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// [`is_dark`], read once and then cached until [`forget_cached`].
+pub fn is_dark_cached() -> bool {
+    DARK.with(|d| {
+        if let Some(v) = d.get() {
+            return v;
+        }
+        let v = is_dark();
+        d.set(Some(v));
+        v
+    })
+}
+
+/// The system theme changed.
+pub fn forget_cached() {
+    DARK.with(|d| d.set(None));
+}
+
 /// Makes popup menus follow the system theme. Call once at startup and again
 /// when the theme changes.
 pub fn allow_dark_menus() {

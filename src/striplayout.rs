@@ -43,9 +43,51 @@ pub fn hit(layout: &Layout, x: i32) -> Option<Option<usize>> {
     layout.items.iter().position(|s| s.contains(x)).map(Some)
 }
 
+/// Order in which `count` tiles go into a native menu so they read left to
+/// right, top to bottom, in rows of at most `max_cols`.
+///
+/// Native menus fill columns top to bottom and start a new column at an item
+/// marked MFT_MENUBREAK, so the grid is fed column by column. Each entry is
+/// (tile index, starts a new column).
+pub fn tile_order(count: usize, max_cols: usize) -> Vec<(usize, bool)> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let cols = count.min(max_cols.max(1));
+    let rows = count.div_ceil(cols);
+    let mut out = Vec::with_capacity(count);
+    for c in 0..cols {
+        for r in 0..rows {
+            let idx = r * cols + c;
+            if idx < count {
+                out.push((idx, r == 0 && c > 0));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiles_in_one_row_when_they_fit() {
+        assert_eq!(tile_order(3, 8), vec![(0, false), (1, true), (2, true)]);
+        assert!(tile_order(0, 8).is_empty());
+    }
+
+    #[test]
+    fn tiles_wrap_row_major() {
+        // 5 tiles, 3 per row:  0 1 2 / 3 4
+        assert_eq!(tile_order(5, 3), vec![(0, false), (3, false), (1, true), (4, false), (2, true)]);
+        let order = tile_order(17, 8);
+        assert_eq!(order.len(), 17);
+        let mut idx: Vec<usize> = order.iter().map(|o| o.0).collect();
+        idx.sort();
+        assert_eq!(idx, (0..17).collect::<Vec<_>>());
+        assert_eq!(order.iter().filter(|o| o.1).count(), 7); // 8 columns
+    }
 
     #[test]
     fn items_are_centered() {

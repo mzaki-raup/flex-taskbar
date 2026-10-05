@@ -10,7 +10,7 @@ use super::catalog::{self, Catalog, ShellApp, Source as AppSource};
 use super::icons::{self, Source as IconSource};
 use super::launch::{self, Target};
 use super::ui::{self, wide};
-use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, strip, supervisor, theme};
+use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, strip, supervisor, theme, tiles};
 use crate::config::{Config, Hotkey, LoadOutcome, Store};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,6 +18,7 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM
 use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT};
 use windows::Win32::UI::Controls::{
     ICC_BAR_CLASSES, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, ICC_STANDARD_CLASSES, ICC_TREEVIEW_CLASSES,
     INITCOMMONCONTROLSEX, InitCommonControlsEx,
@@ -35,6 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SM_CXSMICON, SW_SHOWNORMAL, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_HOTKEY,
     WM_QUERYENDSESSION, WM_SETTINGCHANGE, WNDCLASSW, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
+use windows::Win32::UI::WindowsAndMessaging::{WM_DRAWITEM, WM_MEASUREITEM};
 use windows::core::{PCWSTR, w};
 
 pub const WM_APP_COMMAND: u32 = WM_APP + 1;
@@ -318,11 +320,21 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 String::new()
             };
             if area == "ImmersiveColorSet" {
+                theme::forget_cached();
                 theme::allow_dark_menus();
                 searchwin::theme_changed();
                 strip::theme_changed();
             }
             LRESULT(0)
+        }
+        // Owner-drawn tiles in category popups (menus are owned by this window).
+        WM_MEASUREITEM => {
+            let mis = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
+            if tiles::measure(mis) { LRESULT(1) } else { unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) } }
+        }
+        WM_DRAWITEM => {
+            let dis = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+            if tiles::draw(dis) { LRESULT(1) } else { unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) } }
         }
         WM_QUERYENDSESSION => LRESULT(1),
         WM_ENDSESSION => {
@@ -639,6 +651,7 @@ pub fn reload_icon(key: &str) {
     searchwin::icons_changed(&keys);
     manager::icons_changed(&keys);
     strip::icon_changed(key);
+    tiles::icon_changed(key);
 }
 
 // ---------------------------------------------------------------- hotkeys

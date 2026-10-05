@@ -3,15 +3,16 @@
 //! keyboard navigation.
 
 use super::app::{self, FOLDER_ICON};
-use super::autostart;
 use super::ui::{escape_amp, wide};
+use super::{autostart, tiles};
 use crate::config::Category;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetMenuItemCount, HMENU, InsertMenuItemW, MENU_ITEM_STATE, MENUITEMINFOW,
-    MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
-    MIIM_SUBMENU, PostMessageW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_NULL,
+    MFS_CHECKED, MFS_DISABLED, MFT_MENUBREAK, MFT_OWNERDRAW, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP, MIIM_DATA,
+    MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU, PostMessageW, SetForegroundWindow, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_NULL,
 };
 use windows::core::PWSTR;
 
@@ -27,6 +28,8 @@ pub enum Action {
 }
 
 struct Builder {
+    /// Category contents as owner-drawn tiles instead of a list.
+    tiles: bool,
     actions: Vec<Action>,
     /// Keeps item text alive until the menu is built.
     strings: Vec<Vec<u16>>,
@@ -125,6 +128,88 @@ impl Builder {
         menu
     }
 
+    /// Like [`Self::category`], but apps are tiles running left to right
+    /// (wrapping after `tile_columns`), and subcategories are a column of rows
+    /// at the right end. Keeping folders at the right edge matters: Windows
+    /// opens a submenu beside its item, so a folder tile in the middle of the
+    /// row would open on top of its neighbours.
+    fn category_tiles(&mut self, s: &app::State, c: &Category) -> HMENU {
+        struct Entry {
+            text: String,
+            key: Option<String>,
+            sub: Option<HMENU>,
+            cmd: u32,
+            enabled: bool,
+        }
+        let menu = Self::popup();
+        let mut entries = Vec::new();
+        for id in &c.apps {
+            match s.catalog.get(id) {
+                Some(entry) => {
+                    let cmd = self.command(Action::Launch(id.to_string()));
+                    entries.push(Entry {
+                        text: entry.name.clone(),
+                        key: Some(id.clone()),
+                        sub: None,
+                        cmd,
+                        enabled: true,
+                    });
+                }
+                None => entries.push(Entry {
+                    text: format!("{} (not found)", short_id(id)),
+                    key: None,
+                    sub: None,
+                    cmd: 0,
+                    enabled: false,
+                }),
+            }
+        }
+        let mut folders = Vec::new();
+        for child in &c.children {
+            let sub = self.category_tiles(s, child);
+            folders.push(Entry {
+                text: child.name.clone(),
+                key: Some(format!("cat:{}", child.id)),
+                sub: Some(sub),
+                cmd: 0,
+                enabled: true,
+            });
+        }
+        if entries.is_empty() && folders.is_empty() {
+            entries.push(Entry { text: "(empty)".into(), key: None, sub: None, cmd: 0, enabled: false });
+        }
+        let max_cols = s.cfg.settings.tile_columns.clamp(1, 24);
+        let mut layout: Vec<(&Entry, bool, bool)> = crate::striplayout::tile_order(entries.len(), max_cols)
+            .into_iter()
+            .map(|(idx, new_column)| (&entries[idx], new_column, false))
+            .collect();
+        let has_tiles = !layout.is_empty();
+        for (i, f) in folders.iter().enumerate() {
+            layout.push((f, i == 0 && has_tiles, true));
+        }
+        for (e, new_column, row) in layout {
+            let data = tiles::add(tiles::Tile { text: e.text.clone(), key: e.key.clone(), row });
+            let mut mii = MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_DATA,
+                fType: if new_column { MFT_OWNERDRAW | MFT_MENUBREAK } else { MFT_OWNERDRAW },
+                fState: if e.enabled { MENU_ITEM_STATE(0) } else { MFS_DISABLED },
+                wID: e.cmd,
+                dwItemData: data,
+                ..Default::default()
+            };
+            if let Some(sub) = e.sub {
+                mii.fMask |= MIIM_SUBMENU;
+                mii.hSubMenu = sub;
+            }
+            unsafe {
+                let pos = GetMenuItemCount(Some(menu)).max(0) as u32;
+                let _ = InsertMenuItemW(menu, pos, true, &mii);
+            }
+        }
+        menu
+    }
+
     fn all_apps(&mut self, s: &app::State) -> HMENU {
         let menu = Self::popup();
         let apps = &s.catalog.apps;
@@ -197,7 +282,7 @@ impl Built {
 pub fn build_main() -> Built {
     let autostart_on = autostart::is_enabled();
     app::with(|s| {
-        let mut b = Builder { actions: Vec::new(), strings: Vec::new() };
+        let mut b = Builder { tiles: false, actions: Vec::new(), strings: Vec::new() };
         let root = Builder::popup();
 
         if s.cfg.settings.show_recents_in_menu {
@@ -254,12 +339,15 @@ pub fn build_main() -> Built {
 /// One category's contents as a popup: its subcategories (each a cascading
 /// submenu, at any depth) followed by its apps.
 pub fn build_category(cat_id: u64) -> Option<Built> {
-    app::with(|s| {
+    tiles::reset();
+    let built = app::with(|s| {
         let c = crate::tree::find(&s.cfg.categories, cat_id)?;
-        let mut b = Builder { actions: Vec::new(), strings: Vec::new() };
-        let menu = b.category(s, c);
+        let mut b = Builder { tiles: s.cfg.settings.tile_menus, actions: Vec::new(), strings: Vec::new() };
+        let menu = if b.tiles { b.category_tiles(s, c) } else { b.category(s, c) };
         Some(Built { menu, actions: b.actions })
-    })
+    });
+    tiles::load_icons();
+    built
 }
 
 /// Shows the main menu at `pt` and returns the chosen action.

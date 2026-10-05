@@ -728,8 +728,11 @@ fn cursor_button() -> Option<Button> {
 unsafe extern "system" fn menu_filter(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == MSGF_MENU as i32 && lparam.0 != 0 {
         let msg = unsafe { &*(lparam.0 as *const MSG) };
+        // Only when the strip itself is under the pointer, not a (sub)menu
+        // that happens to overlap it.
         if msg.message == WM_MOUSEMOVE
             && let (Some(h), Some(current)) = (hwnd(), HOOK_CURRENT.with(|c| c.get()))
+            && unsafe { windows::Win32::UI::WindowsAndMessaging::WindowFromPoint(msg.pt) } == h
         {
             let mut pt = msg.pt;
             unsafe {
