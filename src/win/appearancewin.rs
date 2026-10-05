@@ -6,7 +6,7 @@ use super::app;
 use super::canvas;
 use super::ui::{self, scale, wide};
 use super::{searchwin, strip, theme};
-use crate::appearance::{Appearance, DockWidth, Rgba, ThemeMode};
+use crate::appearance::{Appearance, DockWidth, HoverAnim, Rgba, ThemeMode};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
@@ -24,6 +24,7 @@ use windows::core::{PCWSTR, w};
 const THEME: u16 = 10;
 const DOCK: u16 = 11;
 const POSITION: u16 = 12;
+const ANIMATION: u16 = 14;
 // Colour buttons, and their "Default" buttons (+100).
 const ACCENT: u16 = 20;
 const BACKGROUND: u16 = 21;
@@ -108,13 +109,14 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 21] = [
+const ROWS: [Row; 22] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
     Row::Colour(BACKGROUND),
     Row::Slider(OPACITY),
     Row::Slider(ICON_SIZE),
+    Row::Combo(ANIMATION, "Hover animation", &["Off", "Magnify (like the macOS Dock)", "Lift", "Bounce", "Pulse"]),
     Row::Heading("Category flyouts"),
     Row::Slider(COLUMNS),
     Row::Colour(FLYOUT_BORDER),
@@ -346,6 +348,7 @@ fn load() {
     };
     sel(THEME, a.theme as usize);
     sel(DOCK, a.dock_width as usize);
+    sel(ANIMATION, a.hover_animation as usize);
     sel(POSITION, app::with(|s| s.cfg.settings.strip_edge) as usize);
     for (id, value) in [
         (OPACITY, a.opacity as u32),
@@ -462,6 +465,13 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             let id = ui::loword(wparam.0);
             let code = ui::hiword(wparam.0);
             match (id, code) {
+                (ANIMATION, CBN_SELCHANGE) => {
+                    let i = combo(id);
+                    let kind =
+                        [HoverAnim::Off, HoverAnim::Magnify, HoverAnim::Lift, HoverAnim::Bounce, HoverAnim::Pulse]
+                            [i.min(4)];
+                    change(|a, _| a.hover_animation = kind);
+                }
                 (POSITION, CBN_SELCHANGE) => {
                     use crate::config::StripEdge;
                     let i = combo(id);

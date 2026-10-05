@@ -24,6 +24,21 @@ pub enum DockWidth {
     Fit,
 }
 
+/// How the strip's icons react to the pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HoverAnim {
+    Off,
+    /// The icon under the pointer grows, its neighbours a little (the Dock).
+    Magnify,
+    /// The icon rises towards the screen.
+    Lift,
+    /// The icon hops twice.
+    Bounce,
+    /// The icon briefly grows and settles.
+    Pulse,
+}
+
 /// An sRGB colour with alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba {
@@ -100,6 +115,8 @@ pub struct Appearance {
     /// Gap between the bar and the screen edges in DIPs (0 = docked flush).
     pub margin: u32,
     pub dock_width: DockWidth,
+    /// Animation when the pointer moves over the strip's icons.
+    pub hover_animation: HoverAnim,
     /// Icon size on the bar and in flyout tiles, in DIPs.
     pub icon_size: u32,
     /// App tiles per row in a category flyout.
@@ -124,6 +141,7 @@ impl Default for Appearance {
             corner_radius: 0,
             margin: 0,
             dock_width: DockWidth::Full,
+            hover_animation: HoverAnim::Magnify,
             icon_size: 32,
             flyout_columns: 4,
             flyout_corner_radius: 6,

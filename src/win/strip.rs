@@ -24,7 +24,8 @@ use super::flyout;
 use super::menu;
 use super::theme;
 use super::ui::{self, scale, wide};
-use crate::appearance::{Appearance, Colors, DockWidth};
+use crate::anim;
+use crate::appearance::{Appearance, Colors, DockWidth, HoverAnim};
 use crate::config::CustomApp;
 use crate::striplayout::{self, BarLayout, Edge, Hit, Metrics, Slot};
 use resvg::tiny_skia::Pixmap;
@@ -61,6 +62,8 @@ use windows::core::{PCWSTR, PWSTR, w};
 const WM_APP_APPBAR: u32 = WM_APP + 20;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_HOVER: usize = 1;
+/// Animation frames (about 60 a second), only while something moves.
+const TIMER_ANIM: usize = 2;
 
 const LEFT_ALL: usize = 0;
 const RIGHT_LINK: usize = 0;
@@ -102,6 +105,15 @@ struct Strip {
     /// whether the bar is being dragged to another edge.
     bar_press: Option<(i32, i32)>,
     moving: bool,
+    /// Hover animation: each visible icon's smoothed amount, the pointer's
+    /// position along the bar (client), the icon it arrived on and when,
+    /// and the time of the last frame.
+    anim_levels: Vec<f32>,
+    anim_pointer: Option<i32>,
+    anim_enter: Option<(usize, std::time::Instant)>,
+    anim_last: std::time::Instant,
+    /// The frame timer is running (re-arming it would delay the next frame).
+    anim_running: bool,
 }
 
 thread_local! {
@@ -215,6 +227,11 @@ fn create() {
             drag: None,
             bar_press: None,
             moving: false,
+            anim_levels: Vec::new(),
+            anim_pointer: None,
+            anim_enter: None,
+            anim_last: std::time::Instant::now(),
+            anim_running: false,
         })
     });
     unsafe {
@@ -295,7 +312,8 @@ pub fn refresh() {
         (items, names, sources)
     });
     let (size, missing) = with(|st| {
-        let size = scale(st.look.icon_size as i32, st.dpi);
+        // Loaded larger than shown, so magnified icons stay sharp.
+        let size = scale(st.look.icon_size as i32 * 3 / 2, st.dpi);
         let missing: Vec<_> = sources.into_iter().filter(|(k, _)| !st.icons.contains_key(k)).collect();
         (size, missing)
     })
@@ -688,6 +706,74 @@ fn move_bar() {
     }
 }
 
+// ---------------------------------------------------------------- hover animation
+
+/// Where each visible icon's animation is heading.
+fn anim_targets(s: &Strip) -> Vec<f32> {
+    let m = margin(s);
+    match s.look.hover_animation {
+        HoverAnim::Magnify => {
+            let centres: Vec<f32> = s.layout.items.iter().map(|sl| (sl.x + sl.w / 2) as f32).collect();
+            let reach = s.layout.items.first().map(|sl| sl.w as f32 * 2.5).unwrap_or(0.0);
+            anim::magnify_targets(&centres, s.anim_pointer.map(|p| (p - m) as f32), reach)
+        }
+        HoverAnim::Lift => {
+            let hovered = match s.hover {
+                Some(Hit::Item(i)) => Some(i),
+                _ => None,
+            };
+            (0..s.layout.items.len()).map(|i| if hovered == Some(i) { 1.0 } else { 0.0 }).collect()
+        }
+        _ => vec![0.0; s.layout.items.len()],
+    }
+}
+
+/// Advances the animation one frame. Returns whether it is still moving.
+fn anim_step() -> bool {
+    with(|s| {
+        let now = std::time::Instant::now();
+        let dt = (now - std::mem::replace(&mut s.anim_last, now)).as_secs_f32() * 1000.0;
+        let targets = anim_targets(s);
+        s.anim_levels.resize(targets.len(), 0.0);
+        for (l, t) in s.anim_levels.iter_mut().zip(&targets) {
+            *l = anim::approach(*l, *t, dt.min(100.0));
+        }
+        let since = s.anim_enter.map(|(_, t)| t.elapsed().as_secs_f32() * 1000.0);
+        anim::busy(s.look.hover_animation, &s.anim_levels, &targets, since)
+    })
+    .unwrap_or(false)
+}
+
+/// The pointer moved on the strip (`None`: it left): start animating.
+fn anim_pointer(hwnd: HWND, pos: Option<i32>, entered: Option<usize>) {
+    let animate = with(|s| {
+        if s.look.hover_animation == HoverAnim::Off {
+            return false;
+        }
+        s.anim_pointer = pos;
+        if let Some(i) = entered {
+            s.anim_enter = Some((i, std::time::Instant::now()));
+        }
+        true
+    })
+    .unwrap_or(false);
+    let start = animate
+        && with(|s| {
+            let start = !s.anim_running;
+            if start {
+                s.anim_running = true;
+                s.anim_last = std::time::Instant::now();
+            }
+            start
+        })
+        .unwrap_or(false);
+    if start {
+        unsafe {
+            SetTimer(Some(hwnd), TIMER_ANIM, 16, None);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- drawing
 
 fn render() {
@@ -763,8 +849,21 @@ fn render() {
         let size = scale(s.look.icon_size as i32, d);
         // While dragging, the others make room where the dragged one would land.
         let order = display_order(s);
-        let draw_item = |cv: &mut Canvas, i: usize, rc: RECT| {
+        // Hover animation: how much an icon may grow and rise in the bar.
+        let max_scale = ((thickness(s) - scale(4, d)) as f32 / size as f32).min(1.5);
+        let lift_room = ((thickness(s) - size) as f32 / 2.0 - scale(2, d) as f32).max(0.0);
+        let (odx, ody) = s.edge.opening();
+        let effect_of = |pos: usize| {
+            if s.drag.is_some() {
+                return anim::REST;
+            }
+            let since = s.anim_enter.filter(|(p, _)| *p == pos).map(|(_, t)| t.elapsed().as_secs_f32() * 1000.0);
+            anim::effect(s.look.hover_animation, s.anim_levels.get(pos).copied().unwrap_or(0.0), since, max_scale)
+        };
+        let draw_item = |cv: &mut Canvas, i: usize, rc: RECT, fx: anim::Effect| {
             let (cx, cy) = centre(&rc);
+            let (cx, cy) = (cx + odx * fx.lift * lift_room, cy + ody * fx.lift * lift_room);
+            let size = (size as f32 * fx.scale).round() as i32;
             let x = (cx - size as f32 / 2.0) as i32;
             let y = (cy - size as f32 / 2.0) as i32;
             let is_cat = matches!(s.items[i], Item::Category(_));
@@ -799,7 +898,7 @@ fn render() {
             if s.drag.is_none() {
                 draw_state(&mut cv, Hit::Item(pos), *slot);
             }
-            draw_item(&mut cv, i, rc);
+            draw_item(&mut cv, i, rc, effect_of(pos));
         }
         if let Some((from, p)) = s.drag
             && let Some(slot) = s.layout.items.first()
@@ -809,7 +908,7 @@ fn render() {
             let rc = slot_rect(s, Slot { x: start, w: slot.w });
             let (x, y, w, h) = cell(&rc);
             cv.fill_round_rect(x, y, w, h, r4, c.pressed);
-            draw_item(&mut cv, from, rc);
+            draw_item(&mut cv, from, rc, anim::REST);
         }
 
         // End: Link, settings.
@@ -1097,12 +1196,17 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 return LRESULT(0);
             }
             let under = hit_at(x, y);
-            let (changed, start_leave) = with(|s| {
+            let (changed, start_leave, pos) = with(|s| {
                 let changed = s.hover != under;
                 s.hover = under;
-                (changed, !std::mem::replace(&mut s.tracking_leave, true))
+                (changed, !std::mem::replace(&mut s.tracking_leave, true), along(s, x, y))
             })
-            .unwrap_or((false, false));
+            .unwrap_or((false, false, 0));
+            let entered = match under {
+                Some(Hit::Item(i)) if changed => Some(i),
+                _ => None,
+            };
+            anim_pointer(hwnd, Some(pos), entered);
             if start_leave {
                 let mut tme = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -1142,11 +1246,23 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 s.hover = None;
                 s.tracking_leave = false;
             });
+            anim_pointer(hwnd, None, None);
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
             }
             render();
             flyout::pointer_left_anchor();
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == TIMER_ANIM => {
+            let busy = anim_step();
+            render();
+            if !busy {
+                with(|s| s.anim_running = false);
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), TIMER_ANIM);
+                }
+            }
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_HOVER => {

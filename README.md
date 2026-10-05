@@ -130,6 +130,21 @@ original FlexTaskbar:
     right-click a category and pick *Manage categories…*).
   - The flyouts close shortly after the pointer leaves all of them and the
     bar button.
+- **Hover animations**, in the spirit of the macOS Dock, on every icon of the
+  bar (categories and pinned apps). Pick one in the Appearance window, or turn
+  them off:
+  - *Magnify* (the default): the icon under the pointer grows, its neighbours a
+    little, following the pointer smoothly;
+  - *Lift*: the icon rises towards the screen;
+  - *Bounce*: the icon hops twice;
+  - *Pulse*: the icon briefly grows and settles;
+  - *Off*.
+
+  The icons grow and move within the bar's thickness (a thicker bar leaves more
+  room). Frames are drawn only while something moves, about 60 a second, and
+  stop as soon as it settles.
+
+  ![Magnify, Lift, Bounce and Pulse as the pointer sweeps along the bar](screenshots/hover-animations.gif)
 - **Slide between categories.** While a flyout is open, moving along the bar
   switches to the next category straight away.
 - **Pinned apps** launch with a click. You can pin an app from the Manage
@@ -163,6 +178,7 @@ Every change shows on the bar straight away:
 | Background colour | Any colour; the text turns dark or light to stay readable | Theme's colour |
 | Background opacity | 10–100 % (icons and text stay solid) | 87 % |
 | Icon size | 16–48 | 32 |
+| Hover animation | Off, Magnify (like the macOS Dock), Lift, Bounce, Pulse | Magnify |
 | **Bar** | | |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
@@ -348,15 +364,17 @@ with Backspace and click *Apply hotkeys*.
 
 The launcher is built to cost almost nothing while idle:
 - It waits on Windows messages and never polls. The bar's only timers are the
-  short hover delay, started when the pointer enters a category icon, and the
-  flyout's close delay. The
+  short hover delay, started when the pointer enters a category icon, the
+  flyout's close delay, and the hover animation's frame timer, which runs
+  only while an icon is moving. The
   supervisor wakes every 5 seconds to check that the launcher is still
   responding.
 - The app scan and icon loading happen on background threads. Icons come from
   Windows' own icon cache and are kept in memory after the first load.
 - The bar and its flyouts are drawn in software (anti-aliased, with
   tiny-skia) only when something changes, and handed to Windows as
-  per-pixel-alpha layered windows. There's no animation and no GPU work.
+  per-pixel-alpha layered windows. Apart from the hover animation there's no
+  animation, and no GPU work.
   Menus are native Windows popup menus.
 - The search list is virtual, so it only creates rows for what's on screen.
 - The Manage window is fully destroyed when you close it.
@@ -369,7 +387,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 41 unit tests cover:
+The 45 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -384,6 +402,9 @@ The 41 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- hover animations: the Dock-style magnification falling off with distance,
+  smoothing that settles the same whatever the frame rate, the bounce and
+  pulse ending, and each style's effect
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, the flyout border
   following the bar's unless set, colour parsing and clamping
@@ -401,6 +422,8 @@ The 41 unit tests cover:
     towards the screen
   - launching from a tile on the third level, sliding between categories, launching a pinned app
   - the *All* list
+  - the hover animations: Magnify following the pointer along the bar,
+    Lift, Bounce and Pulse
   - the right-click menus (move, unpin)
   - dragging a pinned app and a category to new places, and the *Arrange the
     bar* window (buttons and dragging rows), all updating the bar live
@@ -475,6 +498,7 @@ src/win/supervisor.rs  crash/hang restart
 src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon cache
 src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
+src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
 src/win/canvas.rs    anti-aliased drawing into layered windows
