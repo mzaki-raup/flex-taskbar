@@ -2,9 +2,13 @@
 //! list as Start's "All apps" — desktop programs, Store apps, and browser web
 //! apps installed from Chrome/Edge) plus the user's custom apps.
 //!
+//! Each entry's kind (Store app, Chrome or Edge web app…) comes from
+//! `appkind`, from how the shell names it.
+//!
 //! If the Apps folder can't be enumerated, the Start Menu shortcut folders are
 //! scanned instead, so the launcher still has something to show.
 
+use crate::appkind::{self, AppKind};
 use crate::config::CustomApp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -43,6 +47,8 @@ pub struct AppEntry {
     /// File name or AUMID, searched as a secondary field.
     pub file_hint: String,
     pub source: Source,
+    /// Desktop program, Store app, Chrome/Edge web app or custom.
+    pub kind: AppKind,
 }
 
 #[derive(Default)]
@@ -59,6 +65,11 @@ impl Catalog {
                 id: s.parsing_name.clone(),
                 name: s.name.clone(),
                 file_hint: file_hint(&s.parsing_name),
+                kind: if s.file {
+                    appkind::classify_file(&s.parsing_name)
+                } else {
+                    appkind::classify_shell(&s.parsing_name)
+                },
                 source: if s.file {
                     Source::File(s.parsing_name.clone())
                 } else {
@@ -71,6 +82,7 @@ impl Catalog {
                 id: c.id.clone(),
                 name: c.name.clone(),
                 file_hint: file_hint(&c.target),
+                kind: appkind::classify_custom(&c.target, &c.args),
                 source: Source::Custom,
             });
         }

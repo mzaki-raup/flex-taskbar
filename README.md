@@ -57,8 +57,8 @@ top or bottom bar and vertical strips from a side bar.
 | Hover a category: subcategories and apps as tiles | Hover a subcategory: its flyout floats above |
 |---|---|
 | ![Development open: Editors, Terminals and Tools subcategory tiles, two app tiles](screenshots/tiles.png) | ![Development, then Tools above it, then Debugging above that](screenshots/subcategory.png) |
-| **All: every app** | **Light theme, rounded floating dock** |
-| ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
+| **All: every app, labelled Store app, Chrome or Edge web app** | **Light theme, rounded floating dock** |
+| ![All apps list with Calculator and Terminal labelled Store app, Outlook Edge web app and YouTube Chrome web app](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
 | **Drag an icon to rearrange the bar** | **Arrange the bar (from Manage or right-click)** |
 | ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: the bar's buttons in order, with move buttons](screenshots/arrange.png) |
 | **Appearance window** | **Flyouts with their own corners and border** |
@@ -210,11 +210,25 @@ is filed under. So typing "dev" finds every app inside "Dev › Editors" too.
 Initials work as well ("vsc" → Visual Studio Code). When the box is empty, it
 lists recently used apps first, then everything else A–Z.
 
-**All your apps, automatically.** The app list is the Windows Apps folder, the
-same list as Start's "All apps". It includes desktop programs, Microsoft Store
-apps, and web apps installed from Chrome or Edge. It's rescanned in the
-background each time FlexTaskbar starts, and on demand. If the Apps folder can't
-be read, FlexTaskbar falls back to scanning the Start Menu shortcut folders.
+**All your apps, automatically.** The app list is the Windows shell Apps folder
+(`shell:AppsFolder`), the same list as Start's "All apps". So *All*, search and
+the Manage window include:
+- desktop programs;
+- **Microsoft Store and other modern Windows 10/11 apps** (packaged apps, by
+  their AppUserModelID, such as Calculator or Windows Terminal);
+- **web apps installed from Google Chrome** (*Install app* / *Create shortcut*)
+  and **from Microsoft Edge** (*Install this site as an app*), and those of
+  other Chromium browsers.
+
+Each app is labelled by kind: *Store app*, *Chrome web app*, *Edge web app*,
+*Web app* or *Custom* (desktop programs have no label). The label shows on the
+right in the *All* list and the Manage window, and next to the category path in
+search, so typing "web app" or "store" finds them. The list is rescanned in the
+background each time FlexTaskbar starts, and on demand (*Rescan apps*), so
+newly installed apps and web apps appear without restarting. If the Apps
+folder can't be read, FlexTaskbar falls back to scanning the Start Menu
+shortcut folders, where Chrome's web apps (its *Chrome Apps* folder) are still
+recognised; Store apps need the Apps folder.
 
 **Custom apps.** You can add any program, shortcut, file, URL, `shell:` path or
 protocol (such as `ms-settings:`) as an app, with optional arguments, a start
@@ -387,7 +401,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 45 unit tests cover:
+The 49 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -408,6 +422,9 @@ The 45 unit tests cover:
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, the flyout border
   following the bar's unless set, colour parsing and clamping
+- telling app kinds apart from their shell names: Store/packaged apps,
+  Chrome, Edge and other Chromium web apps, desktop programs, Start Menu
+  shortcuts and custom browser web apps
 - the old-settings importer, including cycles in old data and bad JSON
 
 **Manually, under Wine 9 on Linux** (not real Windows):
@@ -450,7 +467,9 @@ The 45 unit tests cover:
 - the screenshots and the GIF above come from a scripted run of this flow
 
 **Not yet verified**, because Wine can't show it, so expect rough edges here:
-- the Apps folder scan
+- the Apps folder scan with real Store apps and Chrome/Edge web apps (under
+  Wine their labels and search were checked with those apps' real parsing
+  names, seeded into the app cache)
 - shell app icons
 - the global hotkeys
 - *Windows default* theme following a live light/dark switch
@@ -499,6 +518,7 @@ src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon ca
 src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
+src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
 src/win/canvas.rs    anti-aliased drawing into layered windows

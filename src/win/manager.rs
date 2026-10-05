@@ -1530,9 +1530,9 @@ unsafe fn on_notify(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 && !di.item.pszText.is_null()
                 && di.item.cchTextMax > 0
             {
-                let name = app::with(|s| s.catalog.get(&app_id).map(|a| a.name.clone())).unwrap_or_default();
-                let custom = app_id.starts_with("custom:");
-                let text = wide(&if custom { format!("{name}  (custom)") } else { name });
+                let (name, kind) =
+                    app::with(|s| s.catalog.get(&app_id).map(|a| (a.name.clone(), a.kind.label()))).unwrap_or_default();
+                let text = wide(&if kind.is_empty() { name } else { format!("{name}  ({})", kind.to_lowercase()) });
                 let n = text.len().min(di.item.cchTextMax as usize);
                 unsafe {
                     std::ptr::copy_nonoverlapping(text.as_ptr(), di.item.pszText.0, n);

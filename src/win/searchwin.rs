@@ -316,7 +316,19 @@ fn refilter() {
         for (id, path) in &all_paths {
             paths.entry(id.as_str()).or_default().push(path.clone());
         }
-        let detail = |id: &str| paths.get(id).map(|p| p.join(", ")).unwrap_or_default();
+        // Category paths, then the kind ("Chrome web app", "Store app"…), so
+        // typing "web app" or "store" finds those too.
+        let detail = |id: &str| {
+            let mut d = paths.get(id).map(|p| p.join(", ")).unwrap_or_default();
+            let kind = s.catalog.get(id).map(|a| a.kind.label()).unwrap_or_default();
+            if !kind.is_empty() {
+                if !d.is_empty() {
+                    d.push_str("  ·  ");
+                }
+                d.push_str(kind);
+            }
+            d
+        };
         let make = |id: &str, name: &str| Row { id: id.to_string(), name: wide(name), detail: wide(&detail(id)) };
 
         let apps = &s.catalog.apps;

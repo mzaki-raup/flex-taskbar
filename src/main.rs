@@ -2,6 +2,7 @@
 
 mod anim;
 mod appearance;
+mod appkind;
 mod config;
 mod migrate;
 mod search;

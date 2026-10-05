@@ -25,8 +25,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ,
-    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    DT_CENTER, DT_END_ELLIPSIS, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteObject, GetMonitorInfoW,
+    HFONT, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -67,6 +67,8 @@ struct Placed {
     elem: Elem,
     text: String,
     icon: Option<String>,
+    /// A small right-aligned note (the app's kind in the All list).
+    note: &'static str,
 }
 
 struct Level {
@@ -338,7 +340,7 @@ fn rebuild(idx: usize) {
         subs: Vec<(u64, String)>,
         tiles: Vec<(String, String)>,
         empty: bool,
-        rows: Vec<(String, String)>,
+        rows: Vec<(String, String, &'static str)>,
     }
     let content = app::with(|s| match &view {
         View::Category(id) => crate::tree::find(&s.cfg.categories, *id).map(|c| Content {
@@ -351,7 +353,7 @@ fn rebuild(idx: usize) {
             subs: Vec::new(),
             tiles: Vec::new(),
             empty: false,
-            rows: s.catalog.apps.iter().map(|a| (a.id.clone(), a.name.clone())).collect(),
+            rows: s.catalog.apps.iter().map(|a| (a.id.clone(), a.name.clone(), a.kind.label())).collect(),
         }),
     });
     let mon = unsafe {
@@ -414,6 +416,7 @@ fn rebuild(idx: usize) {
                     elem,
                     text,
                     icon: Some(icon),
+                    note: "",
                 });
             }
             y += used_rows as i32 * (tile.1 + 2 * tm);
@@ -423,29 +426,32 @@ fn rebuild(idx: usize) {
                     elem: Elem::Label,
                     text: "No apps in this category".into(),
                     icon: None,
+                    note: "",
                 });
                 y += s(28);
             }
         }
         View::All { first_row } => {
-            inner_w = s(280) - 2 * pad;
+            inner_w = s(340) - 2 * pad;
             elems.push(Placed {
                 rect: RECT { left: pad + s(4), top: y + s(4), right: pad + inner_w, bottom: y + s(22) },
                 elem: Elem::Label,
                 text: if content.rows.is_empty() { "No apps found".into() } else { "All apps".into() },
                 icon: None,
+                note: "",
             });
             y += s(24);
             let row_h = s(28);
             let visible = ((s(480) - y - pad) / row_h).max(1) as usize;
             let first = (*first_row).min(content.rows.len().saturating_sub(visible));
             all_rows = Some((content.rows.len(), visible, first));
-            for (id, name) in content.rows.iter().skip(first).take(visible) {
+            for &(ref id, ref name, note) in content.rows.iter().skip(first).take(visible) {
                 elems.push(Placed {
                     rect: RECT { left: pad, top: y, right: pad + inner_w, bottom: y + row_h },
                     elem: Elem::Row(id.clone()),
                     text: name.clone(),
                     icon: Some(id.clone()),
+                    note,
                 });
                 y += row_h;
             }
@@ -581,10 +587,24 @@ fn render(idx: usize) {
                     let size = s(20);
                     let x = rc.left + s(8);
                     let y = rc.top + (ui::rect_h(&rc) - size) / 2;
-                    if let Some(img) = icon.and_then(|k| icon_for(f, k, size)) {
-                        cv.image(&img, x, y, size, 1.0);
+                    match icon.and_then(|k| icon_for(f, k, size)) {
+                        Some(img) => cv.image(&img, x, y, size, 1.0),
+                        None => {
+                            // No icon: the name's first letter on a tile.
+                            cv.fill_round_rect(x as f32, y as f32, size as f32, size as f32, s(4) as f32, c.pressed);
+                            let letter: String =
+                                p.text.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
+                            let lrc = RECT { left: x, top: y, right: x + size, bottom: y + size };
+                            cv.text(&letter, lrc, f.small, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        }
                     }
-                    let trc = RECT { left: x + size + s(8), right: rc.right - s(4), ..rc };
+                    // The kind (Store app, Chrome web app…) on the right, subtle.
+                    let note_w = if p.note.is_empty() { 0 } else { canvas::measure(p.note, f.small).0 + s(12) };
+                    if note_w > 0 {
+                        let nrc = RECT { left: rc.right - s(10) - note_w, right: rc.right - s(10), ..rc };
+                        cv.text(p.note, nrc, f.small, c.subtle, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                    }
+                    let trc = RECT { left: x + size + s(8), right: rc.right - s(4) - note_w - s(6), ..rc };
                     cv.text(&p.text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
                 Elem::Label => {

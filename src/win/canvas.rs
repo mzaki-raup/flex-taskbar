@@ -341,6 +341,10 @@ fn pixmap_from_bitmap(bmp: HBITMAP, size: i32) -> Option<Pixmap> {
             return None;
         }
     }
+    // Nothing drawn at all (the shell had no icon): no icon, not a black square.
+    if buf.iter().all(|&b| b == 0) {
+        return None;
+    }
     // Old 24-bit icons come back with no alpha at all: treat them as opaque.
     let has_alpha = buf.as_chunks::<4>().0.iter().any(|p| p[3] != 0);
     let mut pix = Pixmap::new(size as u32, size as u32)?;
