@@ -19,7 +19,7 @@ use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
 use crate::appearance::{Appearance, Colors};
-use crate::striplayout::{self, Edge, Hit};
+use crate::striplayout::{self, Hit};
 use resvg::tiny_skia::Pixmap;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -354,6 +354,12 @@ fn rebuild(idx: usize) {
             rows: s.catalog.apps.iter().map(|a| (a.id.clone(), a.name.clone())).collect(),
         }),
     });
+    let mon = unsafe {
+        let m = MonitorFromPoint(POINT { x: anchor_rc.left, y: anchor_rc.top }, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(m, &mut mi);
+        mi.rcMonitor
+    };
     let Some(content) = content else {
         if idx == 0 {
             close()
@@ -377,24 +383,30 @@ fn rebuild(idx: usize) {
             let tile = (s(84), s(76));
             let tm = s(2);
             let cols = (look.flyout_columns as usize).max(1);
-            // Subcategories first, so they sit in the top row, nearest to
-            // the flyouts they open above.
+            // Subcategories first, so they sit nearest the flyouts they open.
             let items: Vec<(Elem, String, String)> = content
                 .subs
                 .iter()
                 .map(|(id, name)| (Elem::Sub(*id), name.clone(), format!("cat:{id}")))
                 .chain(content.tiles.iter().map(|(id, name)| (Elem::Tile(id.clone()), name.clone(), id.clone())))
                 .collect();
-            let tiles_w = cols.min(items.len().max(1)) as i32 * (tile.0 + 2 * tm);
-            inner_w = tiles_w.max(canvas::measure("No apps in this category", font).0 + s(16));
+            // A horizontal strip for a top or bottom bar, a vertical one for
+            // a side bar (see `flyout_cells`).
             let n = items.len();
-            // The subcategories (first) sit in the row nearest where their
-            // flyouts open: the top row for a bottom strip, the bottom row
-            // (rows flipped) for a top strip. Side strips keep reading order.
-            let rows = n.div_ceil(cols);
-            let flip = strip::edge() == Edge::Top;
-            for ((col, row), (elem, text, icon)) in striplayout::grid(n, cols).into_iter().zip(items) {
-                let row = if flip { rows - 1 - row } else { row };
+            let edge = strip::edge();
+            // A side bar's flyout is a single column, wrapping only once it
+            // would be taller than the screen.
+            let per_line = if edge.vertical() {
+                (((mon.bottom - mon.top) - 2 * pad) / (tile.1 + 2 * tm)).max(1) as usize
+            } else {
+                cols
+            };
+            let cells = striplayout::flyout_cells(n, per_line, edge);
+            let used_cols = cells.iter().map(|c| c.0 + 1).max().unwrap_or(1);
+            let used_rows = cells.iter().map(|c| c.1 + 1).max().unwrap_or(0);
+            let tiles_w = used_cols as i32 * (tile.0 + 2 * tm);
+            inner_w = if content.empty { canvas::measure("No apps in this category", font).0 + s(16) } else { tiles_w };
+            for ((col, row), (elem, text, icon)) in cells.into_iter().zip(items) {
                 let left = pad + col as i32 * (tile.0 + 2 * tm) + tm;
                 let top = y + row as i32 * (tile.1 + 2 * tm) + tm;
                 elems.push(Placed {
@@ -404,9 +416,7 @@ fn rebuild(idx: usize) {
                     icon: Some(icon),
                 });
             }
-            if n > 0 {
-                y += n.div_ceil(cols) as i32 * (tile.1 + 2 * tm);
-            }
+            y += used_rows as i32 * (tile.1 + 2 * tm);
             if content.empty {
                 elems.push(Placed {
                     rect: RECT { left: pad + s(4), top: y + s(4), right: pad + inner_w, bottom: y + s(24) },
@@ -446,12 +456,6 @@ fn rebuild(idx: usize) {
 
     // Away from the strip's edge (above a bottom strip, right of a left one…),
     // kept on the monitor.
-    let mon = unsafe {
-        let m = MonitorFromPoint(POINT { x: anchor_rc.left, y: anchor_rc.top }, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-        let _ = GetMonitorInfoW(m, &mut mi);
-        mi.rcMonitor
-    };
     let (x, y) = striplayout::flyout_origin(
         strip::edge(),
         (anchor_rc.left, anchor_rc.top, anchor_rc.right, anchor_rc.bottom),

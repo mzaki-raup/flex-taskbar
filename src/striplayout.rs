@@ -113,18 +113,34 @@ pub fn hit(layout: &BarLayout, x: i32) -> Option<Hit> {
     layout.items.iter().position(|s| s.contains(x)).map(Hit::Item)
 }
 
-/// Rows of tiles in a flyout: `count` tiles, at most `cols` per row. Returns
-/// (column, row) for each tile, reading left to right.
-pub fn grid(count: usize, cols: usize) -> Vec<(usize, usize)> {
-    let cols = cols.max(1);
-    (0..count).map(|i| (i % cols, i / cols)).collect()
-}
-
 /// Where an item dragged to bar position `x` lands: the slot nearest the
 /// pointer (by centre). The other items fill the remaining slots in order.
 pub fn drop_index(items: &[Slot], x: i32) -> usize {
     let centre = |s: &Slot| s.x + s.w / 2;
     items.windows(2).filter(|w| x >= (centre(&w[0]) + centre(&w[1])) / 2).count()
+}
+
+/// Where each of `n` tiles goes in a category flyout of a bar on `edge`, as
+/// (column, row). The flyout runs the same way as its bar: tiles left to
+/// right for a top or bottom bar, top to bottom for a side bar, wrapping
+/// after `per_line`. The first tiles (the subcategories) end up on the side
+/// nearest where their own flyouts open: the top row above a bottom bar, the
+/// bottom row below a top bar, the right column beside a left bar, the left
+/// column beside a right bar.
+pub fn flyout_cells(n: usize, per_line: usize, edge: Edge) -> Vec<(usize, usize)> {
+    let per = per_line.max(1);
+    let lines = n.div_ceil(per);
+    (0..n)
+        .map(|i| {
+            let (line, pos) = (i / per, i % per);
+            match edge {
+                Edge::Bottom => (pos, line),
+                Edge::Top => (pos, lines - 1 - line),
+                Edge::Left => (lines - 1 - line, pos),
+                Edge::Right => (line, pos),
+            }
+        })
+        .collect()
 }
 
 /// A screen edge the strip can dock against.
@@ -237,6 +253,19 @@ mod tests {
     }
 
     #[test]
+    fn flyouts_run_the_way_their_bar_does() {
+        // Bottom bar: a horizontal strip, wrapping upwards (first row on top).
+        assert_eq!(flyout_cells(5, 4, Edge::Bottom), vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]);
+        // Top bar: the first row at the bottom, nearest the next level.
+        assert_eq!(flyout_cells(5, 4, Edge::Top), vec![(0, 1), (1, 1), (2, 1), (3, 1), (0, 0)]);
+        // Side bars: a vertical strip, wrapping into further columns.
+        assert_eq!(flyout_cells(3, 4, Edge::Right), vec![(0, 0), (0, 1), (0, 2)]);
+        assert_eq!(flyout_cells(5, 4, Edge::Right), vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0)]);
+        assert_eq!(flyout_cells(5, 4, Edge::Left), vec![(1, 0), (1, 1), (1, 2), (1, 3), (0, 0)]);
+        assert!(flyout_cells(0, 4, Edge::Left).is_empty());
+    }
+
+    #[test]
     fn edges() {
         let screen = (0, 0, 1600, 900);
         assert_eq!(edge_for_point(screen, 800, 880), Edge::Bottom);
@@ -276,11 +305,5 @@ mod tests {
         assert_eq!(drop_index(items, items[2].x + items[2].w / 2), 2);
         assert_eq!(drop_index(items, items[3].right() + 300), 3);
         assert_eq!(drop_index(&[], 50), 0);
-    }
-
-    #[test]
-    fn flyout_grid() {
-        assert_eq!(grid(5, 4), vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]);
-        assert_eq!(grid(2, 0), vec![(0, 0), (0, 1)]);
     }
 }

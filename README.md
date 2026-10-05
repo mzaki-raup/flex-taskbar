@@ -42,14 +42,15 @@ match the original .NET version.
 ![The bar with All, category and app icons, Link and the settings gear](screenshots/strip.png)
 
 **Any edge**: drag the bar by an empty spot to the left, right, top or bottom.
-Its flyouts open towards the middle of the screen.
+Its flyouts open towards the middle of the screen, as horizontal strips from a
+top or bottom bar and vertical strips from a side bar.
 
 ![Dragging the bar to the left, right, top and back to the bottom edge, with flyouts opening away from each](screenshots/edges.gif)
 
-| Left edge: flyouts open to the right | Right edge: flyouts open to the left |
+| Left edge: vertical flyouts open to the right | Right edge: vertical flyouts open to the left |
 |---|---|
-| ![An upright bar on the left with three flyout levels opening to the right](screenshots/edge-left.png) | ![An upright bar on the right with two flyout levels opening to the left](screenshots/edge-right.png) |
-| **Top edge: flyouts open downwards** | |
+| ![An upright bar on the left with three vertical flyout strips opening to the right](screenshots/edge-left.png) | ![An upright bar on the right with three vertical flyout strips opening to the left](screenshots/edge-right.png) |
+| **Top edge: horizontal flyouts open downwards** | |
 | ![A bar at the top with three flyout levels opening downwards](screenshots/edge-top.png) | |
 
 | Hover a category: subcategories and apps as tiles | Hover a subcategory: its flyout floats above |
@@ -99,13 +100,17 @@ original FlexTaskbar:
   it, on the screen side: above a bottom bar, below a top bar, to the right of
   a left bar and to the left of a right bar:
   - its **subcategories and apps as tiles**, each a large icon with the name
-    underneath, 4 per row by default. Subcategories come first and are marked
-    with ▾, like categories on the bar;
+    underneath. Subcategories come first and are marked with ▾, like
+    categories on the bar. The flyout runs the same way as the bar: on a top
+    or bottom bar it is a **horizontal strip** (4 tiles per row by default,
+    wrapping into more rows); on a left or right bar it is a **vertical
+    strip**, one column top to bottom, wrapping into another column only if
+    it would be taller than the screen;
   - resting the pointer on a subcategory opens **its flyout beyond this one**
     (further from the bar, lined up with the tile), and so on at any depth.
     Moving to another subcategory switches it; resting on an app tile closes
-    it. On a top bar the subcategories sit in the bottom row, nearest where
-    their flyouts open;
+    it. Subcategories always sit nearest where their flyouts open (the
+    bottom row on a top bar, for instance);
   - *No apps in this category* when it's empty. Flyouts only launch apps;
     categories are managed in the Manage window (⚙ on the bar, or
     right-click a category and pick *Manage categories…*).
@@ -153,7 +158,7 @@ Every change shows on the bar straight away:
 | Gap from screen edge | 0–24 | 0 (docked flush) |
 | Bar thickness | 32–96 (its height, or its width on a side edge) | 48 |
 | **Category flyouts** | | |
-| App tiles per row | 1–12 | 4 |
+| App tiles per row | 1–12 (top and bottom bars; on a side bar a flyout is one column) | 4 |
 | Border colour | Any colour | Same as the bar |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 | 6 |
@@ -359,8 +364,9 @@ The 39 unit tests cover:
 - search ranking
 - bar layout (the three zones, centring, overflow, the fitted dock, hit
   testing, where a dragged icon lands), which edge a dragged bar docks to,
-  where flyouts open for each edge (and staying on screen), flyout tile
-  grids, pinning, and the
+  where flyouts open for each edge (and staying on screen), how flyout tiles
+  run for each edge (rows for top and bottom bars, columns for side bars),
+  pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, the flyout border
@@ -374,6 +380,7 @@ The 39 unit tests cover:
     last; switching to another subcategory; an app tile closing the level above
   - the bar on each edge (bottom, top, left, right), set from *Position* and by
     dragging the bar; flyouts and three-level cascades opening the right way
+    (horizontal strips from top and bottom bars, vertical ones from side bars)
     on each; dragging icons along an upright bar; the right-click menu opening
     towards the screen
   - launching from a tile on the third level, sliding between categories, launching a pinned app
