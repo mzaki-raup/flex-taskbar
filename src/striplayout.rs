@@ -120,6 +120,13 @@ pub fn grid(count: usize, cols: usize) -> Vec<(usize, usize)> {
     (0..count).map(|i| (i % cols, i / cols)).collect()
 }
 
+/// Where an item dragged to bar position `x` lands: the slot nearest the
+/// pointer (by centre). The other items fill the remaining slots in order.
+pub fn drop_index(items: &[Slot], x: i32) -> usize {
+    let centre = |s: &Slot| s.x + s.w / 2;
+    items.windows(2).filter(|w| x >= (centre(&w[0]) + centre(&w[1])) / 2).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +178,17 @@ mod tests {
         let l = bar_layout(1000, &metrics(), 0, true);
         assert!(l.items.is_empty());
         assert_eq!(hit(&l, 100), None); // outside the shrunken bar
+    }
+
+    #[test]
+    fn dragging() {
+        let l = bar_layout(1000, &metrics(), 4, false);
+        let items = &l.items;
+        assert_eq!(drop_index(items, 0), 0);
+        assert_eq!(drop_index(items, items[0].x + 5), 0);
+        assert_eq!(drop_index(items, items[2].x + items[2].w / 2), 2);
+        assert_eq!(drop_index(items, items[3].right() + 300), 3);
+        assert_eq!(drop_index(&[], 50), 0);
     }
 
     #[test]

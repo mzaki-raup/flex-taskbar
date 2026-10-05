@@ -30,7 +30,7 @@ next to it (just above, or below a top taskbar), and can be turned off.
 
 ## Screenshots
 
-![Hovering a category, subcategory flyouts floating above it three levels deep, sliding between categories, launching a pinned app, All apps, and changing the appearance live](screenshots/flow.gif)
+![Hovering a category, subcategory flyouts floating above it three levels deep, sliding between categories, launching a pinned app, All apps, dragging an icon to rearrange the bar, and changing the appearance live](screenshots/flow.gif)
 
 **The bar**: *All* on the left, root categories (▾) and pinned apps in the
 centre, *Link* and settings (⚙) on the right. These are the defaults, which
@@ -43,6 +43,8 @@ match the original .NET version.
 | ![Development open: Editors, Terminals and Tools subcategory tiles, two app tiles](screenshots/tiles.png) | ![Development, then Tools above it, then Debugging above that](screenshots/subcategory.png) |
 | **All: every app** | **Light theme, rounded floating dock** |
 | ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
+| **Drag an icon to rearrange the bar** | **Arrange the bar (from Manage or right-click)** |
+| ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: the bar's buttons in order, with move buttons](screenshots/arrange.png) |
 | **Appearance window** | **Right-click: the full menu** |
 | ![Appearance window with theme, bar width, colours and sliders](screenshots/appearance.png) | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) |
 | **Search** | **Custom app (a browser web app)** |
@@ -88,8 +90,17 @@ out like the original FlexTaskbar:
 - **Pinned apps** launch with a click. You can pin an app from the Manage
   window (*Pin to strip*), from the *All* list, with *Link*, or by dragging
   `.exe`/`.lnk` files onto the bar.
-- **Right-click** an icon to move it left or right, unpin it, manage it or
-  change the appearance; right-click anywhere else for the full menu.
+- **Rearrange by dragging.** Press on a category or app icon and drag it along
+  the bar; the others make room, and it stays where you let go. Categories
+  and apps can be mixed in any order. Let go away from the bar to cancel.
+- **Arrange the bar** (in the Manage window, or right-click the bar): the same
+  order as a list, left to right. Drag a row, or use *Move to start*, *Move
+  left*, *Move right*, *Move to end* and *Unpin*. Changes show on the bar
+  straight away. (This order is the bar's own; the menus keep the order of
+  the category tree.)
+- **Right-click** an icon to move it left or right, unpin it, arrange the bar,
+  manage categories or change the appearance; right-click anywhere else for the
+  full menu.
 - **Screen space.** By default the bar reserves its space like the taskbar
   does, so maximized windows stop above it. You can turn that off in the Manage
   window, and then the bar floats on top instead.
@@ -306,7 +317,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 34 unit tests cover:
+The 36 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -314,7 +325,8 @@ The 34 unit tests cover:
   app membership
 - search ranking
 - bar layout (the three zones, centring, overflow, the fitted dock, hit
-  testing), flyout tile grids, and pinning
+  testing, where a dragged icon lands), flyout tile grids, pinning, and the
+  bar order (mixing categories and apps, moves, new and removed buttons)
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, colour parsing and
   clamping
@@ -328,6 +340,8 @@ The 34 unit tests cover:
   - launching from a tile on the third level, sliding between categories, launching a pinned app
   - the *All* list
   - the right-click menus (move, unpin)
+  - dragging a pinned app and a category to new places, and the *Arrange the
+    bar* window (buttons and dragging rows), all updating the bar live
   - *Pin to strip*
   - showing and hiding it
   - coming back after a crash
@@ -400,6 +414,7 @@ src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
 src/win/canvas.rs    anti-aliased drawing into layered windows
 src/win/appearancewin.rs  Appearance window
+src/win/arrangewin.rs     Arrange the bar window
 src/win/searchwin.rs search window
 src/win/manager.rs   Manage categories window
 src/win/appdialog.rs custom-app dialog

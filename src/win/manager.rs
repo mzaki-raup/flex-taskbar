@@ -84,6 +84,7 @@ const STRIP_SHOW: u16 = 66;
 const STRIP_RESERVE: u16 = 67;
 const ALL_PIN: u16 = 68;
 const APPEARANCE: u16 = 69;
+const ARRANGE: u16 = 70;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -327,6 +328,7 @@ fn create() {
             ("Rescan apps", RESCAN),
             ("Import old settings…", IMPORT),
             ("Open data folder", OPEN_DATA),
+            ("Arrange the bar…", ARRANGE),
             ("Appearance…", APPEARANCE),
             ("Close", CLOSE),
         ] {
@@ -448,9 +450,9 @@ fn layout() {
 
     // Status + actions row.
     let y2 = y1 + bh + gap;
-    let actions_w = s(5 * 130 + 4 * 6);
+    let actions_w = s(6 * 130 + 5 * 6);
     place(STATUS, m, y2 + s(5), width - actions_w - gap, lh);
-    row(&[RESCAN, IMPORT, OPEN_DATA, APPEARANCE, CLOSE], rc.right - m - actions_w, y2, actions_w);
+    row(&[RESCAN, IMPORT, OPEN_DATA, ARRANGE, APPEARANCE, CLOSE], rc.right - m - actions_w, y2, actions_w);
 
     for lv in [APPS, ALL] {
         let mut lrc = RECT::default();
@@ -1371,6 +1373,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 IMPORT => import_old(hwnd),
                 OPEN_DATA => app::open_data_folder(),
                 APPEARANCE => super::appearancewin::show(),
+                ARRANGE => super::arrangewin::show(),
                 REFRESH_LABEL => refresh_category_apps(),
                 CLOSE => unsafe {
                     let _ = DestroyWindow(hwnd);

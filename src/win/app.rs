@@ -436,6 +436,7 @@ pub fn save() {
     }
     // Every change goes through here, so the strip always shows the saved state.
     strip::refresh();
+    super::arrangewin::bar_changed();
 }
 
 /// Rebuilds the catalog after custom apps changed.

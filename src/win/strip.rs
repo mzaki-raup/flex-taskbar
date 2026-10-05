@@ -7,7 +7,8 @@
 //! - right: **Link** (add an app, file, URL or web app) and ⚙ (settings).
 //!
 //! Resting the pointer on a category opens its flyout (see `flyout`). Pinned
-//! apps launch with a click. The look — theme, colours, transparency, border,
+//! apps launch with a click. Categories and apps can be dragged along the bar
+//! to rearrange them (the order is `Config::bar_order`). The look — theme, colours, transparency, border,
 //! corners, floating margin, width, sizes — comes from the Appearance
 //! settings. The bar is a per-pixel-alpha layered window drawn with `canvas`.
 //!
@@ -34,18 +35,21 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::Controls::{
     TTF_SUBCLASS, TTM_ADDTOOLW, TTM_DELTOOLW, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+};
 use windows::Win32::UI::Shell::{
     ABE_BOTTOM, ABE_TOP, ABM_GETTASKBARPOS, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, ABN_FULLSCREENAPP,
     ABN_POSCHANGED, ABN_STATECHANGE, APPBARDATA, DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHAppBarMessage,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HWND_TOPMOST,
-    InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING, PostMessageW,
-    RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SendMessageW, SetForegroundWindow, SetTimer,
-    SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WINDOW_STYLE, WM_APP,
-    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP,
-    WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, GetSystemMetrics,
+    HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+    PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SendMessageW,
+    SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenuEx, WINDOW_STYLE, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
+    WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -84,6 +88,10 @@ struct Strip {
     reserved: bool,
     edge: u32,
     tools: usize,
+    /// Left button held on an item: (item index, x where it went down).
+    press: Option<(usize, i32)>,
+    /// Item being dragged, and the pointer's x.
+    drag: Option<(usize, i32)>,
 }
 
 thread_local! {
@@ -193,6 +201,8 @@ fn create() {
             reserved: false,
             edge: ABE_BOTTOM,
             tools: 0,
+            press: None,
+            drag: None,
         })
     });
     unsafe {
@@ -258,13 +268,14 @@ pub fn refresh() {
     let (items, names, sources) = app::with(|s| {
         let mut items = Vec::new();
         let mut names = Vec::new();
-        for c in &s.cfg.categories {
-            items.push(Item::Category(c.id));
-            names.push(c.name.clone());
-        }
-        for id in &s.cfg.pinned {
-            if let Some(a) = s.catalog.get(id) {
-                items.push(Item::App(id.clone()));
+        for key in s.cfg.bar_keys() {
+            if let Some(id) = key.strip_prefix("cat:").and_then(|id| id.parse::<u64>().ok()) {
+                if let Some(c) = s.cfg.categories.iter().find(|c| c.id == id) {
+                    items.push(Item::Category(id));
+                    names.push(c.name.clone());
+                }
+            } else if let Some(a) = s.catalog.get(&key) {
+                items.push(Item::App(key));
                 names.push(a.name.clone());
             }
         }
@@ -553,6 +564,37 @@ fn reposition() {
     }
 }
 
+// ---------------------------------------------------------------- dragging
+
+/// Which item each visible slot shows: the bar's order, or while dragging,
+/// the order it would have if dropped now.
+fn display_order(s: &Strip) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..s.items.len()).collect();
+    if let Some((from, x)) = s.drag {
+        order.remove(from);
+        order.insert(striplayout::drop_index(&s.layout.items, x - margin(s)).min(order.len()), from);
+    }
+    order
+}
+
+/// Finishes a drag: the item moves to where it was dropped. Dropping it away
+/// from the bar cancels.
+fn drop_item(from: usize, x: i32, y: i32) {
+    let target = with(|s| {
+        let m = margin(s);
+        let over_bar = y >= -bar_height(s) && y < ui::rect_h(&s.win) + bar_height(s);
+        let key = s.items.get(from).map(key_of)?;
+        over_bar.then(|| (key, striplayout::drop_index(&s.layout.items, x - m)))
+    })
+    .flatten();
+    match target {
+        Some((key, to)) if app::with(|s| s.cfg.move_bar_item(&key, to)) => {
+            app::save();
+        }
+        _ => render(),
+    }
+}
+
 // ---------------------------------------------------------------- drawing
 
 fn render() {
@@ -617,9 +659,10 @@ fn render() {
         // Centre: categories and pinned apps.
         let size = scale(s.look.icon_size as i32, d);
         let cy = m + bh / 2.0;
-        for (i, slot) in s.layout.items.iter().enumerate() {
-            draw_state(&mut cv, Hit::Item(i), *slot);
-            let x = m as i32 + slot.x + (slot.w - size) / 2;
+        // While dragging, the others make room where the dragged one would land.
+        let order = display_order(s);
+        let draw_item = |cv: &mut Canvas, i: usize, left: i32, w: i32| {
+            let x = m as i32 + left + (w - size) / 2;
             let y = (cy - size as f32 / 2.0) as i32;
             let is_cat = matches!(s.items[i], Item::Category(_));
             match s.icons.get(&key_of(&s.items[i])).and_then(|p| p.as_ref()) {
@@ -641,6 +684,26 @@ fn render() {
                     c.subtle,
                 );
             }
+        };
+        for (pos, slot) in s.layout.items.iter().enumerate() {
+            let i = order[pos];
+            if s.drag.is_some_and(|(from, _)| from == i) {
+                // The drop spot.
+                cv.fill_round_rect(m + slot.x as f32, m + inset, slot.w as f32, bh - 2.0 * inset, r4, c.hover);
+                continue;
+            }
+            if s.drag.is_none() {
+                draw_state(&mut cv, Hit::Item(pos), *slot);
+            }
+            draw_item(&mut cv, i, slot.x, slot.w);
+        }
+        if let Some((from, x)) = s.drag
+            && let Some(slot) = s.layout.items.first()
+        {
+            // The dragged button follows the pointer.
+            let left = (x - m as i32 - slot.w / 2).clamp(s.layout.bar.x, s.layout.bar.right() - slot.w);
+            cv.fill_round_rect(m + left as f32, m + inset, slot.w as f32, bh - 2.0 * inset, r4, c.pressed);
+            draw_item(&mut cv, from, left, slot.w);
         }
 
         // Right: Link, settings.
@@ -704,6 +767,12 @@ fn add_link() {
 
 /// Right-click menu for one button; the full menu elsewhere.
 fn context_menu(hit: Option<Hit>) {
+    // A pending hover would otherwise open a flyout over the menu.
+    if let Some(h) = hwnd() {
+        unsafe {
+            let _ = KillTimer(Some(h), TIMER_HOVER);
+        }
+    }
     flyout::close();
     let item = hit.and_then(item);
     let Some(item) = item else {
@@ -722,15 +791,12 @@ fn context_menu(hit: Option<Hit>) {
     const MANAGE: usize = 4;
     const LOOK: usize = 5;
     const HIDE: usize = 6;
-    let (can_left, can_right) = app::with(|s| match &item {
-        Item::Category(id) => {
-            let pos = s.cfg.categories.iter().position(|c| c.id == *id).unwrap_or(0);
-            (pos > 0, pos + 1 < s.cfg.categories.len())
-        }
-        Item::App(id) => {
-            let pos = s.cfg.pinned.iter().position(|p| p == id).unwrap_or(0);
-            (pos > 0, pos + 1 < s.cfg.pinned.len())
-        }
+    const ARRANGE: usize = 7;
+    let key = key_of(&item);
+    let (can_left, can_right) = app::with(|s| {
+        let keys = s.cfg.bar_keys();
+        let pos = keys.iter().position(|k| *k == key).unwrap_or(0);
+        (pos > 0, pos + 1 < keys.len())
     });
     let chosen = unsafe {
         let menu = CreatePopupMenu().unwrap_or_default();
@@ -753,6 +819,7 @@ fn context_menu(hit: Option<Hit>) {
             let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_STRING, id, PCWSTR(t.as_ptr()));
             pos += 1;
         };
+        add(ARRANGE, "Arrange the bar…");
         add(MANAGE, "Manage categories…");
         add(LOOK, "Appearance…");
         add(HIDE, "Hide icon strip");
@@ -769,10 +836,7 @@ fn context_menu(hit: Option<Hit>) {
     match chosen {
         LEFT | RIGHT => {
             let delta = if chosen == LEFT { -1 } else { 1 };
-            app::with(|s| match &item {
-                Item::Category(id) => crate::tree::move_sibling(&mut s.cfg.categories, *id, delta),
-                Item::App(id) => s.cfg.move_pinned(id, delta),
-            });
+            app::with(|s| s.cfg.move_bar_by(&key, delta));
             app::save();
         }
         UNPIN => {
@@ -786,6 +850,7 @@ fn context_menu(hit: Option<Hit>) {
             Item::App(_) => super::manager::show(),
         },
         LOOK => super::appearancewin::show(),
+        ARRANGE => super::arrangewin::show(),
         HIDE => app::perform(menu::Action::ToggleStrip),
         _ => {}
     }
@@ -837,8 +902,45 @@ fn mouse_xy(lparam: LPARAM) -> (i32, i32) {
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_LBUTTONDOWN => {
+            let (x, y) = mouse_xy(lparam);
+            if let Some(Hit::Item(i)) = hit_at(x, y) {
+                with(|s| s.press = Some((i, x)));
+                unsafe {
+                    SetCapture(hwnd);
+                }
+            }
+            LRESULT(0)
+        }
         WM_MOUSEMOVE => {
             let (x, y) = mouse_xy(lparam);
+            // Dragging an item along the bar?
+            let threshold = unsafe { GetSystemMetrics(SM_CXDRAG) }.max(2);
+            let dragging = with(|s| {
+                if let Some((from, x0)) = s.press
+                    && s.drag.is_none()
+                    && (x - x0).abs() >= threshold
+                {
+                    s.drag = Some((from, x));
+                    s.hover = None;
+                    return Some(true);
+                }
+                s.drag.as_mut().map(|d| {
+                    d.1 = x;
+                    false
+                })
+            })
+            .flatten();
+            if let Some(started) = dragging {
+                if started {
+                    flyout::close();
+                    unsafe {
+                        let _ = KillTimer(Some(hwnd), TIMER_HOVER);
+                    }
+                }
+                render();
+                return LRESULT(0);
+            }
             let under = hit_at(x, y);
             let (changed, start_leave) = with(|s| {
                 let changed = s.hover != under;
@@ -906,13 +1008,26 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_LBUTTONUP => {
             let (x, y) = mouse_xy(lparam);
+            let (press, drag) = with(|s| (s.press.take(), s.drag.take())).unwrap_or_default();
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
+                if press.is_some() {
+                    let _ = ReleaseCapture();
+                }
             }
-            if let Some(h) = hit_at(x, y) {
+            if let Some((from, _)) = drag {
+                drop_item(from, x, y);
+            } else if let Some(h) = hit_at(x, y) {
                 click(h);
             } else {
                 flyout::close();
+            }
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            // Capture lost mid-drag (another window took it): cancel.
+            if with(|s| s.press.take().is_some() | s.drag.take().is_some()).unwrap_or(false) {
+                render();
             }
             LRESULT(0)
         }

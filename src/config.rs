@@ -136,8 +136,12 @@ pub struct Config {
     pub app_icons: BTreeMap<String, String>,
     /// Most recent first.
     pub recents: Vec<String>,
-    /// Apps pinned to the icon strip, left to right (after the root categories).
+    /// Apps pinned to the icon strip.
     pub pinned: Vec<String>,
+    /// Order of the strip's buttons, as keys: `cat:<id>` for a root category,
+    /// the app id for a pinned app. Buttons missing from it follow, root
+    /// categories first; keys that no longer exist are ignored.
+    pub bar_order: Vec<String>,
     pub next_id: u64,
 }
 
@@ -151,6 +155,7 @@ impl Default for Config {
             app_icons: BTreeMap::new(),
             recents: Vec::new(),
             pinned: Vec::new(),
+            bar_order: Vec::new(),
             next_id: 1,
         }
     }
@@ -193,15 +198,41 @@ impl Config {
         self.pinned.len() != before
     }
 
-    /// Moves a pinned app one place left (`-1`) or right (`1`).
-    pub fn move_pinned(&mut self, app_id: &str, delta: isize) -> bool {
-        let Some(pos) = self.pinned.iter().position(|p| p == app_id) else { return false };
-        let target = pos as isize + delta;
-        if target < 0 || target as usize >= self.pinned.len() {
+    /// The strip's buttons, left to right, as keys (see [`Config::bar_order`]).
+    pub fn bar_keys(&self) -> Vec<String> {
+        let roots: Vec<String> = self.categories.iter().map(|c| format!("cat:{}", c.id)).collect();
+        let exists = |k: &String| roots.contains(k) || self.pinned.contains(k);
+        let mut out: Vec<String> = Vec::with_capacity(roots.len() + self.pinned.len());
+        for k in self.bar_order.iter().chain(&roots).chain(&self.pinned) {
+            if exists(k) && !out.contains(k) {
+                out.push(k.clone());
+            }
+        }
+        out
+    }
+
+    /// Moves a strip button to position `to` (counted after it is taken
+    /// out). Returns false if nothing changed.
+    pub fn move_bar_item(&mut self, key: &str, to: usize) -> bool {
+        let mut keys = self.bar_keys();
+        let Some(pos) = keys.iter().position(|k| k == key) else { return false };
+        let k = keys.remove(pos);
+        let to = to.min(keys.len());
+        keys.insert(to, k);
+        let changed = pos != to;
+        self.bar_order = keys;
+        changed
+    }
+
+    /// Moves a strip button `delta` places left (negative) or right.
+    pub fn move_bar_by(&mut self, key: &str, delta: isize) -> bool {
+        let keys = self.bar_keys();
+        let Some(pos) = keys.iter().position(|k| k == key) else { return false };
+        let to = pos as isize + delta;
+        if to < 0 || to as usize >= keys.len() {
             return false;
         }
-        self.pinned.swap(pos, target as usize);
-        true
+        self.move_bar_item(key, to as usize)
     }
 
     pub fn custom_app(&self, id: &str) -> Option<&CustomApp> {
@@ -409,12 +440,40 @@ mod tests {
         assert!(cfg.pin("a"));
         assert!(cfg.pin("b"));
         assert!(!cfg.pin("a"));
-        assert!(cfg.move_pinned("b", -1));
-        assert!(!cfg.move_pinned("b", -1));
-        assert_eq!(cfg.pinned, vec!["b".to_string(), "a".to_string()]);
         assert!(cfg.unpin("b"));
         assert!(!cfg.unpin("b"));
         assert_eq!(cfg.pinned, vec!["a".to_string()]);
+    }
+
+    fn keys(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn bar_order() {
+        let mut cfg = Config::default();
+        for (id, name) in [(1, "A"), (2, "B")] {
+            cfg.categories.push(Category { id, name: name.into(), ..Default::default() });
+        }
+        cfg.pin("x");
+        cfg.pin("y");
+        // Default: root categories, then pinned apps.
+        assert_eq!(cfg.bar_keys(), keys(&["cat:1", "cat:2", "x", "y"]));
+        // Apps and categories can be mixed freely.
+        assert!(cfg.move_bar_item("y", 0));
+        assert_eq!(cfg.bar_keys(), keys(&["y", "cat:1", "cat:2", "x"]));
+        assert!(cfg.move_bar_item("cat:1", 3));
+        assert_eq!(cfg.bar_keys(), keys(&["y", "cat:2", "x", "cat:1"]));
+        assert!(!cfg.move_bar_item("cat:1", 9)); // already last
+        assert!(cfg.move_bar_by("x", -1));
+        assert!(!cfg.move_bar_by("y", -1));
+        assert!(!cfg.move_bar_item("nope", 0));
+        assert_eq!(cfg.bar_keys(), keys(&["y", "x", "cat:2", "cat:1"]));
+        // New buttons join at the end; removed ones drop out.
+        cfg.pin("z");
+        cfg.unpin("x");
+        cfg.categories.retain(|c| c.id != 2);
+        assert_eq!(cfg.bar_keys(), keys(&["y", "cat:1", "z"]));
     }
 
     #[test]

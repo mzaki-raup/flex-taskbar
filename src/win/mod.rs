@@ -3,6 +3,7 @@
 mod app;
 mod appdialog;
 mod appearancewin;
+mod arrangewin;
 mod autostart;
 mod canvas;
 mod catalog;
