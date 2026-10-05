@@ -35,9 +35,9 @@ bar sits next to it, on the same edge, and it can be turned off.
 
 ![Hovering a category, subcategory flyouts floating above it three levels deep, sliding between categories, launching a pinned app, All apps, dragging an icon to rearrange the bar, and changing the appearance live](screenshots/flow.gif)
 
-**The bar**: *All* on the left, root categories (▾) and pinned apps in the
-centre, *Link* and settings (⚙) on the right. These are the defaults, which
-match the original .NET version.
+**The bar**: *All* on the left, then root categories (▾) and pinned apps
+packed right after it, *Link* and settings (⚙) on the right. (Centred icons,
+as in the original .NET version, are one setting away.)
 
 ![The bar with All, category and app icons, Link and the settings gear](screenshots/strip.png)
 
@@ -90,10 +90,12 @@ original FlexTaskbar:
   that edge, like the Windows taskbar. Or pick *Position* in the Appearance
   window (*Next to the Windows taskbar*, *Bottom*, *Top*, *Left*, *Right*).
   On the left or right edge the bar stands upright: *All* at the top, icons
-  down the middle, *Link* and ⚙ at the bottom.
+  straight underneath it, *Link* and ⚙ at the bottom.
 - **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
   right-click an app to pin or unpin it).
-- **Centre: root categories and pinned apps.** A small ▾ marks a category.
+- **Next: root categories and pinned apps**, packed right after *All* with no
+  empty space before them, on every edge (or centred on the bar, if you set
+  *Icons* to *Centred* in the Appearance window). A small ▾ marks a category.
 - **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
   path and pins it to the bar. ⚙ opens the Manage window.
 - **Category flyouts.** Resting the pointer on a category opens a flyout beside
@@ -152,6 +154,7 @@ Every change shows on the bar straight away:
 | **Bar** | | |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
+| Icons | At the start, right after *All* (at the top on a side bar), or centred | At the start |
 | Border colour | Any colour | A faint line in the text colour |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
@@ -205,7 +208,7 @@ custom icons are copied over.
 ### What changed from the .NET version
 
 The docked bar is back in its original look: *All* on the left, category and
-app icons in the centre, *Link* and ⚙ on the right, and category flyouts with
+app icons next to it (or centred), *Link* and ⚙ on the right, and category flyouts with
 subcategory and app tiles. Managing categories moved out of the flyouts into
 the Manage window. Subcategory flyouts open beyond the one they come from,
 like the bar's own categories, and the bar can sit on any edge of the screen. Its colours, transparency,
@@ -355,14 +358,14 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 39 unit tests cover:
+The 40 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
 - category tree operations at any depth: add, remove, reorder, indent/outdent,
   app membership
 - search ranking
-- bar layout (the three zones, centring, overflow, the fitted dock, hit
+- bar layout (the three zones, packing icons after *All* or centring them, overflow, the fitted dock, hit
   testing, where a dragged icon lands), which edge a dragged bar docks to,
   where flyouts open for each edge (and staying on screen), how flyout tiles
   run for each edge (rows for top and bottom bars, columns for side bars),

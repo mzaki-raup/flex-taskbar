@@ -2,7 +2,8 @@
 //! border, corners, size. Pure data plus the colour resolution, so it can be
 //! unit-tested off Windows.
 //!
-//! The defaults reproduce the original .NET FlexTaskbar bar.
+//! The defaults reproduce the original .NET FlexTaskbar bar, except that icons
+//! are packed after All instead of centred.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -22,6 +23,15 @@ pub enum DockWidth {
     Full,
     /// Just wide enough for its buttons, centred (a floating dock).
     Fit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IconAlign {
+    /// Right after All (on a side bar: at the top), with no gap.
+    Start,
+    /// Centred on the bar, like the Windows 11 taskbar.
+    Centre,
 }
 
 /// An sRGB colour with alpha.
@@ -100,6 +110,8 @@ pub struct Appearance {
     /// Gap between the bar and the screen edges in DIPs (0 = docked flush).
     pub margin: u32,
     pub dock_width: DockWidth,
+    /// Where the categories and apps sit along the bar.
+    pub icon_align: IconAlign,
     /// Icon size on the bar and in flyout tiles, in DIPs.
     pub icon_size: u32,
     /// App tiles per row in a category flyout.
@@ -124,6 +136,7 @@ impl Default for Appearance {
             corner_radius: 0,
             margin: 0,
             dock_width: DockWidth::Full,
+            icon_align: IconAlign::Start,
             icon_size: 32,
             flyout_columns: 4,
             flyout_corner_radius: 6,

@@ -6,7 +6,7 @@ use super::app;
 use super::canvas;
 use super::ui::{self, scale, wide};
 use super::{searchwin, strip, theme};
-use crate::appearance::{Appearance, DockWidth, Rgba, ThemeMode};
+use crate::appearance::{Appearance, DockWidth, IconAlign, Rgba, ThemeMode};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
@@ -24,6 +24,7 @@ use windows::core::{PCWSTR, w};
 const THEME: u16 = 10;
 const DOCK: u16 = 11;
 const POSITION: u16 = 12;
+const ALIGN: u16 = 13;
 // Colour buttons, and their "Default" buttons (+100).
 const ACCENT: u16 = 20;
 const BACKGROUND: u16 = 21;
@@ -108,7 +109,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 21] = [
+const ROWS: [Row; 22] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -128,6 +129,7 @@ const ROWS: [Row; 21] = [
         &["Next to the Windows taskbar", "Bottom", "Top", "Left", "Right"],
     ),
     Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
+    Row::Combo(ALIGN, "Icons", &["At the start, right after All", "Centred"]),
     Row::Colour(BORDER),
     Row::Slider(BORDER_WIDTH),
     Row::Slider(RADIUS),
@@ -346,6 +348,7 @@ fn load() {
     };
     sel(THEME, a.theme as usize);
     sel(DOCK, a.dock_width as usize);
+    sel(ALIGN, a.icon_align as usize);
     sel(POSITION, app::with(|s| s.cfg.settings.strip_edge) as usize);
     for (id, value) in [
         (OPACITY, a.opacity as u32),
@@ -469,6 +472,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                         [StripEdge::Taskbar, StripEdge::Bottom, StripEdge::Top, StripEdge::Left, StripEdge::Right]
                             [i.min(4)];
                     change_settings(|st| st.strip_edge = edge);
+                }
+                (ALIGN, CBN_SELCHANGE) => {
+                    let i = combo(id);
+                    change(|a, _| a.icon_align = [IconAlign::Start, IconAlign::Centre][i.min(1)]);
                 }
                 (THEME | DOCK, CBN_SELCHANGE) => {
                     let i = combo(id);

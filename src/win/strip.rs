@@ -24,7 +24,7 @@ use super::flyout;
 use super::menu;
 use super::theme;
 use super::ui::{self, scale, wide};
-use crate::appearance::{Appearance, Colors, DockWidth};
+use crate::appearance::{Appearance, Colors, DockWidth, IconAlign};
 use crate::config::CustomApp;
 use crate::striplayout::{self, BarLayout, Edge, Hit, Metrics, Slot};
 use resvg::tiny_skia::Pixmap;
@@ -320,7 +320,7 @@ pub fn key_of(item: &Item) -> String {
 }
 
 fn empty_metrics() -> Metrics {
-    Metrics { pad: 0, item_w: 1, gap: 0, left: Vec::new(), right: Vec::new() }
+    Metrics { pad: 0, item_w: 1, gap: 0, left: Vec::new(), right: Vec::new(), centre: false }
 }
 
 fn metrics(s: &Strip) -> Metrics {
@@ -341,6 +341,7 @@ fn metrics(s: &Strip) -> Metrics {
         gap: scale(4, d),
         left: vec![all],
         right: vec![link, settings],
+        centre: s.look.icon_align == IconAlign::Centre,
     }
 }
 

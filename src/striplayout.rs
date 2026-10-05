@@ -35,6 +35,9 @@ pub struct Metrics {
     pub left: Vec<i32>,
     /// Widths of the right-hand buttons, in order.
     pub right: Vec<i32>,
+    /// Centre the items on the bar (the original look); otherwise they start
+    /// right after the left-hand buttons.
+    pub centre: bool,
 }
 
 pub struct BarLayout {
@@ -70,7 +73,8 @@ fn run_width(widths: &[i32], gap: i32) -> i32 {
 }
 
 pub fn bar_layout(width: i32, m: &Metrics, count: usize, fit: bool) -> BarLayout {
-    let zone_gap = m.gap * 4;
+    // Centred items keep clear of the side buttons; packed ones sit close.
+    let zone_gap = if m.centre { m.gap * 4 } else { m.gap * 2 };
     let left_w = run_width(&m.left, m.gap);
     let right_w = run_width(&m.right, m.gap);
     let item_w = |n: usize| n as i32 * m.item_w + (n as i32 - 1).max(0) * m.gap;
@@ -97,8 +101,9 @@ pub fn bar_layout(width: i32, m: &Metrics, count: usize, fit: bool) -> BarLayout
     let room = (hi - lo).max(0);
     let n = count.min(((room + m.gap) / (m.item_w + m.gap)).max(0) as usize);
     let total = item_w(n);
-    // Centred on the whole bar, nudged inward if that would overlap a side zone.
-    let start = ((width - total) / 2).max(lo).min(hi - total);
+    // Centred on the whole bar, nudged inward if that would overlap a side
+    // zone; or packed at the start.
+    let start = if m.centre { ((width - total) / 2).max(lo).min(hi - total) } else { lo };
     let items = (0..n).map(|i| Slot { x: start + i as i32 * (m.item_w + m.gap), w: m.item_w }).collect();
     BarLayout { bar, left, items, right }
 }
@@ -204,7 +209,7 @@ mod tests {
     use super::*;
 
     fn metrics() -> Metrics {
-        Metrics { pad: 8, item_w: 44, gap: 4, left: vec![40], right: vec![60, 30] }
+        Metrics { pad: 8, item_w: 44, gap: 4, left: vec![40], right: vec![60, 30], centre: true }
     }
 
     #[test]
@@ -215,6 +220,17 @@ mod tests {
         assert_eq!(l.right.last().unwrap().right(), 1000 - 8);
         let total = 3 * 44 + 2 * 4;
         assert_eq!(l.items[0].x, (1000 - total) / 2);
+    }
+
+    #[test]
+    fn packed_items_start_right_after_the_left_buttons() {
+        let m = Metrics { centre: false, ..metrics() };
+        let l = bar_layout(1000, &m, 3, false);
+        assert_eq!(l.items[0].x, l.left[0].right() + 2 * 4);
+        assert_eq!(l.items[1].x, l.items[0].right() + 4);
+        // The side buttons stay at the ends.
+        assert_eq!(l.right.last().unwrap().right(), 1000 - 8);
+        assert_eq!(hit(&l, l.items[0].x + 1), Some(Hit::Item(0)));
     }
 
     #[test]
