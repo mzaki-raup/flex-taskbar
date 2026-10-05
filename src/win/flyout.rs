@@ -766,11 +766,10 @@ fn present(idx: usize) -> bool {
         let t = l.anim.map(|(start, _)| start.elapsed().as_secs_f32() * 1000.0 / ms as f32).unwrap_or(1.0);
         let anim = l.anim.filter(|_| t < 1.0);
         l.anim = anim;
-        let cv = match anim {
-            Some((_, across)) => animation_frame(pix, style, t, across),
-            None => Canvas { pix: pix.clone() },
-        };
-        cv.present(l.hwnd, l.win.left, l.win.top);
+        match anim {
+            Some((_, across)) => animation_frame(pix, style, t, across).present(l.hwnd, l.win.left, l.win.top),
+            None => canvas::present_pixmap(pix, l.hwnd, l.win.left, l.win.top),
+        }
         anim.is_some()
     })
 }

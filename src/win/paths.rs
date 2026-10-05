@@ -54,4 +54,18 @@ impl Paths {
     pub fn apps_cache(&self) -> PathBuf {
         self.data.join("apps-cache.json")
     }
+
+    /// A picture in `icons` by the file name stored in the settings. Only a
+    /// bare file name is accepted, so a hand-edited or shared config can't
+    /// make the app read, or delete, a file outside that folder.
+    pub fn icon_file(&self, name: &str) -> Option<PathBuf> {
+        crate::config::is_plain_file_name(name).then(|| self.icons.join(name))
+    }
+}
+
+/// Deletes a picture the app copied into `icons` (see [`Paths::icon_file`]).
+pub fn remove_icon(name: &str) {
+    if let Some(p) = get().icon_file(name) {
+        let _ = std::fs::remove_file(p);
+    }
 }

@@ -13,6 +13,7 @@ mod indicator;
 mod launch;
 mod manager;
 mod menu;
+mod panel;
 mod paths;
 mod searchwin;
 mod strip;

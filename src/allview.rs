@@ -164,9 +164,8 @@ fn shown(e: &Entry, v: &AllAppsView) -> bool {
 /// headings when grouped. `roots` are the root categories in tree order.
 pub fn lines(entries: &[Entry], v: &AllAppsView, roots: &[(u64, String)]) -> Vec<Line> {
     let mut idx: Vec<usize> = (0..entries.len()).filter(|&i| shown(&entries[i], v)).collect();
-    let by_name =
-        |a: &usize, b: &usize| entries[*a].name.to_lowercase().cmp(&entries[*b].name.to_lowercase()).then(a.cmp(b));
-    idx.sort_by(by_name);
+    // Each name lowercased once, not on every comparison.
+    idx.sort_by_cached_key(|&i| (entries[i].name.to_lowercase(), i));
     let apps = |list: &[usize]| list.iter().map(|&i| Line::App(i)).collect::<Vec<_>>();
     let mut out = Vec::new();
     let group = |title: &str, list: Vec<usize>, out: &mut Vec<Line>| {

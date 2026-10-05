@@ -1,9 +1,9 @@
 //! Small Win32 helpers shared by every window.
 
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    COLOR_WINDOW, COLOR_WINDOWTEXT, CreateFontIndirectW, DeleteObject, GetMonitorInfoW, GetSysColor, GetSysColorBrush,
-    HDC, HFONT, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, SetBkColor, SetTextColor,
+    CreateFontIndirectW, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MonitorFromPoint,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, SystemParametersInfoForDpi};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
@@ -156,17 +156,6 @@ pub fn rect_h(r: &RECT) -> i32 {
 /// Static-control style for labels: SS_NOPREFIX (show `&` literally) |
 /// SS_ENDELLIPSIS (truncate with … instead of wrapping).
 pub const SS_LABEL: WINDOW_STYLE = WINDOW_STYLE(0x0080 | 0x4000);
-
-/// WM_CTLCOLORSTATIC handler that gives labels and checkboxes the window
-/// background instead of the grey dialog face.
-pub fn static_colors(wparam: WPARAM) -> LRESULT {
-    unsafe {
-        let hdc = HDC(wparam.0 as *mut _);
-        SetBkColor(hdc, COLORREF(GetSysColor(COLOR_WINDOW)));
-        SetTextColor(hdc, COLORREF(GetSysColor(COLOR_WINDOWTEXT)));
-        LRESULT(GetSysColorBrush(COLOR_WINDOW).0 as isize)
-    }
-}
 
 /// Work area of the monitor under the mouse cursor.
 pub fn work_area_at_cursor() -> RECT {

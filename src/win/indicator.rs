@@ -13,21 +13,23 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    /// The user's indicator picture, by (file name, pixel size).
-    static IMAGES: RefCell<HashMap<(String, i32), Option<Pixmap>>> = RefCell::new(HashMap::new());
+    /// The user's pictures (the indicator's, the *All* button's), by file
+    /// name and pixel size.
+    static IMAGES: RefCell<HashMap<String, HashMap<i32, Option<Pixmap>>>> = RefCell::new(HashMap::new());
 }
 
-/// A picture from the data folder's `icons` at `size` pixels, loaded once
-/// (the indicator's picture, the *All* button's).
-pub fn image(file: &str, size: i32) -> Option<Pixmap> {
-    let key = (file.to_string(), size);
-    if let Some(p) = IMAGES.with(|m| m.borrow().get(&key).cloned()) {
-        return p;
-    }
-    let path = paths::get().icons.join(file);
-    let pix = canvas::icon_pixmap(&IconSource::Image(path), size);
-    IMAGES.with(|m| m.borrow_mut().insert(key, pix.clone()));
-    pix
+/// Calls `f` with a picture from the data folder's `icons` at `size` pixels,
+/// loaded once. Drawn every frame of the bar, so it neither allocates nor
+/// copies once loaded. `None` when the picture can't be read.
+pub fn with_image<R>(file: &str, size: i32, f: impl FnOnce(&Pixmap) -> R) -> Option<R> {
+    IMAGES.with(|m| {
+        let mut m = m.borrow_mut();
+        if !m.get(file).is_some_and(|sizes| sizes.contains_key(&size)) {
+            let pix = paths::get().icon_file(file).and_then(|path| canvas::icon_pixmap(&IconSource::Image(path), size));
+            m.entry(file.to_string()).or_default().insert(size, pix);
+        }
+        m.get(file)?.get(&size)?.as_ref().map(f)
+    })
 }
 
 /// Forget loaded pictures (a new one was chosen).
@@ -77,11 +79,9 @@ pub fn draw(cv: &mut Canvas, look: &Appearance, c: &Colors, edge: Edge, x: i32, 
         }
         Indicator::Image => {
             let px = (s * k).round() as i32;
-            if let Some(file) = &look.indicator_image
-                && let Some(img) = image(file, px)
-            {
+            if let Some(file) = &look.indicator_image {
                 let (ix, iy) = ((cx - px as f32 / 2.0) as i32, (cy - px as f32 / 2.0) as i32);
-                cv.image(&img, ix, iy, px, 1.0);
+                with_image(file, px, |img| cv.image(img, ix, iy, px, 1.0));
             }
         }
     }

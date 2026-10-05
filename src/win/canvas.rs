@@ -15,7 +15,7 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_NOPREFIX,
     DT_SINGLELINE, DeleteDC, DeleteObject, DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
     FONT_QUALITY, FW_NORMAL, FW_SEMIBOLD, GdiFlush, GetDC, GetDIBits, HBITMAP, HDC, HFONT, HGDIOBJ, ReleaseDC,
-    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+    SelectObject, SetBkMode, SetDIBitsToDevice, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{ULW_ALPHA, UpdateLayeredWindow};
 use windows::core::PCWSTR;
@@ -205,49 +205,80 @@ impl Canvas {
         }
     }
 
+    /// Copies the (opaque) picture onto a window's device context at its
+    /// top left, for `WM_PAINT`.
+    pub fn blit(&self, hdc: HDC) {
+        let (w, h) = (self.width(), self.height());
+        let mut bgra = Vec::with_capacity((w * h * 4) as usize);
+        for s in self.pix.data().as_chunks::<4>().0 {
+            bgra.extend_from_slice(&[s[2], s[1], s[0], 255]);
+        }
+        unsafe {
+            SetDIBitsToDevice(
+                hdc,
+                0,
+                0,
+                w as u32,
+                h as u32,
+                0,
+                0,
+                0,
+                h as u32,
+                bgra.as_ptr() as *const _,
+                &bitmap_info(w, h),
+                DIB_RGB_COLORS,
+            );
+        }
+    }
+
     /// Puts the frame on screen at (`x`, `y`).
     pub fn present(&self, hwnd: HWND, x: i32, y: i32) {
-        let (w, h) = (self.width(), self.height());
-        unsafe {
-            let screen = GetDC(None);
-            let mem = CreateCompatibleDC(Some(screen));
-            let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-            let Ok(bmp) = CreateDIBSection(Some(mem), &bitmap_info(w, h), DIB_RGB_COLORS, &mut bits, None, 0) else {
-                let _ = DeleteDC(mem);
-                ReleaseDC(None, screen);
-                return;
-            };
-            // tiny-skia is premultiplied RGBA; GDI wants premultiplied BGRA.
-            let dst = std::slice::from_raw_parts_mut(bits as *mut u8, (w * h * 4) as usize);
-            for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(self.pix.data().as_chunks::<4>().0) {
-                d[0] = s[2];
-                d[1] = s[1];
-                d[2] = s[0];
-                d[3] = s[3];
-            }
-            let old = SelectObject(mem, HGDIOBJ(bmp.0));
-            let blend = BLENDFUNCTION {
-                BlendOp: AC_SRC_OVER as u8,
-                BlendFlags: 0,
-                SourceConstantAlpha: 255,
-                AlphaFormat: AC_SRC_ALPHA as u8,
-            };
-            let _ = UpdateLayeredWindow(
-                hwnd,
-                Some(screen),
-                Some(&POINT { x, y }),
-                Some(&SIZE { cx: w, cy: h }),
-                Some(mem),
-                Some(&POINT { x: 0, y: 0 }),
-                COLORREF(0),
-                Some(&blend),
-                ULW_ALPHA,
-            );
-            SelectObject(mem, old);
-            let _ = DeleteObject(HGDIOBJ(bmp.0));
+        present_pixmap(&self.pix, hwnd, x, y);
+    }
+}
+
+/// Puts `pix` on screen as the layered window `hwnd`, at (`x`, `y`).
+pub fn present_pixmap(pix: &Pixmap, hwnd: HWND, x: i32, y: i32) {
+    let (w, h) = (pix.width() as i32, pix.height() as i32);
+    unsafe {
+        let screen = GetDC(None);
+        let mem = CreateCompatibleDC(Some(screen));
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let Ok(bmp) = CreateDIBSection(Some(mem), &bitmap_info(w, h), DIB_RGB_COLORS, &mut bits, None, 0) else {
             let _ = DeleteDC(mem);
             ReleaseDC(None, screen);
+            return;
+        };
+        // tiny-skia is premultiplied RGBA; GDI wants premultiplied BGRA.
+        let dst = std::slice::from_raw_parts_mut(bits as *mut u8, (w * h * 4) as usize);
+        for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(pix.data().as_chunks::<4>().0) {
+            d[0] = s[2];
+            d[1] = s[1];
+            d[2] = s[0];
+            d[3] = s[3];
         }
+        let old = SelectObject(mem, HGDIOBJ(bmp.0));
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        let _ = UpdateLayeredWindow(
+            hwnd,
+            Some(screen),
+            Some(&POINT { x, y }),
+            Some(&SIZE { cx: w, cy: h }),
+            Some(mem),
+            Some(&POINT { x: 0, y: 0 }),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        );
+        SelectObject(mem, old);
+        let _ = DeleteObject(HGDIOBJ(bmp.0));
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
     }
 }
 

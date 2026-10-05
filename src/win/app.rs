@@ -498,11 +498,14 @@ pub fn launch_app(id: &str) {
             // A package manager's command-line tool opens in a console that
             // stays open (it would otherwise flash and close).
             AppSource::File(path) if matches!(entry.kind, AppKind::Package(_)) && is_console_program(path) => {
-                Target::Custom {
-                    target: "%ComSpec%".into(),
-                    args: format!("/k \"{path}\""),
-                    dir: "%USERPROFILE%".into(),
-                    admin: false,
+                match crate::pkgsources::console_args(path) {
+                    Some(args) => {
+                        Target::Custom { target: "%ComSpec%".into(), args, dir: "%USERPROFILE%".into(), admin: false }
+                    }
+                    // A path cmd can't be given safely: start it directly.
+                    None => {
+                        Target::Custom { target: path.clone(), args: String::new(), dir: String::new(), admin: false }
+                    }
                 }
             }
             AppSource::File(path) => {
@@ -614,7 +617,7 @@ pub fn icon(key: &str) -> Option<HBITMAP> {
 
 fn icon_source(s: &State, app_id: &str) -> Option<IconSource> {
     if let Some(file) = s.cfg.app_icons.get(app_id) {
-        return Some(IconSource::Image(paths::get().icons.join(file)));
+        return paths::get().icon_file(file).map(IconSource::Image);
     }
     match &s.catalog.get(app_id)?.source {
         AppSource::Shell(pn) => Some(IconSource::Shell(pn.clone())),
@@ -635,7 +638,7 @@ pub fn icon_source_for(s: &State, key: &str) -> Option<IconSource> {
     if let Some(cat) = key.strip_prefix("cat:") {
         let id: u64 = cat.parse().ok()?;
         return match crate::tree::find(&s.cfg.categories, id)?.icon.as_ref() {
-            Some(f) => Some(IconSource::Image(paths::get().icons.join(f))),
+            Some(f) => paths::get().icon_file(f).map(IconSource::Image),
             None => icon_source_for(s, FOLDER_ICON),
         };
     }
@@ -657,8 +660,9 @@ pub fn request_all_icons() {
             let key = format!("cat:{}", c.id);
             if let Some(file) = &c.icon
                 && !s.icons.contains_key(&key)
+                && let Some(path) = paths::get().icon_file(file)
             {
-                req.push((key, IconSource::Image(paths::get().icons.join(file))));
+                req.push((key, IconSource::Image(path)));
             }
         });
         // Recently used apps first: they're the likeliest to be shown next.
@@ -687,7 +691,8 @@ pub fn reload_icon(key: &str) {
             let id: u64 = cat.parse().unwrap_or(0);
             crate::tree::find(&s.cfg.categories, id)
                 .and_then(|c| c.icon.clone())
-                .map(|f| IconSource::Image(paths::get().icons.join(f)))
+                .and_then(|f| paths::get().icon_file(&f))
+                .map(IconSource::Image)
         } else {
             icon_source(s, key)
         };

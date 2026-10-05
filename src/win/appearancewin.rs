@@ -5,7 +5,7 @@
 use super::app;
 use super::canvas;
 use super::ui::{self, scale, wide};
-use super::{searchwin, strip, theme};
+use super::{panel, searchwin, strip, theme};
 use crate::appearance::{Appearance, DockWidth, FlyoutAnim, HoverAnim, Indicator, Rgba, ThemeMode};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,8 +15,9 @@ use windows::Win32::UI::Controls::Dialogs::{CC_FULLOPEN, CC_RGBINIT, CHOOSECOLOR
 use windows::Win32::UI::WindowsAndMessaging::{
     BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW, DestroyWindow, IsIconic, KillTimer, RegisterClassW, SW_RESTORE,
     SW_SHOW, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORSTATIC, WM_DESTROY, WM_HSCROLL, WM_TIMER, WM_USER, WNDCLASSW,
-    WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_ERASEBKGND, WM_HSCROLL,
+    WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_MINIMIZEBOX, WS_SYSMENU,
+    WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{PCWSTR, w};
 
@@ -69,7 +70,6 @@ struct Win {
     hwnd: HWND,
     controls: HashMap<u16, HWND>,
     font: HFONT,
-    heading: HFONT,
     /// Custom colours of the colour picker, kept while the window is open.
     custom: [COLORREF; 16],
 }
@@ -121,7 +121,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 29] = [
+const ROWS: [Row; 28] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -162,7 +162,6 @@ const ROWS: [Row; 29] = [
     ),
     Row::Picture(INDICATOR_IMAGE, "Picture (PNG, JPEG…)", "Remove"),
     Row::Slider(INDICATOR_SIZE),
-    Row::Heading(""),
 ];
 
 pub fn show() {
@@ -199,7 +198,7 @@ fn create() {
             WINDOW_EX_STYLE(0),
             PCWSTR(class.as_ptr()),
             w!("FlexTaskbar — Appearance"),
-            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
             0,
             0,
             100,
@@ -215,7 +214,6 @@ fn create() {
         let s = |v: i32| scale(v, dpi);
         let mut controls = HashMap::new();
         let mut labels = 0u16;
-        let mut bold: Vec<HWND> = Vec::new();
         let mut label = |controls: &mut HashMap<u16, HWND>, text: &str| {
             let id = LABEL_BASE + labels;
             labels += 1;
@@ -249,60 +247,76 @@ fn create() {
             h
         };
 
-        // One row per setting: a label on the left, the control on the right.
-        let (m, label_w, row_h, ctl_h) = (s(14), s(170), s(34), s(26));
-        let ctl_x = m + label_w;
-        let ctl_w = s(250);
-        let mut y = m;
+        // Each section is a card: a label on the left of each row, the control
+        // on the right. Two columns of cards, and a command bar at the bottom.
+        let pm = panel::metrics(dpi);
+        let (label_w, row_h, ctl_h, ctl_w) = (s(170), s(34), s(26), s(250));
+        let card_w = pm.pad + label_w + ctl_w + pm.pad;
+        let top = pm.header;
         let place = |h: HWND, x: i32, w: i32, height: i32, y: i32| {
             let _ = SetWindowPos(h, None, x, y + (row_h - height) / 2, w, height, SWP_NOZORDER);
         };
 
-        let (mut x0, mut bottom) = (0, 0);
+        let mut cards: Vec<panel::Card> = Vec::new();
+        // The card being filled: its top and title.
+        let mut open: Option<(i32, &str)> = None;
+        let (mut col_x, mut y) = (pm.margin, top);
+        let finish = |open: &mut Option<(i32, &str)>, cards: &mut Vec<panel::Card>, col_x: i32, y: &mut i32| {
+            if let Some((t, title)) = open.take() {
+                let bottom = *y + pm.pad / 2;
+                cards.push(panel::Card {
+                    rect: windows::Win32::Foundation::RECT { left: col_x, top: t, right: col_x + card_w, bottom },
+                    title: title.to_string(),
+                    subtitle: String::new(),
+                });
+                *y = bottom + pm.gap;
+            }
+        };
         for row in &ROWS {
+            let (lx, cx) = (col_x + pm.pad, col_x + pm.pad + label_w);
             match *row {
                 Row::Column => {
-                    bottom = bottom.max(y);
-                    x0 += ctl_x + ctl_w + m;
-                    y = m;
-                    continue;
+                    finish(&mut open, &mut cards, col_x, &mut y);
+                    col_x += card_w + pm.gap;
+                    y = top;
                 }
                 Row::Heading(text) => {
-                    if !text.is_empty() {
-                        let h = label(&mut controls, text);
-                        place(h, x0 + m, label_w + ctl_w, s(18), y + s(4));
-                        bold.push(h);
-                    }
+                    finish(&mut open, &mut cards, col_x, &mut y);
+                    open = Some((y, text));
+                    y = pm.content_top(y, false);
                 }
                 Row::Combo(id, text, items) => {
-                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
+                    place(label(&mut controls, text), lx, label_w, s(18), y);
                     let h = combo(id, items);
                     // A combo box's height includes its drop-down list.
-                    let _ = SetWindowPos(h, None, x0 + ctl_x, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
+                    let _ = SetWindowPos(h, None, cx, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
                     controls.insert(id, h);
+                    y += row_h;
                 }
                 Row::Colour(id) => {
                     let text = COLOURS.iter().find(|(c, _)| *c == id).map(|(_, t)| *t).unwrap_or_default();
-                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
+                    place(label(&mut controls, text), lx, label_w, s(18), y);
                     let h = button("", id);
-                    place(h, x0 + ctl_x, s(160), ctl_h, y);
+                    place(h, cx, s(160), ctl_h, y);
                     controls.insert(id, h);
                     let d = button("Default", id + DEFAULT_OFFSET);
-                    place(d, (x0 + ctl_x) + s(166), ctl_w - s(166), ctl_h, y);
+                    place(d, cx + s(166), ctl_w - s(166), ctl_h, y);
                     controls.insert(id + DEFAULT_OFFSET, d);
+                    y += row_h;
                 }
                 Row::Picture(id, text, remove) => {
-                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
+                    place(label(&mut controls, text), lx, label_w, s(18), y);
                     let h = button("Choose…", id);
-                    place(h, x0 + ctl_x, s(160), ctl_h, y);
+                    place(h, cx, s(160), ctl_h, y);
                     controls.insert(id, h);
                     let d = button(remove, id + DEFAULT_OFFSET);
-                    place(d, x0 + ctl_x + s(166), ctl_w - s(166), ctl_h, y);
+                    place(d, cx + s(166), ctl_w - s(166), ctl_h, y);
                     controls.insert(id + DEFAULT_OFFSET, d);
+                    y += row_h;
                 }
                 Row::Slider(id) => {
                     let Some(&(_, text, min, max)) = SLIDERS.iter().find(|(s, ..)| *s == id) else { continue };
-                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
+                    place(label(&mut controls, text), lx, label_w, s(18), y);
                     let h = ui::child(
                         hwnd,
                         "msctls_trackbar32",
@@ -312,7 +326,7 @@ fn create() {
                         id,
                     );
                     SendMessageW(h, TBM_SETRANGE, Some(WPARAM(1)), Some(LPARAM(((max << 16) | min) as isize)));
-                    place(h, x0 + ctl_x, ctl_w - s(44), ctl_h, y);
+                    place(h, cx, ctl_w - s(44), ctl_h, y);
                     controls.insert(id, h);
                     let v = ui::child(
                         hwnd,
@@ -322,29 +336,43 @@ fn create() {
                         WINDOW_EX_STYLE(0),
                         id + VALUE_OFFSET,
                     );
-                    place(v, (x0 + ctl_x) + ctl_w - s(40), s(40), s(18), y);
+                    place(v, cx + ctl_w - s(40), s(40), s(18), y);
                     controls.insert(id + VALUE_OFFSET, v);
+                    y += row_h;
                 }
             }
-            y += if matches!(row, Row::Heading(_)) { row_h * 3 / 4 } else { row_h };
         }
-        y = y.max(bottom);
-        let right = x0 + ctl_x + ctl_w + m;
-        y += s(8);
+        finish(&mut open, &mut cards, col_x, &mut y);
+        let right = col_x + card_w + pm.margin;
+        let footer = cards.iter().map(|c| c.rect.bottom).max().unwrap_or(top) + pm.margin;
+        let by = footer + (pm.footer - (ctl_h + s(2))) / 2;
         let r = button("Reset to defaults", RESET);
-        place(r, m, s(150), ctl_h + s(2), y);
+        let _ = SetWindowPos(r, None, pm.margin, by, s(150), ctl_h + s(2), SWP_NOZORDER);
         controls.insert(RESET, r);
         let c = button("Close", CLOSE);
-        place(c, right - m - s(100), s(100), ctl_h + s(2), y);
+        let _ = SetWindowPos(c, None, right - pm.margin - s(110), by, s(110), ctl_h + s(2), SWP_NOZORDER);
         controls.insert(CLOSE, c);
-        y += row_h + m;
+        let y = footer + pm.footer;
+        panel::set(
+            hwnd,
+            panel::Page {
+                title: "Appearance".into(),
+                subtitle: "Changes show on the bar straight away and are saved automatically.".into(),
+                cards,
+                footer: Some(footer),
+            },
+        );
+        for (id, h) in &controls {
+            if *id >= VALUE_OFFSET && *id < LABEL_BASE {
+                panel::subtle(hwnd, *h);
+            }
+        }
 
         let font = ui::message_font(dpi, 1.0);
-        let heading = canvas::font(scale(14, dpi), true);
         for h in controls.values() {
-            ui::set_font(*h, if bold.contains(h) { heading } else { font });
+            ui::set_font(*h, font);
         }
-        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, controls, font, heading, custom: [COLORREF(0xFFFFFF); 16] }));
+        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, controls, font, custom: [COLORREF(0xFFFFFF); 16] }));
         app::register_dialog(hwnd, true);
         theme::style_window(hwnd, false, false);
         load();
@@ -354,7 +382,7 @@ fn create() {
         let mut outer = client;
         let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(
             &mut outer,
-            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
             false,
             WINDOW_EX_STYLE(0),
             dpi,
@@ -534,7 +562,7 @@ fn forget_picture(old: Option<String>) {
             a.indicator_image.as_deref() == Some(old.as_str()) || a.all_icon.as_deref() == Some(old.as_str())
         });
         if !in_use {
-            let _ = std::fs::remove_file(super::paths::get().icons.join(old));
+            super::paths::remove_icon(&old);
         }
     }
     super::indicator::forget_images();
@@ -712,7 +740,9 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
-        WM_CTLCOLORSTATIC => ui::static_colors(wparam),
+        WM_PAINT => panel::paint(hwnd),
+        WM_ERASEBKGND => LRESULT(1),
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
         WM_CLOSE => {
             unsafe {
                 let _ = DestroyWindow(hwnd);
@@ -722,9 +752,9 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_DESTROY => {
             save_now();
             app::register_dialog(hwnd, false);
+            panel::forget(hwnd);
             if let Some(w) = WIN.with(|w| w.borrow_mut().take()) {
                 ui::delete_font(w.font);
-                ui::delete_font(w.heading);
             }
             LRESULT(0)
         }

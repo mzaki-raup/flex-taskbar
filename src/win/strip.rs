@@ -850,12 +850,15 @@ fn render() {
         let all_rc = slot_rect(s, all);
         // The user's picture instead of the word, if one was chosen.
         let all_size = scale(s.look.icon_size as i32, d).min(ui::rect_w(&all_rc)).min(ui::rect_h(&all_rc));
-        match s.look.all_icon.as_deref().and_then(|f| super::indicator::image(f, all_size)) {
-            Some(img) => {
-                let (cx, cy) = centre(&all_rc);
-                cv.image(&img, cx as i32 - all_size / 2, cy as i32 - all_size / 2, all_size, 1.0);
-            }
-            None => cv.text("All", all_rc, s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE),
+        let (cx, cy) = centre(&all_rc);
+        let (ax, ay) = (cx as i32 - all_size / 2, cy as i32 - all_size / 2);
+        let drawn = s
+            .look
+            .all_icon
+            .as_deref()
+            .and_then(|f| super::indicator::with_image(f, all_size, |img| cv.image(img, ax, ay, all_size, 1.0)));
+        if drawn.is_none() {
+            cv.text("All", all_rc, s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
 
         // Centre: categories and pinned apps.

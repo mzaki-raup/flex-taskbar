@@ -1,7 +1,7 @@
 //! Modal dialog for adding or editing a custom app.
 
-use super::app;
 use super::ui::{self, scale, wide};
+use super::{app, panel};
 use crate::config::CustomApp;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,8 +16,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, BS_DEFPUSHBUTTON, BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL, GetMessageW, GetWindowRect, IDCANCEL, IDOK, IsDialogMessageW, MSG,
     PostQuitMessage, RegisterClassW, SW_SHOW, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos,
-    ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORSTATIC, WNDCLASSW,
-    WS_BORDER, WS_CAPTION, WS_CHILD, WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
+    WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, PWSTR};
 
@@ -72,7 +73,7 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
             WS_EX_DLGMODALFRAME,
             PCWSTR(class.as_ptr()),
             PCWSTR(title_w.as_ptr()),
-            WS_POPUP | WS_CAPTION | WS_SYSMENU,
+            WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN,
             x,
             y,
             w,
@@ -88,8 +89,13 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
     };
 
     let mut controls = HashMap::new();
-    let (lx, fx, fw, rh) = (s(14), s(120), s(410), s(26));
-    let mut y = s(14);
+    let pm = panel::metrics(dpi);
+    let card_w = s(560);
+    let (lx, rh) = (pm.margin + pm.pad, s(26));
+    let fx = lx + s(100);
+    let fw = pm.margin + card_w - pm.pad - fx;
+    let card_top = pm.header;
+    let mut y = pm.content_top(card_top, false);
     let mut add = |id: u16, class: &str, text: &str, style: WINDOW_STYLE, x: i32, yy: i32, w: i32, h: i32| {
         let c = ui::child(hwnd, class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), id);
         unsafe {
@@ -128,26 +134,30 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
     }
     add(ADMIN, "BUTTON", "Run as administrator", WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), fx, y, fw, s(22));
     y += s(30);
-    add(
+    let hint = add(
         0,
         "STATIC",
         "Target can be a program, a shortcut, any file, a URL (https://…), shell:AppsFolder\\… or a protocol such as ms-settings:. \
          For a browser web app use the browser's proxy exe with --app-id=… in Arguments.",
         WINDOW_STYLE(0x0080), // SS_NOPREFIX, wrapping
-        lx,
+        fx,
         y,
-        s(530),
+        fw,
         s(50),
     );
-    y += s(58);
+    panel::subtle(hwnd, hint);
+    y += s(50) + pm.pad;
+    let footer = y + pm.margin;
+    let right = pm.margin + card_w + pm.margin;
+    let by = footer + (pm.footer - rh) / 2;
     add(
         IDOK.0 as u16,
         "BUTTON",
         "OK",
         WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32),
-        s(560) - s(2 * 96 + 30),
-        y,
-        s(90),
+        right - pm.margin - s(2 * 96 + 6),
+        by,
+        s(96),
         rh,
     );
     add(
@@ -155,11 +165,41 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
         "BUTTON",
         "Cancel",
         WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32),
-        s(560) - s(96 + 24),
-        y,
-        s(90),
+        right - pm.margin - s(96),
+        by,
+        s(96),
         rh,
     );
+    panel::set(
+        hwnd,
+        panel::Page {
+            title: title.to_string(),
+            subtitle: "A program, file, website or shell location to launch from the bar and the menus.".into(),
+            cards: vec![panel::Card {
+                rect: RECT { left: pm.margin, top: card_top, right: pm.margin + card_w, bottom: y },
+                title: "App".into(),
+                subtitle: String::new(),
+            }],
+            footer: Some(footer),
+        },
+    );
+    // Size the window around the page, over its owner.
+    unsafe {
+        let mut outer = RECT { left: 0, top: 0, right, bottom: footer + pm.footer };
+        let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(
+            &mut outer,
+            WS_POPUP | WS_CAPTION | WS_SYSMENU,
+            false,
+            WS_EX_DLGMODALFRAME,
+            dpi,
+        );
+        let (w, h) = (ui::rect_w(&outer), ui::rect_h(&outer));
+        let mut orc = RECT::default();
+        let _ = GetWindowRect(owner, &mut orc);
+        let x = orc.left + (ui::rect_w(&orc) - w) / 2;
+        let top = orc.top + (ui::rect_h(&orc) - h) / 3;
+        let _ = SetWindowPos(hwnd, None, x, top, w, h, SWP_NOZORDER);
+    }
 
     DIALOG.with(|d| *d.borrow_mut() = Some(Dialog { controls, result: None, done: false }));
     let check = if initial.run_as_admin { BST_CHECKED } else { BST_UNCHECKED };
@@ -197,6 +237,7 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
         let _ = SetForegroundWindow(owner);
     }
     ui::delete_font(font);
+    panel::forget(hwnd);
     DIALOG.with(|d| d.borrow_mut().take()).and_then(|d| d.result)
 }
 
@@ -268,7 +309,9 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
-        WM_CTLCOLORSTATIC => ui::static_colors(wparam),
+        WM_PAINT => panel::paint(hwnd),
+        WM_ERASEBKGND => LRESULT(1),
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
         WM_CLOSE => {
             finish(false, hwnd);
             LRESULT(0)

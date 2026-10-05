@@ -389,8 +389,41 @@ pub fn unix_time() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Whether `name` is a bare file name, as the app stores for the pictures
+/// it copies into its `icons` folder: no folders, drive or parent references,
+/// so joining it to that folder can't reach outside it.
+pub fn is_plain_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['\\', '/', ':', '\0'])
+        // Windows drops trailing dots and spaces: "..." would mean the folder.
+        && !name.chars().all(|c| c == '.' || c == ' ')
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_file_names_only() {
+        for ok in ["18dbae98d1de954c.png", "my icon.ico", "a.b.svg"] {
+            assert!(is_plain_file_name(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            ".",
+            "..",
+            "...",
+            " ",
+            "..\\..\\x.png",
+            "../x.png",
+            "sub\\x.png",
+            "C:x.png",
+            "C:\\x.png",
+            "\\\\srv\\x",
+            "a\0b",
+        ] {
+            assert!(!is_plain_file_name(bad), "{bad:?}");
+        }
+    }
+
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {

@@ -3,8 +3,8 @@
 //! change shows on the strip straight away.
 
 use super::app::{self, FOLDER_ICON};
-use super::theme;
 use super::ui::{self, scale, wide};
+use super::{panel, theme};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -20,8 +20,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, ReleaseCapture, 
 use windows::Win32::UI::WindowsAndMessaging::{
     BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW, DestroyWindow, IsIconic, RegisterClassW, SW_RESTORE, SW_SHOW,
     SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_CAPTURECHANGED, WM_CLOSE, WM_COMMAND, WM_CTLCOLORSTATIC, WM_DESTROY, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NOTIFY,
-    WNDCLASSW, WS_CAPTION, WS_CHILD, WS_EX_CLIENTEDGE, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    WM_CAPTURECHANGED, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_ERASEBKGND,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NOTIFY, WM_PAINT, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
+    WS_EX_CLIENTEDGE, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -32,7 +33,6 @@ const DOWN: u16 = 22;
 const TO_END: u16 = 23;
 const UNPIN: u16 = 24;
 const CLOSE: u16 = 25;
-const HINT: u16 = 30;
 
 const BN_CLICKED: u16 = 0;
 const LVN_FIRST: i32 = -100;
@@ -100,7 +100,7 @@ fn create() {
             ..Default::default()
         };
         RegisterClassW(&wc);
-        let style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        let style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
         let Ok(hwnd) = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PCWSTR(class.as_ptr()),
@@ -134,18 +134,11 @@ fn create() {
             let _ = SetWindowPos(h, None, x, y, w, height, SWP_NOZORDER);
         };
 
-        let (m, list_w, list_h, bw, bh) = (s(12), s(300), s(360), s(120), s(28));
-        let hint = ui::child(
-            hwnd,
-            "STATIC",
-            "The bar's buttons, left to right. Drag a row to move it.",
-            WS_CHILD | WS_VISIBLE | ui::SS_LABEL,
-            WINDOW_EX_STYLE(0),
-            HINT,
-        );
-        place(hint, m, m, list_w + m + bw, s(18));
-        controls.insert(HINT, hint);
-        let top = m + s(24);
+        let pm = panel::metrics(dpi);
+        let (list_w, list_h, bw, bh) = (s(300), s(360), s(130), s(28));
+        let card_top = pm.header;
+        let (cx, top) = (pm.margin + pm.pad, pm.content_top(card_top, true));
+        let m = pm.pad;
 
         let list = ui::child(
             hwnd,
@@ -169,10 +162,10 @@ fn create() {
         SendMessageW(list, LVM_INSERTCOLUMNW, Some(WPARAM(0)), Some(LPARAM(&col as *const _ as isize)));
         let images = ui::image_list(app::with(|s| s.icon_size), 16);
         SendMessageW(list, LVM_SETIMAGELIST, Some(WPARAM(LVSIL_SMALL as usize)), Some(LPARAM(images.0)));
-        place(list, m, top, list_w, list_h);
+        place(list, cx, top, list_w, list_h);
         controls.insert(LIST, list);
 
-        let bx = m + list_w + m;
+        let bx = cx + list_w + m;
         let mut y = top;
         for (text, id) in
             [("Move to start", TO_START), ("Move left  ▲", UP), ("Move right  ▼", DOWN), ("Move to end", TO_END)]
@@ -186,9 +179,27 @@ fn create() {
         let h = button("Unpin", UNPIN);
         place(h, bx, y, bw, bh);
         controls.insert(UNPIN, h);
+        let card_right = bx + bw + pm.pad;
+        let card_bottom = top + list_h + pm.pad;
+        let footer = card_bottom + pm.margin;
+        let right = card_right + pm.margin;
         let h = button("Close", CLOSE);
-        place(h, bx, top + list_h - bh, bw, bh);
+        place(h, right - pm.margin - s(110), footer + (pm.footer - bh) / 2, s(110), bh);
         controls.insert(CLOSE, h);
+        panel::set(
+            hwnd,
+            panel::Page {
+                title: "Arrange the bar".into(),
+                subtitle: "Changes show on the bar straight away.".into(),
+                cards: vec![panel::Card {
+                    rect: RECT { left: pm.margin, top: card_top, right: card_right, bottom: card_bottom },
+                    title: "Buttons".into(),
+                    subtitle: "The bar's buttons, left to right (top to bottom on a side bar). Drag a row to move it."
+                        .into(),
+                }],
+                footer: Some(footer),
+            },
+        );
 
         let font = ui::message_font(dpi, 1.0);
         for h in controls.values() {
@@ -209,7 +220,7 @@ fn create() {
         theme::style_window(hwnd, false, false);
         fill();
 
-        let client = RECT { left: 0, top: 0, right: bx + bw + m, bottom: top + list_h + m };
+        let client = RECT { left: 0, top: 0, right, bottom: footer + pm.footer };
         let mut outer = client;
         let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(&mut outer, style, false, WINDOW_EX_STYLE(0), dpi);
         let (w, h) = (ui::rect_w(&outer), ui::rect_h(&outer));
@@ -431,7 +442,9 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             });
             LRESULT(0)
         }
-        WM_CTLCOLORSTATIC => ui::static_colors(wparam),
+        WM_PAINT => panel::paint(hwnd),
+        WM_ERASEBKGND => LRESULT(1),
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
         WM_CLOSE => {
             unsafe {
                 let _ = DestroyWindow(hwnd);
@@ -440,6 +453,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_DESTROY => {
             app::register_dialog(hwnd, false);
+            panel::forget(hwnd);
             if let Some(w) = WIN.with(|w| w.borrow_mut().take()) {
                 ui::delete_font(w.font);
                 unsafe {

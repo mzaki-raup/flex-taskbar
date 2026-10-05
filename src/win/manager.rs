@@ -8,7 +8,7 @@ use super::appdialog;
 use super::icons::{self, ICON_EXTENSIONS};
 use super::paths;
 use super::ui::{self, scale, wide};
-use super::{autostart, theme};
+use super::{autostart, panel, theme};
 use crate::config::{Category, CustomApp, Hotkey, MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 use crate::{migrate, tree};
 use std::cell::{Cell, RefCell};
@@ -36,9 +36,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DestroyMenu, DestroyWindow, ES_AUTOHSCROLL, GetClientRect, GetWindowRect, HMENU, InsertMenuW,
     IsIconic, MF_BYPOSITION, MF_STRING, MINMAXINFO, RegisterClassW, SW_RESTORE, SW_SHOW, SWP_NOZORDER, SendMessageW,
     SetForegroundWindow, SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DROPFILES, WM_GETMINMAXINFO,
-    WM_NOTIFY, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_EX_ACCEPTFILES, WS_EX_CLIENTEDGE,
-    WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DROPFILES,
+    WM_ERASEBKGND, WM_GETMINMAXINFO, WM_NOTIFY, WM_PAINT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
+    WS_EX_ACCEPTFILES, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -207,9 +207,9 @@ fn create() {
             ui::child(hwnd, "STATIC", text, WS_CHILD | WS_VISIBLE | ui::SS_LABEL, WINDOW_EX_STYLE(0), id)
         };
 
-        controls.insert(LBL_CATS, label("Categories (drag files here to add apps)", LBL_CATS));
+        controls.insert(LBL_CATS, label("", LBL_CATS));
         controls.insert(LBL_APPS, label("Apps in this category", LBL_APPS));
-        controls.insert(LBL_ALL, label("All apps", LBL_ALL));
+        controls.insert(LBL_ALL, label("Select apps, then add or pin them", LBL_ALL));
 
         let tree_style = WS_CHILD
             | WS_VISIBLE
@@ -299,9 +299,9 @@ fn create() {
         );
         for (text, id) in [
             ("Show icon strip", STRIP_SHOW),
-            ("Reserve screen space for the strip (maximized windows stop above it)", STRIP_RESERVE),
-            ("Rescan apps automatically when apps are installed or removed", AUTO_RESCAN),
-            ("Include apps from package managers (winget, Scoop, Chocolatey, npm, pip, Cargo…)", PACKAGE_APPS),
+            ("Reserve its space (maximized windows stop at it)", STRIP_RESERVE),
+            ("Rescan when apps are installed or removed", AUTO_RESCAN),
+            ("Include package managers' apps (winget, npm…)", PACKAGE_APPS),
         ] {
             controls.insert(
                 id,
@@ -315,8 +315,8 @@ fn create() {
                 ),
             );
         }
-        controls.insert(LBL_HK_SEARCH, label("Search hotkey", LBL_HK_SEARCH));
-        controls.insert(LBL_HK_MENU, label("Menu hotkey", LBL_HK_MENU));
+        controls.insert(LBL_HK_SEARCH, label("Search", LBL_HK_SEARCH));
+        controls.insert(LBL_HK_MENU, label("Menu", LBL_HK_MENU));
         controls.insert(
             HK_SEARCH,
             ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), HK_SEARCH),
@@ -326,7 +326,7 @@ fn create() {
             ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), HK_MENU),
         );
         controls.insert(HK_APPLY, button("Apply hotkeys", HK_APPLY));
-        controls.insert(LBL_HINT, label("Clear a hotkey box (Backspace) to turn it off.", LBL_HINT));
+        controls.insert(LBL_HINT, label("Backspace in a box turns it off.", LBL_HINT));
         controls.insert(STATUS, label("", STATUS));
         for (text, id) in [
             ("Rescan apps", RESCAN),
@@ -345,6 +345,9 @@ fn create() {
         let font = ui::message_font(dpi, 1.0);
         for h in controls.values() {
             ui::set_font(*h, font);
+        }
+        for id in [LBL_CATS, LBL_APPS, LBL_ALL, LBL_HINT, STATUS] {
+            panel::subtle(hwnd, controls[&id]);
         }
 
         MANAGER.with(|m| {
@@ -372,7 +375,7 @@ fn create() {
         refresh_all();
         update_status();
 
-        let (w, h) = (scale(1080, dpi), scale(640, dpi));
+        let (w, h) = (scale(1100, dpi), scale(720, dpi));
         let wa = ui::work_area_at_cursor();
         let x = wa.left + (ui::rect_w(&wa) - w).max(0) / 2;
         let y = wa.top + (ui::rect_h(&wa) - h).max(0) / 2;
@@ -392,13 +395,17 @@ fn layout() {
     unsafe {
         let _ = GetClientRect(h, &mut rc);
     }
-    let (m, gap, bh, lh) = (s(10), s(6), s(28), s(20));
-    let width = rc.right - 2 * m;
-    let col_w = (width - 2 * s(12)) / 3;
-    let cols = [m, m + col_w + s(12), m + 2 * (col_w + s(12))];
-    let bottom_h = 4 * bh + 5 * gap;
-    let top = m;
-    let pane_bottom = rc.bottom - m - bottom_h;
+    let pm = panel::metrics(dpi);
+    let (gap, bh, lh, pitch) = (s(6), s(28), s(20), s(32));
+    let col_w = (rc.right - 2 * pm.margin - 2 * pm.gap) / 3;
+    let cols = [0, 1, 2].map(|i| pm.margin + i * (col_w + pm.gap));
+    // Inside a card.
+    let (inner_w, ix) = (col_w - 2 * pm.pad, cols.map(|x| x + pm.pad));
+    let footer = rc.bottom - pm.footer;
+    let options_h = pm.card_title + 3 * pitch + s(6);
+    let options_top = footer - pm.margin - options_h;
+    let top = pm.header;
+    let pane_bottom = options_top - pm.gap;
 
     let place = |id: u16, x: i32, y: i32, w: i32, hh: i32| unsafe {
         let _ = SetWindowPos(ctl(id), None, x, y, w.max(0), hh.max(0), SWP_NOZORDER);
@@ -410,56 +417,78 @@ fn layout() {
             place(*id, x + i as i32 * (bw + gap), y, bw, bh);
         }
     };
+    let card = |i: usize, t: i32, b: i32, title: &str| panel::Card {
+        rect: RECT { left: cols[i], top: t, right: cols[i] + col_w, bottom: b },
+        title: title.into(),
+        subtitle: String::new(),
+    };
+    // The panes' grey subtitles are labels (they change with the selection).
+    let sub_y = top + s(33);
+    let content = pm.content_top(top, true);
+    let last_row = pane_bottom - pm.pad - bh;
 
     // Categories.
-    place(LBL_CATS, cols[0], top, col_w, lh);
-    let tree_bottom = pane_bottom - 2 * (bh + gap);
-    place(TREE, cols[0], top + lh, col_w, tree_bottom - top - lh);
-    row(&[CAT_NEW, CAT_SUB, CAT_RENAME, CAT_DELETE, CAT_ICON], cols[0], tree_bottom + gap, col_w);
-    row(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN], cols[0], tree_bottom + 2 * gap + bh, col_w);
+    place(LBL_CATS, ix[0], sub_y, inner_w, s(16));
+    let tree_bottom = last_row - bh - 2 * gap;
+    place(TREE, ix[0], content, inner_w, tree_bottom - content);
+    row(&[CAT_NEW, CAT_SUB, CAT_RENAME, CAT_DELETE, CAT_ICON], ix[0], tree_bottom + gap, inner_w);
+    row(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN], ix[0], last_row, inner_w);
 
-    // Apps in category.
-    place(LBL_APPS, cols[1], top, col_w, lh);
-    let apps_bottom = pane_bottom - (bh + gap);
-    place(APPS, cols[1], top + lh, col_w, apps_bottom - top - lh);
-    row(&[APP_REMOVE, APP_UP, APP_DOWN, APP_ICON], cols[1], apps_bottom + gap, col_w);
+    // Apps in the category.
+    place(LBL_APPS, ix[1], sub_y, inner_w, s(16));
+    let apps_bottom = last_row - gap;
+    place(APPS, ix[1], content, inner_w, apps_bottom - content);
+    row(&[APP_REMOVE, APP_UP, APP_DOWN, APP_ICON], ix[1], last_row, inner_w);
 
     // All apps.
-    place(LBL_ALL, cols[2], top, col_w, lh);
-    place(ALL_FILTER, cols[2], top + lh, col_w, s(24));
-    let all_top = top + lh + s(24) + gap;
-    let all_bottom = pane_bottom - 2 * (bh + gap);
-    place(ALL, cols[2], all_top, col_w, all_bottom - all_top);
-    row(&[ALL_ADD, ALL_PIN, ALL_ICON], cols[2], all_bottom + gap, col_w);
-    row(&[CUSTOM_NEW, CUSTOM_EDIT, CUSTOM_DELETE], cols[2], all_bottom + 2 * gap + bh, col_w);
+    place(LBL_ALL, ix[2], sub_y, inner_w, s(16));
+    place(ALL_FILTER, ix[2], content, inner_w, s(24));
+    let all_top = content + s(24) + gap;
+    let all_bottom = last_row - bh - 2 * gap;
+    place(ALL, ix[2], all_top, inner_w, all_bottom - all_top);
+    row(&[ALL_ADD, ALL_PIN, ALL_ICON], ix[2], all_bottom + gap, inner_w);
+    row(&[CUSTOM_NEW, CUSTOM_EDIT, CUSTOM_DELETE], ix[2], last_row, inner_w);
 
-    // Settings rows.
-    let y0 = pane_bottom + 2 * gap;
-    place(AUTOSTART, m, y0, s(150), bh);
-    place(STRIP_SHOW, m + s(160), y0, s(140), bh);
-    place(STRIP_RESERVE, m + s(310), y0, (rc.right - m - (m + s(310))).max(0), bh);
-    let ya = y0 + bh + gap;
-    place(AUTO_RESCAN, m, ya, s(400), bh);
-    place(PACKAGE_APPS, m + s(410), ya, (rc.right - m - (m + s(410))).max(0), bh);
-    let y1 = ya + bh + gap;
-    let mut x = m;
-    place(LBL_HK_SEARCH, x, y1 + s(5), s(90), lh);
-    x += s(92);
-    place(HK_SEARCH, x, y1 + s(2), s(140), s(24));
-    x += s(150);
-    place(LBL_HK_MENU, x, y1 + s(5), s(80), lh);
-    x += s(82);
-    place(HK_MENU, x, y1 + s(2), s(140), s(24));
-    x += s(150);
-    place(HK_APPLY, x, y1, s(110), bh);
-    x += s(120);
-    place(LBL_HINT, x, y1 + s(5), (rc.right - m - x).max(0), lh);
+    // Options: one card per subject under the panes.
+    let oy = pm.content_top(options_top, false);
+    let line = |n: i32| oy + n * pitch;
+    place(AUTOSTART, ix[0], line(0), inner_w, bh);
+    place(STRIP_SHOW, ix[0], line(1), inner_w, bh);
+    place(STRIP_RESERVE, ix[0], line(2), inner_w, bh);
+    place(AUTO_RESCAN, ix[1], line(0), inner_w, bh);
+    place(PACKAGE_APPS, ix[1], line(1), inner_w, bh);
+    row(&[RESCAN, IMPORT], ix[1], line(2), inner_w);
+    let lw = s(70);
+    place(LBL_HK_SEARCH, ix[2], line(0) + s(5), lw, lh);
+    place(HK_SEARCH, ix[2] + lw, line(0) + s(2), inner_w - lw, s(24));
+    place(LBL_HK_MENU, ix[2], line(1) + s(5), lw, lh);
+    place(HK_MENU, ix[2] + lw, line(1) + s(2), inner_w - lw, s(24));
+    place(HK_APPLY, ix[2], line(2), s(120), bh);
+    place(LBL_HINT, ix[2] + s(128), line(2) + s(5), inner_w - s(128), lh);
 
-    // Status + actions row.
-    let y2 = y1 + bh + gap;
-    let actions_w = s(6 * 130 + 5 * 6);
-    place(STATUS, m, y2 + s(5), width - actions_w - gap, lh);
-    row(&[RESCAN, IMPORT, OPEN_DATA, ARRANGE, APPEARANCE, CLOSE], rc.right - m - actions_w, y2, actions_w);
+    // Command bar: where the data lives, and the other windows.
+    let by = footer + (pm.footer - bh) / 2;
+    let actions_w = 4 * s(130) + 3 * gap;
+    place(STATUS, pm.margin, by + s(5), rc.right - 2 * pm.margin - actions_w - pm.gap, lh);
+    row(&[OPEN_DATA, ARRANGE, APPEARANCE, CLOSE], rc.right - pm.margin - actions_w, by, actions_w);
+
+    panel::set(
+        h,
+        panel::Page {
+            title: "Manage categories".into(),
+            subtitle: "Changes are saved straight away. Drop files or shortcuts on this window to add them as apps."
+                .into(),
+            cards: vec![
+                card(0, top, pane_bottom, "Categories"),
+                card(1, top, pane_bottom, "In this category"),
+                card(2, top, pane_bottom, "All apps"),
+                card(0, options_top, footer - pm.margin, "Startup and bar"),
+                card(1, options_top, footer - pm.margin, "App list"),
+                card(2, options_top, footer - pm.margin, "Hotkeys"),
+            ],
+            footer: Some(footer),
+        },
+    );
 
     for lv in [APPS, ALL] {
         let mut lrc = RECT::default();
@@ -507,7 +536,7 @@ fn tree_image(key: &str) -> i32 {
 fn rebuild_tree(select: Option<u64>) {
     ui::set_text(
         ctl(LBL_CATS),
-        &format!("Categories, up to {} levels deep (drag files here to add apps)", super::strip::max_levels()),
+        &format!("Up to {} levels deep · drop files here to add apps", super::strip::max_levels()),
     );
     let select = select.or_else(selected_category);
     let tree_hwnd = ctl(TREE);
@@ -650,7 +679,7 @@ fn delete_category(owner: HWND) {
             let mut files = Vec::new();
             tree::walk(std::slice::from_ref(&removed), &mut |c, _| files.extend(c.icon.clone()));
             for f in files {
-                let _ = std::fs::remove_file(paths::get().icons.join(f));
+                paths::remove_icon(&f);
             }
         }
         parent
@@ -723,7 +752,7 @@ fn refresh_category_apps() {
     });
     let label =
         app::with(|s| cat.and_then(|id| tree::find(&s.cfg.categories, id)).map(|c| format!("Apps in “{}”", c.name)));
-    ui::set_text(ctl(LBL_APPS), &label.unwrap_or_else(|| "Apps in this category".into()));
+    ui::set_text(ctl(LBL_APPS), &label.unwrap_or_else(|| "Select a category".into()));
 }
 
 fn refresh_all() {
@@ -900,7 +929,7 @@ fn delete_custom_app(owner: HWND) {
             s.cfg.recents.retain(|r| r != id);
             s.cfg.unpin(id);
             if let Some(f) = s.cfg.app_icons.remove(id) {
-                let _ = std::fs::remove_file(paths::get().icons.join(f));
+                paths::remove_icon(&f);
             }
         }
     });
@@ -1013,7 +1042,7 @@ fn category_icon(owner: HWND) {
     let old =
         app::with(|s| tree::find_mut(&mut s.cfg.categories, id).and_then(|c| std::mem::replace(&mut c.icon, new_file)));
     if let Some(old) = old {
-        let _ = std::fs::remove_file(paths::get().icons.join(old));
+        paths::remove_icon(&old);
     }
     app::save();
     let key = format!("cat:{id}");
@@ -1051,7 +1080,7 @@ fn app_icon(owner: HWND, list_id: u16, button: u16) {
         None => s.cfg.app_icons.remove(id),
     });
     if let Some(old) = old {
-        let _ = std::fs::remove_file(paths::get().icons.join(old));
+        paths::remove_icon(&old);
     }
     app::save();
     app::reload_icon(id);
@@ -1342,11 +1371,13 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             layout();
             LRESULT(0)
         }
-        WM_CTLCOLORSTATIC => ui::static_colors(wparam),
+        WM_PAINT => panel::paint(hwnd),
+        WM_ERASEBKGND => LRESULT(1),
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
         WM_GETMINMAXINFO => {
             let mmi = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
             let dpi = ui::dpi_of(hwnd);
-            mmi.ptMinTrackSize = POINT { x: scale(900, dpi), y: scale(480, dpi) };
+            mmi.ptMinTrackSize = POINT { x: scale(1000, dpi), y: scale(620, dpi) };
             LRESULT(0)
         }
         WM_COMMAND => {
@@ -1469,6 +1500,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_DESTROY => {
             app::register_dialog(hwnd, false);
+            panel::forget(hwnd);
             let taken = MANAGER.with(|m| m.borrow_mut().take());
             if let Some(m) = taken {
                 ui::delete_font(m.font);

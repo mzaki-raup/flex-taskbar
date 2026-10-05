@@ -196,8 +196,38 @@ pub fn pe_is_console(head: &[u8]) -> Option<bool> {
 /// write many files, and a rescan should see the finished result.
 pub const SETTLE_MS: u32 = 4000;
 
+/// The `cmd.exe` arguments that run the program at `path` in a console
+/// that stays open afterwards, or `None` when `path` can't be handed to cmd
+/// safely.
+///
+/// `/s` makes cmd strip only the outer pair of quotes, so the path stays
+/// quoted and characters such as `&`, `|` or `^` (allowed in file names) are
+/// taken literally instead of starting another command. `%` and `!` would
+/// still be expanded inside quotes, so such paths are refused (the caller
+/// then starts the program directly).
+pub fn console_args(path: &str) -> Option<String> {
+    if path.is_empty() || path.contains(['%', '!', '"']) || path.chars().any(char::is_control) {
+        return None;
+    }
+    Some(format!("/v:off /s /k \"\"{path}\"\""))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn console_arguments_keep_the_path_quoted() {
+        assert_eq!(
+            console_args(r"C:\Users\me\AppData\Roaming\npm\tsc.cmd").as_deref(),
+            Some(r#"/v:off /s /k ""C:\Users\me\AppData\Roaming\npm\tsc.cmd"""#)
+        );
+        // An & in a file name stays inside the quotes.
+        assert!(console_args(r"C:\tools\a&calc.exe").unwrap().ends_with(r#"""C:\tools\a&calc.exe"""#));
+        // cmd would expand these even in quotes.
+        for bad in [r"C:\t\%PATH%.exe", r"C:\t\a!b!.exe", "", "C:\\t\\a\nb.exe"] {
+            assert_eq!(console_args(bad), None, "{bad:?}");
+        }
+    }
+
     use super::*;
     use std::collections::HashMap;
 

@@ -1,7 +1,8 @@
 //! Launching. Everything goes through ShellExecuteEx with explicit file /
 //! parameters / directory fields. The one use of cmd.exe is to keep a package
-//! manager's command-line tool open in a console (`cmd /k "<path>"`, with a
-//! path found on disk, never user-typed text).
+//! manager's command-line tool open in a console (`cmd /s /k ""<path>""`, with
+//! a path found on disk, never user-typed text, kept quoted; see
+//! `pkgsources::console_args`).
 //!
 //! Launches run on a short-lived background thread so a slow shell handler can
 //! never freeze the launcher's UI.

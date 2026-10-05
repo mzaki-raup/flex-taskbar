@@ -60,15 +60,15 @@ top or bottom bar and vertical strips from a side bar.
 | **All: every app, labelled Store app, Chrome or Edge web app** | **Light theme, rounded floating dock** |
 | ![All apps list with Calculator and Terminal labelled Store app, Outlook Edge web app and YouTube Chrome web app](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
 | **Drag an icon to rearrange the bar** | **Arrange the bar (from Manage or right-click)** |
-| ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: the bar's buttons in order, with move buttons](screenshots/arrange.png) |
+| ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: a Buttons card with the bar's buttons in order and move buttons beside them](screenshots/arrange.png) |
 | **Appearance window** | **Flyouts with their own corners and border** |
-| ![Appearance window with general, bar and category flyout settings](screenshots/appearance.png) | ![Flyouts with 12 px corners and a 2 px red border over a light floating dock](screenshots/flyout-style.png) |
+| ![Appearance window: General, Category flyouts, Bar and Category indicator cards in two columns, with Reset to defaults and Close in the command bar](screenshots/appearance.png) | ![Flyouts with 12 px corners and a 2 px red border over a light floating dock](screenshots/flyout-style.png) |
 | **Right-click: the full menu** | **All, sorted by category with the System category hidden** |
 | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | ![All apps showing 12 of 15 apps under Development, Games and Not in a category headings, with Sort and Show buttons](screenshots/all-sorted.png) |
-| **Search** | **Custom app (a browser web app)** |
-| ![Search window listing apps with their category paths](screenshots/search.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
+| **Search** | **Custom app dialog** |
+| ![Search window listing apps with their category paths](screenshots/search.png) | ![New custom app dialog: a page title, an App card with name, target, arguments and start-in fields, and OK and Cancel in the command bar](screenshots/custom-app.png) |
 
-![Manage window with category tree, apps in the category, all apps, and strip settings](screenshots/manage.png)
+![Manage window: a page title, cards for categories, the apps in the selected category and all apps, cards for startup and bar, app list and hotkey options, and a command bar along the bottom](screenshots/manage.png)
 
 These were captured under Wine on Linux, using a demo setup: Wine's built-in
 programs filed into example categories, with custom icons. On Windows you see
@@ -211,6 +211,14 @@ original FlexTaskbar:
 - **Full-screen apps.** It hides while a full-screen app (a game or a video) is
   in front.
 
+**Settings windows.** The Manage, Appearance, *Arrange the bar* and custom-app
+windows share one look, in the style of Windows 11 Settings: a page title
+with a line on what the page does, the settings grouped on white cards with
+rounded corners and a title each (*Categories*, *All apps*, *Startup and
+bar*, *Hotkeys*, *General*, *Category flyouts*…), on a soft grey page, and a
+command bar along the bottom for the window's main buttons. The cards are
+drawn anti-aliased, only when Windows asks for the window to be painted.
+
 **Appearance.** Right-click the bar (or use the menu) and pick *Appearance…*.
 Every change shows on the bar straight away:
 
@@ -299,9 +307,11 @@ The managers' own commands (`choco`, `scoop`, `npm`, `pip`, `cargo`…) are left
 out, and a program that is already in the list under the same name (for
 example a Scoop app that also has a Start Menu shortcut) isn't listed twice.
 Command-line tools open in a console window that stays open, in your user
-folder. Apps that winget, Chocolatey or UniGetUI install with a normal
+folder. Their path is handed to `cmd.exe` quoted so that characters a file
+name may contain, such as `&`, can't start another command; a path cmd would
+still expand (with `%` or `!` in it) is started directly instead. Apps that winget, Chocolatey or UniGetUI install with a normal
 installer have a Start Menu entry, so they are in the Apps folder anyway.
-Turn this off with *Include apps from package managers* in the Manage window.
+Turn this off with *Include package managers' apps* in the Manage window (*App list* card).
 
 **Automatic rescan.** The list is rescanned in the background when FlexTaskbar
 starts, on demand (*Rescan apps*), and **by itself when apps are installed or
@@ -312,8 +322,8 @@ managers' folders above. A few seconds after the last change, once the
 installer has finished, the list is rescanned, so a new app or web app appears
 in *All*, search and the Manage window without doing anything. Folders that
 appear later (a package manager installed after FlexTaskbar started) are
-picked up within a few minutes. Turn it off with *Rescan apps automatically*
-in the Manage window.
+picked up within a few minutes. Turn it off with *Rescan when apps are
+installed or removed* on the Manage window's *App list* card.
 
 **Custom apps.** You can add any program, shortcut, file, URL, `shell:` path or
 protocol (such as `ms-settings:`) as an app, with optional arguments, a start
@@ -458,8 +468,8 @@ package managers' apps are checkboxes in the Manage window (`show_strip`,
 Everything about its look is in the Appearance window and is stored under
 `settings.appearance`.
 
-The hotkeys are set in the Manage window. To turn a hotkey off, clear its box
-with Backspace and click *Apply hotkeys*.
+The hotkeys are set on the Manage window's *Hotkeys* card. To turn a hotkey
+off, clear its box with Backspace and click *Apply hotkeys*.
 
 ## Performance
 
@@ -479,6 +489,11 @@ The launcher is built to cost almost nothing while idle:
   frames are stretched copies of the finished flyout, not redrawn.
   Menus are native Windows popup menus.
 - The search list is virtual, so it only creates rows for what's on screen.
+- Pictures drawn on every frame of the bar (the *All* button's, the category
+  indicator's) are loaded once per size and drawn from that cache without
+  allocating or copying. Redrawing a flyout on hover hands its finished
+  picture to Windows without copying it, and the *All* list lowercases each
+  name once when sorting, not on every comparison.
 - The Manage window is fully destroyed when you close it.
 - The release build uses LTO and is stripped.
 
@@ -489,7 +504,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 66 unit tests cover:
+The 68 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -517,8 +532,11 @@ The 66 unit tests cover:
   badge when no picture was chosen, colour parsing and clamping
 - package managers: where each keeps its programs (following its environment
   variables), which files are apps and which are the managers' own commands,
-  which manager a path belongs to, and spotting console programs from their
-  headers
+  which manager a path belongs to, spotting console programs from their
+  headers, and the console command keeping the path quoted (an `&` in a
+  file name staying literal, `%` and `!` refused)
+- picture file names from the settings: only plain file names accepted
+  (no `..`, folders, drives or UNC paths)
 - telling app kinds apart from their shell names: Store/packaged apps,
   Chrome, Edge and other Chromium web apps, desktop programs, Start Menu
   shortcuts and custom browser web apps
@@ -557,7 +575,14 @@ The 66 unit tests cover:
   - apps from winget, Scoop, Chocolatey and npm folders listed with their
     labels; a new program and a new Chrome web-app shortcut picked up by
     the automatic rescan a few seconds later; an npm tool opening in a
-    console that stays open
+    console that stays open; a tool named `demo&echo INJECTED.cmd` running
+    as itself, without the `echo` being run as a second command
+  - a hand-edited config pointing the *All* picture at `..\victim.txt`:
+    the picture ignored (the word shown), and *Use text* leaving the file
+    alone
+  - the new look of the Manage, Appearance, *Arrange the bar* and
+    custom-app windows (page title, cards, command bar), with their labels,
+    check boxes and sliders on the card colour
   - the right-click menus (move, unpin)
   - dragging a pinned app and a category to new places, and the *Arrange the
     bar* window (buttons and dragging rows), all updating the bar live
@@ -656,6 +681,7 @@ src/win/autostart.rs Run-key toggle
 src/win/paths.rs     portable data folder
 src/win/theme.rs     light/dark support (menus, search window)
 src/win/ui.rs        small Win32 helpers
+src/win/panel.rs     the settings windows' look: page title, cards, command bar
 assets/              icon, manifest, resource script
 ```
 
@@ -663,6 +689,24 @@ assets/              icon, manifest, resource script
 
 Everything stays on your machine. There are no network requests, telemetry,
 analytics or cloud services.
+
+## Security
+
+- **Launching.** Apps start through `ShellExecuteEx` with the program,
+  arguments and folder in separate fields, never through a command line the
+  app builds from text. The one exception is keeping a package manager's
+  command-line tool open in a console; see *Apps from package managers* above
+  for how its path is quoted.
+- **Pictures.** Pictures you choose (app, category, indicator and *All*
+  button icons) are copied into `data\icons\`, up to 8 MB each, and the
+  settings store only the copy's file name. A name in `config.json` that
+  isn't a plain file name (with `\`, `/`, `..` or a drive) is ignored, so a
+  hand-edited or shared config can't make FlexTaskbar read or delete a file
+  outside that folder.
+- **Settings** are plain JSON in the data folder, saved atomically with a
+  backup; a corrupt file is restored from the backup rather than trusted.
+- Nothing runs elevated unless you tick *Run as administrator* on a custom
+  app, and then Windows asks first.
 
 ## License
 
