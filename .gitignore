@@ -2,3 +2,5 @@
 # Portable data folder created next to the exe when running from the repo.
 /data/
 *.exe
+# Local hand-off copies of built exes and screenshots
+/dist/
