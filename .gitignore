@@ -1,18 +1,4 @@
-## .NET / Visual Studio
-bin/
-obj/
-*.user
-.vs/
-
-## Rider / VS Code
-.idea/
-.vscode/
-
-## Test results
-TestResults/
-
-## WiX / installer output
-installer/bin/
-installer/obj/
-*.msi
-*.wixpdb
+/target/
+# Portable data folder created next to the exe when running from the repo.
+/data/
+*.exe

@@ -1,0 +1,30 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --release -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/FlexTaskbar | Out-Null
+          Copy-Item target/release/FlexTaskbar.exe dist/FlexTaskbar/
+          Copy-Item README.md dist/FlexTaskbar/
+          Compress-Archive -Path dist/FlexTaskbar -DestinationPath dist/FlexTaskbar-portable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlexTaskbar-portable
+          path: dist/FlexTaskbar-portable.zip
