@@ -2,7 +2,7 @@
 //!
 //! - a **category** flyout: its subcategories and apps as tiles (large icon,
 //!   name underneath, `flyout_columns` per row; subcategories first, marked
-//!   with ▾), and "Manage Category" at the bottom. Resting the pointer on a
+//!   with ▾). Resting the pointer on a
 //!   subcategory opens *its* flyout floating above this one, the same way a
 //!   category on the strip opens, at any depth;
 //! - the **All** flyout: every app as a scrollable list.
@@ -56,7 +56,6 @@ enum View {
 enum Elem {
     Sub(u64),
     Tile(String),
-    Manage(u64),
     Row(String),
     /// Static text ("No apps in this category", the All header).
     Label,
@@ -334,7 +333,6 @@ fn rebuild(idx: usize) {
     struct Content {
         subs: Vec<(u64, String)>,
         tiles: Vec<(String, String)>,
-        manage: Option<u64>,
         empty: bool,
         rows: Vec<(String, String)>,
     }
@@ -342,14 +340,12 @@ fn rebuild(idx: usize) {
         View::Category(id) => crate::tree::find(&s.cfg.categories, *id).map(|c| Content {
             subs: c.children.iter().map(|ch| (ch.id, ch.name.clone())).collect(),
             tiles: c.apps.iter().filter_map(|a| s.catalog.get(a).map(|e| (a.clone(), e.name.clone()))).collect(),
-            manage: Some(*id),
             empty: c.children.is_empty() && c.apps.is_empty(),
             rows: Vec::new(),
         }),
         View::All { .. } => Some(Content {
             subs: Vec::new(),
             tiles: Vec::new(),
-            manage: None,
             empty: false,
             rows: s.catalog.apps.iter().map(|a| (a.id.clone(), a.name.clone())).collect(),
         }),
@@ -386,7 +382,7 @@ fn rebuild(idx: usize) {
                 .chain(content.tiles.iter().map(|(id, name)| (Elem::Tile(id.clone()), name.clone(), id.clone())))
                 .collect();
             let tiles_w = cols.min(items.len().max(1)) as i32 * (tile.0 + 2 * tm);
-            inner_w = tiles_w.max(canvas::measure("Manage Category", font).0 + s(48)).max(s(180));
+            inner_w = tiles_w.max(canvas::measure("No apps in this category", font).0 + s(16));
             let n = items.len();
             for ((col, row), (elem, text, icon)) in striplayout::grid(n, cols).into_iter().zip(items) {
                 let left = pad + col as i32 * (tile.0 + 2 * tm) + tm;
@@ -409,17 +405,6 @@ fn rebuild(idx: usize) {
                     icon: None,
                 });
                 y += s(28);
-            }
-            if let Some(id) = content.manage {
-                y += s(4);
-                let h = s(28);
-                elems.push(Placed {
-                    rect: RECT { left: pad, top: y, right: pad + inner_w, bottom: y + h },
-                    elem: Elem::Manage(id),
-                    text: "Manage Category".into(),
-                    icon: None,
-                });
-                y += h;
             }
         }
         View::All { first_row } => {
@@ -571,13 +556,6 @@ fn render(idx: usize) {
                         RECT { left: rc.left + s(4), top: y + size + s(4), right: rc.right - s(4), bottom: rc.bottom };
                     cv.text(&p.text, trc, f.small, c.text, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
                 }
-                Elem::Manage(_) => {
-                    let gx = rc.left as f32 + s(18) as f32;
-                    let gy = (rc.top + rc.bottom) as f32 / 2.0;
-                    cv.gear(gx, gy, s(7) as f32, c.text);
-                    let trc = RECT { left: rc.left + s(32), ..rc };
-                    cv.text(&p.text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE);
-                }
                 Elem::Row(_) => {
                     let size = s(20);
                     let x = rc.left + s(8);
@@ -664,10 +642,6 @@ fn activate(idx: usize, i: usize) {
         Some(Elem::Tile(id) | Elem::Row(id)) => {
             close();
             app::launch_app(&id);
-        }
-        Some(Elem::Manage(id)) => {
-            close();
-            super::manager::show_category(id);
         }
         _ => {}
     }

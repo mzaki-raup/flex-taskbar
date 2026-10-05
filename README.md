@@ -40,7 +40,7 @@ match the original .NET version.
 
 | Hover a category: subcategories and apps as tiles | Hover a subcategory: its flyout floats above |
 |---|---|
-| ![Development open: Editors, Terminals and Tools subcategory tiles, two app tiles, Manage Category](screenshots/tiles.png) | ![Development, then Tools above it, then Debugging above that](screenshots/subcategory.png) |
+| ![Development open: Editors, Terminals and Tools subcategory tiles, two app tiles](screenshots/tiles.png) | ![Development, then Tools above it, then Debugging above that](screenshots/subcategory.png) |
 | **All: every app** | **Light theme, rounded floating dock** |
 | ![All apps list above the All button](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
 | **Appearance window** | **Right-click: the full menu** |
@@ -78,8 +78,9 @@ out like the original FlexTaskbar:
   - resting the pointer on a subcategory opens **its flyout floating above**
     this one, and so on at any depth. Moving to another subcategory switches
     the flyout above; resting on an app tile closes it;
-  - *No apps in this category* when it's empty, and **Manage Category** at the
-    bottom, which opens the Manage window on that category.
+  - *No apps in this category* when it's empty. Flyouts only launch apps;
+    categories are managed in the Manage window (⚙ on the bar, or
+    right-click a category and pick *Manage categories…*).
   - The flyouts close shortly after the pointer leaves all of them and the
     bar button.
 - **Slide between categories.** While a flyout is open, moving along the bar
@@ -156,7 +157,8 @@ custom icons are copied over.
 
 The docked bar is back in its original look: *All* on the left, category and
 app icons in the centre, *Link* and ⚙ on the right, and category flyouts with
-subcategory and app tiles and *Manage Category*. Subcategory flyouts float above
+subcategory and app tiles. Managing categories moved out of the flyouts into
+the Manage window. Subcategory flyouts float above
 the one they open from, like the bar's own categories. Its colours, transparency,
 border and corners are now adjustable.
 It now sits beside the Windows taskbar instead of trying to replace it, so these
