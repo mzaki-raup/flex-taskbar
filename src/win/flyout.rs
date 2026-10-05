@@ -25,8 +25,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    DT_CENTER, DT_END_ELLIPSIS, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteObject, GetMonitorInfoW,
-    HFONT, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -599,8 +599,12 @@ fn render(idx: usize) {
                     // The kind (Store app, Chrome web app…) on the right, subtle.
                     let note_w = if p.note.is_empty() { 0 } else { canvas::measure(p.note, f.small).0 + s(12) };
                     if note_w > 0 {
-                        let nrc = RECT { left: rc.right - s(10) - note_w, right: rc.right - s(10), ..rc };
-                        cv.text(p.note, nrc, f.small, c.subtle, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                        // Clear of the scroll indicator at the right edge.
+                        // Placed by its measure but drawn left-aligned with room to
+                        // spare: a final "t" can run a pixel past the measure.
+                        let text_w = note_w - s(12);
+                        let nrc = RECT { left: rc.right - s(14) - text_w, right: rc.right - s(8), ..rc };
+                        cv.text(p.note, nrc, f.small, c.subtle, DT_VCENTER | DT_SINGLELINE);
                     }
                     let trc = RECT { left: x + size + s(8), right: rc.right - s(4) - note_w - s(6), ..rc };
                     cv.text(&p.text, trc, f.font, c.text, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);

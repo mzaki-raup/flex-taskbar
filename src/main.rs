@@ -5,6 +5,7 @@ mod appearance;
 mod appkind;
 mod config;
 mod migrate;
+mod pkgsources;
 mod search;
 mod striplayout;
 mod tree;

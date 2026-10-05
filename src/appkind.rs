@@ -23,6 +23,9 @@ pub enum AppKind {
     EdgeWebApp,
     /// Another Chromium browser's web app (Brave, Vivaldi, Chromium…).
     WebApp,
+    /// From a package manager's folder (winget portable, Scoop, Chocolatey,
+    /// npm, pip…).
+    Package(crate::pkgsources::Manager),
     /// Added by the user.
     Custom,
 }
@@ -36,6 +39,7 @@ impl AppKind {
             AppKind::ChromeWebApp => "Chrome web app",
             AppKind::EdgeWebApp => "Edge web app",
             AppKind::WebApp => "Web app",
+            AppKind::Package(m) => m.label(),
             AppKind::Custom => "Custom",
         }
     }
@@ -77,6 +81,9 @@ pub fn classify_shell(parsing_name: &str) -> AppKind {
 
 /// The kind of a Start Menu shortcut (the fallback scan), by its path.
 pub fn classify_file(path: &str) -> AppKind {
+    if let Some(m) = crate::pkgsources::manager_of(path) {
+        return AppKind::Package(m);
+    }
     let lower = path.to_ascii_lowercase().replace('/', "\\");
     if lower.contains("\\chrome apps\\") {
         AppKind::ChromeWebApp
@@ -140,6 +147,9 @@ mod tests {
 
     #[test]
     fn start_menu_and_custom() {
+        let choco = "C:\\ProgramData\\chocolatey\\bin\\7z.exe";
+        assert_eq!(classify_file(choco), AppKind::Package(crate::pkgsources::Manager::Chocolatey));
+        assert_eq!(classify_file(choco).label(), "Chocolatey");
         let p = "C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Chrome Apps\\YouTube.lnk";
         assert_eq!(classify_file(p), AppKind::ChromeWebApp);
         assert_eq!(

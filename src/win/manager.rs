@@ -85,6 +85,8 @@ const STRIP_RESERVE: u16 = 67;
 const ALL_PIN: u16 = 68;
 const APPEARANCE: u16 = 69;
 const ARRANGE: u16 = 70;
+const AUTO_RESCAN: u16 = 71;
+const PACKAGE_APPS: u16 = 72;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -298,6 +300,8 @@ fn create() {
         for (text, id) in [
             ("Show icon strip", STRIP_SHOW),
             ("Reserve screen space for the strip (maximized windows stop above it)", STRIP_RESERVE),
+            ("Rescan apps automatically when apps are installed or removed", AUTO_RESCAN),
+            ("Include apps from package managers (winget, Scoop, Chocolatey, npm, pip, Cargo…)", PACKAGE_APPS),
         ] {
             controls.insert(
                 id,
@@ -392,7 +396,7 @@ fn layout() {
     let width = rc.right - 2 * m;
     let col_w = (width - 2 * s(12)) / 3;
     let cols = [m, m + col_w + s(12), m + 2 * (col_w + s(12))];
-    let bottom_h = 3 * bh + 4 * gap;
+    let bottom_h = 4 * bh + 5 * gap;
     let top = m;
     let pane_bottom = rc.bottom - m - bottom_h;
 
@@ -434,7 +438,10 @@ fn layout() {
     place(AUTOSTART, m, y0, s(150), bh);
     place(STRIP_SHOW, m + s(160), y0, s(140), bh);
     place(STRIP_RESERVE, m + s(310), y0, (rc.right - m - (m + s(310))).max(0), bh);
-    let y1 = y0 + bh + gap;
+    let ya = y0 + bh + gap;
+    place(AUTO_RESCAN, m, ya, s(400), bh);
+    place(PACKAGE_APPS, m + s(410), ya, (rc.right - m - (m + s(410))).max(0), bh);
+    let y1 = ya + bh + gap;
     let mut x = m;
     place(LBL_HK_SEARCH, x, y1 + s(5), s(90), lh);
     x += s(92);
@@ -1170,8 +1177,11 @@ fn load_settings() {
         SendMessageW(ctl(HK_MENU), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(menu))), Some(LPARAM(0)));
         let check = if autostart::is_enabled() { BST_CHECKED } else { BST_UNCHECKED };
         SendMessageW(ctl(AUTOSTART), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
-        let (show, reserve) = app::with(|s| (s.cfg.settings.show_strip, s.cfg.settings.reserve_space));
-        for (id, on) in [(STRIP_SHOW, show), (STRIP_RESERVE, reserve)] {
+        let (show, reserve, auto, packages) = app::with(|s| {
+            let st = &s.cfg.settings;
+            (st.show_strip, st.reserve_space, st.auto_rescan, st.package_apps)
+        });
+        for (id, on) in [(STRIP_SHOW, show), (STRIP_RESERVE, reserve), (AUTO_RESCAN, auto), (PACKAGE_APPS, packages)] {
             let check = if on { BST_CHECKED } else { BST_UNCHECKED };
             SendMessageW(ctl(id), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
         }
@@ -1385,6 +1395,17 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 ALL_ICON => app_icon(hwnd, ALL, ALL_ICON),
                 ALL_PIN => pin_selected(hwnd),
                 STRIP_SHOW => app::set_strip(Some(is_checked(STRIP_SHOW))),
+                AUTO_RESCAN => {
+                    let on = is_checked(AUTO_RESCAN);
+                    app::with(|s| s.cfg.settings.auto_rescan = on);
+                    app::save();
+                }
+                PACKAGE_APPS => {
+                    let on = is_checked(PACKAGE_APPS);
+                    app::with(|s| s.cfg.settings.package_apps = on);
+                    app::save();
+                    app::request_rescan();
+                }
                 STRIP_RESERVE => {
                     let reserve = is_checked(STRIP_RESERVE);
                     app::with(|s| s.cfg.settings.reserve_space = reserve);

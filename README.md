@@ -236,12 +236,46 @@ the Manage window include:
 Each app is labelled by kind: *Store app*, *Chrome web app*, *Edge web app*,
 *Web app* or *Custom* (desktop programs have no label). The label shows on the
 right in the *All* list and the Manage window, and next to the category path in
-search, so typing "web app" or "store" finds them. The list is rescanned in the
-background each time FlexTaskbar starts, and on demand (*Rescan apps*), so
-newly installed apps and web apps appear without restarting. If the Apps
-folder can't be read, FlexTaskbar falls back to scanning the Start Menu
-shortcut folders, where Chrome's web apps (its *Chrome Apps* folder) are still
-recognised; Store apps need the Apps folder.
+search, so typing "web app" or "store" finds them. If the Apps folder can't be
+read, FlexTaskbar falls back to scanning the Start Menu shortcut folders, where
+Chrome's web apps (its *Chrome Apps* folder) are still recognised; Store apps
+need the Apps folder.
+
+**Apps from package managers.** Many package managers install programs without
+a Start Menu entry. FlexTaskbar also lists the programs in their folders,
+labelled by manager:
+
+| Manager | Folder it looks in |
+|---|---|
+| winget (portable packages) | `%LOCALAPPDATA%\Microsoft\WinGet\Links`, `%ProgramFiles%\WinGet\Links` |
+| Scoop | `%SCOOP%\shims` (default `~\scoop\shims`), and the global `%ProgramData%\scoop\shims` |
+| Chocolatey | `%ChocolateyInstall%\bin` (default `%ProgramData%\chocolatey\bin`) |
+| npm (global packages) | `%APPDATA%\npm` |
+| pip (`--user` and per-user Pythons) | every `PythonXY\Scripts` under `%APPDATA%\Python` and `%LOCALAPPDATA%\Programs\Python` |
+| pipx | `%PIPX_BIN_DIR%` (default `~\.local\bin`) |
+| Cargo | `%CARGO_HOME%\bin` (default `~\.cargo\bin`) |
+| .NET tools | `~\.dotnet\tools` |
+| Go | `%GOBIN%`, or `%GOPATH%\bin` (default `~\go\bin`) |
+
+The managers' own commands (`choco`, `scoop`, `npm`, `pip`, `cargo`…) are left
+out, and a program that is already in the list under the same name (for
+example a Scoop app that also has a Start Menu shortcut) isn't listed twice.
+Command-line tools open in a console window that stays open, in your user
+folder. Apps that winget, Chocolatey or UniGetUI install with a normal
+installer have a Start Menu entry, so they are in the Apps folder anyway.
+Turn this off with *Include apps from package managers* in the Manage window.
+
+**Automatic rescan.** The list is rescanned in the background when FlexTaskbar
+starts, on demand (*Rescan apps*), and **by itself when apps are installed or
+removed**. A background thread watches the Start Menu folders (where installers,
+winget, Chocolatey, UniGetUI and Chrome/Edge web apps put their shortcuts),
+`%LOCALAPPDATA%\Packages` (every Store app gets a folder there) and the package
+managers' folders above. A few seconds after the last change, once the
+installer has finished, the list is rescanned, so a new app or web app appears
+in *All*, search and the Manage window without doing anything. Folders that
+appear later (a package manager installed after FlexTaskbar started) are
+picked up within a few minutes. Turn it off with *Rescan apps automatically*
+in the Manage window.
 
 **Custom apps.** You can add any program, shortcut, file, URL, `shell:` path or
 protocol (such as `ms-settings:`) as an app, with optional arguments, a start
@@ -380,7 +414,9 @@ These can be edited in `data\config.json` while FlexTaskbar is not running:
 | `group_all_apps_above` | `40` | Above this many apps, *All apps* is split into A–Z submenus |
 | `hover_delay_ms` | `100` | How long the pointer rests on a category before its flyout opens |
 
-Showing the bar and reserving its space are checkboxes in the Manage window.
+Showing the bar, reserving its space, rescanning automatically and including
+package managers' apps are checkboxes in the Manage window (`show_strip`,
+`reserve_space`, `auto_rescan` and `package_apps` under `settings`).
 Everything about its look is in the Appearance window and is stored under
 `settings.appearance`.
 
@@ -414,7 +450,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 50 unit tests cover:
+The 54 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -436,6 +472,10 @@ The 50 unit tests cover:
   themes, readable text on a custom background, opacity, the flyout border
   following the bar's unless set, the indicator style falling back to the
   badge when no picture was chosen, colour parsing and clamping
+- package managers: where each keeps its programs (following its environment
+  variables), which files are apps and which are the managers' own commands,
+  which manager a path belongs to, and spotting console programs from their
+  headers
 - telling app kinds apart from their shell names: Store/packaged apps,
   Chrome, Edge and other Chromium web apps, desktop programs, Start Menu
   shortcuts and custom browser web apps
@@ -457,6 +497,10 @@ The 50 unit tests cover:
     Lift, Bounce and Pulse
   - each category indicator style, uploading a PNG as the indicator (copied
     into `data\icons\` and shown on the bar), and removing it
+  - apps from winget, Scoop, Chocolatey and npm folders listed with their
+    labels; a new program and a new Chrome web-app shortcut picked up by
+    the automatic rescan a few seconds later; an npm tool opening in a
+    console that stays open
   - the right-click menus (move, unpin)
   - dragging a pinned app and a category to new places, and the *Arrange the
     bar* window (buttons and dragging rows), all updating the bar live
@@ -535,6 +579,8 @@ src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
+src/pkgsources.rs    package managers' folders and console programs   (tested)
+src/win/watch.rs     automatic rescan when apps are installed
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
 src/win/indicator.rs the mark on category icons (styles, own picture)

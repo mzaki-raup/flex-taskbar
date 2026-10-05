@@ -79,6 +79,11 @@ pub struct Settings {
     pub strip_edge: StripEdge,
     /// Milliseconds the pointer rests on a category icon before it opens.
     pub hover_delay_ms: u32,
+    /// Rescan the app list by itself when apps are installed or removed.
+    pub auto_rescan: bool,
+    /// Also list programs from package managers' folders (winget portable,
+    /// Scoop, Chocolatey, npm, pip, pipx, Cargo, .NET tools, Go).
+    pub package_apps: bool,
     /// Theme, colours, transparency, border, corners and size of the strip.
     pub appearance: crate::appearance::Appearance,
 }
@@ -96,6 +101,8 @@ impl Default for Settings {
             strip_height: 48,
             strip_edge: StripEdge::Taskbar,
             hover_delay_ms: 100,
+            auto_rescan: true,
+            package_apps: true,
             appearance: crate::appearance::Appearance::default(),
         }
     }

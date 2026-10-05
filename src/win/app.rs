@@ -11,6 +11,7 @@ use super::icons::{self, Source as IconSource};
 use super::launch::{self, Target};
 use super::ui::{self, wide};
 use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, strip, supervisor, theme};
+use crate::appkind::AppKind;
 use crate::config::{Config, Hotkey, LoadOutcome, Store};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,9 +32,10 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, HICON, IMAGE_ICON,
-    IsDialogMessageW, LR_DEFAULTCOLOR, LoadImageW, MSG, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
-    SM_CXSMICON, SW_SHOWNORMAL, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_HOTKEY,
-    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WNDCLASSW, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
+    IsDialogMessageW, KillTimer, LR_DEFAULTCOLOR, LoadImageW, MSG, PostQuitMessage, RegisterClassW,
+    RegisterWindowMessageW, SM_CXSMICON, SW_SHOWNORMAL, SetTimer, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_DESTROY,
+    WM_ENDSESSION, WM_HOTKEY, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
+    WS_OVERLAPPED,
 };
 use windows::core::{PCWSTR, w};
 
@@ -42,6 +44,10 @@ const WM_APP_TRAY: u32 = WM_APP + 2;
 pub const WM_APP_ICONS: u32 = WM_APP + 3;
 const WM_APP_SCAN_DONE: u32 = WM_APP + 4;
 const WM_APP_ERROR: u32 = WM_APP + 5;
+/// From `watch`: something was installed or removed.
+const WM_APP_APPS_CHANGED: u32 = WM_APP + 6;
+/// Rescan once changes have settled.
+const TIMER_RESCAN: usize = 7;
 
 /// NIN_SELECT | NINF_KEY: the tray icon was activated with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 0x1;
@@ -61,6 +67,8 @@ pub struct State {
     pub icon_size: i32,
     pub main: HWND,
     pub scanning: bool,
+    /// Apps changed during a scan: scan again when it finishes.
+    pub rescan_pending: bool,
     save_error_shown: bool,
 }
 
@@ -150,6 +158,7 @@ pub fn run(args: &Args) -> i32 {
             icon_size,
             main,
             scanning: false,
+            rescan_pending: false,
             save_error_shown: false,
         })
     });
@@ -166,6 +175,7 @@ pub fn run(args: &Args) -> i32 {
     load_folder_icon();
     request_all_icons();
     start_scan();
+    super::watch::start(main, WM_APP_APPS_CHANGED);
 
     // Tell the user about anything that happened on the way up.
     let mut notes = Vec::new();
@@ -305,6 +315,27 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_APP_SCAN_DONE => {
             let result = unsafe { Box::from_raw(lparam.0 as *mut Result<Vec<ShellApp>, String>) };
             finish_scan(*result);
+            if with(|s| std::mem::take(&mut s.rescan_pending)) {
+                unsafe {
+                    SetTimer(Some(hwnd), TIMER_RESCAN, crate::pkgsources::SETTLE_MS, None);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_APP_APPS_CHANGED => {
+            // Installers write many files: rescan once it has been quiet a moment.
+            if with(|s| s.cfg.settings.auto_rescan) {
+                unsafe {
+                    SetTimer(Some(hwnd), TIMER_RESCAN, crate::pkgsources::SETTLE_MS, None);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == TIMER_RESCAN => {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER_RESCAN);
+            }
+            request_rescan();
             LRESULT(0)
         }
         WM_APP_ERROR => {
@@ -447,11 +478,33 @@ pub fn rebuild_catalog() {
 
 // ---------------------------------------------------------------- launching
 
+/// A `.cmd`/`.bat` launcher, or a program whose header says it is a console
+/// one.
+fn is_console_program(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+        return true;
+    }
+    let mut head = [0u8; 1024];
+    let n = std::fs::File::open(path).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).unwrap_or(0);
+    crate::pkgsources::pe_is_console(&head[..n]) == Some(true)
+}
+
 pub fn launch_app(id: &str) {
     let target = with(|s| {
         let entry = s.catalog.get(id)?;
         let target = match &entry.source {
             AppSource::Shell(pn) => Target::Shell(pn.clone()),
+            // A package manager's command-line tool opens in a console that
+            // stays open (it would otherwise flash and close).
+            AppSource::File(path) if matches!(entry.kind, AppKind::Package(_)) && is_console_program(path) => {
+                Target::Custom {
+                    target: "%ComSpec%".into(),
+                    args: format!("/k \"{path}\""),
+                    dir: "%USERPROFILE%".into(),
+                    admin: false,
+                }
+            }
             AppSource::File(path) => {
                 Target::Custom { target: path.clone(), args: String::new(), dir: String::new(), admin: false }
             }
@@ -492,17 +545,27 @@ pub fn launch_app(id: &str) {
 
 // ---------------------------------------------------------------- scanning
 
+/// Rescans now, or as soon as the scan in progress has finished.
+pub fn request_rescan() {
+    if with(|s| s.scanning) {
+        with(|s| s.rescan_pending = true);
+    } else {
+        start_scan();
+    }
+}
+
 pub fn start_scan() {
     let already = with(|s| std::mem::replace(&mut s.scanning, true));
     if already {
         return;
     }
     let main_raw = main_hwnd().0 as isize;
+    let packages = with(|s| s.cfg.settings.package_apps);
     std::thread::spawn(move || {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
-        let result = catalog::scan().map_err(|e| e.message());
+        let result = catalog::scan(packages).map_err(|e| e.message());
         let ptr = Box::into_raw(Box::new(result));
         unsafe {
             let hwnd = HWND(main_raw as *mut _);

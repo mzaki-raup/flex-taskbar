@@ -1,6 +1,7 @@
 //! Launching. Everything goes through ShellExecuteEx with explicit file /
-//! parameters / directory fields; nothing is ever passed to cmd.exe or
-//! PowerShell as a command string.
+//! parameters / directory fields. The one use of cmd.exe is to keep a package
+//! manager's command-line tool open in a console (`cmd /k "<path>"`, with a
+//! path found on disk, never user-typed text).
 //!
 //! Launches run on a short-lived background thread so a slow shell handler can
 //! never freeze the launcher's UI.

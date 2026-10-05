@@ -19,6 +19,7 @@ mod strip;
 mod supervisor;
 mod theme;
 mod ui;
+mod watch;
 
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, LPARAM, WPARAM};
 use windows::Win32::System::Threading::CreateMutexW;

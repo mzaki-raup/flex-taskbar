@@ -10,8 +10,9 @@
 
 use crate::appkind::{self, AppKind};
 use crate::config::CustomApp;
+use crate::pkgsources;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
@@ -103,15 +104,56 @@ fn file_hint(target: &str) -> String {
     target.rsplit(['\\', '/']).next().unwrap_or(target).to_string()
 }
 
-/// Enumerates the Apps folder, falling back to the Start Menu folders. Needs COM
+/// Enumerates the Apps folder, falling back to the Start Menu folders, and
+/// (with `packages`) adds programs from package managers' folders. Needs COM
 /// initialized on the calling thread.
-pub fn scan() -> Result<Vec<ShellApp>> {
-    match scan_apps_folder() {
-        Ok(apps) if !apps.is_empty() => Ok(apps),
-        Ok(_) => Ok(scan_start_menu()),
-        Err(e) => {
-            let apps = scan_start_menu();
-            if apps.is_empty() { Err(e) } else { Ok(apps) }
+pub fn scan(packages: bool) -> Result<Vec<ShellApp>> {
+    let (mut apps, err) = match scan_apps_folder() {
+        Ok(apps) if !apps.is_empty() => (apps, None),
+        Ok(_) => (scan_start_menu(), None),
+        Err(e) => (scan_start_menu(), Some(e)),
+    };
+    if packages {
+        add_package_apps(&mut apps);
+    }
+    // Nothing found and the Apps folder failed: keep the last list instead.
+    match err {
+        Some(e) if apps.is_empty() => Err(e),
+        _ => Ok(apps),
+    }
+}
+
+/// Programs in winget's, Scoop's, Chocolatey's, npm's, pip's… folders that
+/// aren't already in the list under the same name.
+fn add_package_apps(apps: &mut Vec<ShellApp>) {
+    let stem = |s: &str| {
+        let f = file_hint(s).to_lowercase();
+        f.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or(f)
+    };
+    let mut known: HashSet<String> = apps.iter().flat_map(|a| [a.name.to_lowercase(), stem(&a.parsing_name)]).collect();
+    let subdirs = |root: &Path| -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(root)
+            .map(|r| r.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+            .unwrap_or_default()
+    };
+    for (manager, dir) in pkgsources::tool_dirs(|v| std::env::var(v).ok(), subdirs) {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let mut found: Vec<ShellApp> = entries
+            .flatten()
+            .filter_map(|e| {
+                let file = e.file_name().to_string_lossy().into_owned();
+                if !pkgsources::wanted(manager, &file) {
+                    return None;
+                }
+                let name = pkgsources::display_name(&file);
+                Some(ShellApp { parsing_name: e.path().display().to_string(), name, file: true })
+            })
+            .collect();
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+        for app in found {
+            if known.insert(app.name.to_lowercase()) {
+                apps.push(app);
+            }
         }
     }
 }
