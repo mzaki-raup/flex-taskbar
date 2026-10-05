@@ -24,15 +24,6 @@ pub enum DockWidth {
     Fit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum IconAlign {
-    /// Right after All (on a side bar: at the top), with no gap.
-    Start,
-    /// Centred on the bar, like the Windows 11 taskbar.
-    Centre,
-}
-
 /// An sRGB colour with alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba {
@@ -109,8 +100,6 @@ pub struct Appearance {
     /// Gap between the bar and the screen edges in DIPs (0 = docked flush).
     pub margin: u32,
     pub dock_width: DockWidth,
-    /// Where the categories and apps sit along the bar.
-    pub icon_align: IconAlign,
     /// Icon size on the bar and in flyout tiles, in DIPs.
     pub icon_size: u32,
     /// App tiles per row in a category flyout.
@@ -135,7 +124,6 @@ impl Default for Appearance {
             corner_radius: 0,
             margin: 0,
             dock_width: DockWidth::Full,
-            icon_align: IconAlign::Centre,
             icon_size: 32,
             flyout_columns: 4,
             flyout_corner_radius: 6,

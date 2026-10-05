@@ -94,8 +94,6 @@ original FlexTaskbar:
 - **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
   right-click an app to pin or unpin it).
 - **Centre: root categories and pinned apps.** A small ▾ marks a category.
-  (Set *Icons* to *At the start* in the Appearance window to pack them right
-  after *All* instead.)
 - **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
   path and pins it to the bar. ⚙ opens the Manage window.
 - **Category flyouts.** Resting the pointer on a category opens a flyout beside
@@ -154,7 +152,6 @@ Every change shows on the bar straight away:
 | **Bar** | | |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
-| Icons | Centred, or at the start right after *All* (at the top on a side bar) | Centred |
 | Border colour | Any colour | A faint line in the text colour |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
@@ -358,14 +355,14 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 40 unit tests cover:
+The 39 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
 - category tree operations at any depth: add, remove, reorder, indent/outdent,
   app membership
 - search ranking
-- bar layout (the three zones, centring or packing after *All*, overflow, the fitted dock, hit
+- bar layout (the three zones, centring, overflow, the fitted dock, hit
   testing, where a dragged icon lands), which edge a dragged bar docks to,
   where flyouts open for each edge (and staying on screen), how flyout tiles
   run for each edge (rows for top and bottom bars, columns for side bars),
