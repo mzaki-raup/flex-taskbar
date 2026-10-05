@@ -197,3 +197,26 @@ pub fn image_list(size: i32, grow: i32) -> windows::Win32::UI::Controls::HIMAGEL
         list
     }
 }
+
+/// Creates an owned top-level popup of a system class (e.g. a tooltip window).
+pub fn child_popup(owner: HWND, class: &str, style: WINDOW_STYLE) -> HWND {
+    use windows::Win32::UI::WindowsAndMessaging::{CW_USEDEFAULT, WS_EX_TOPMOST, WS_POPUP};
+    let class_w = wide(class);
+    unsafe {
+        CreateWindowExW(
+            WS_EX_TOPMOST,
+            PCWSTR(class_w.as_ptr()),
+            PCWSTR::null(),
+            WS_POPUP | style,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            Some(owner),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or_default()
+    }
+}

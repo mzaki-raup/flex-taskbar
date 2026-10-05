@@ -21,6 +21,7 @@ pub enum Action {
     Manage,
     Rescan,
     ToggleAutostart,
+    ToggleStrip,
     OpenDataFolder,
     Exit,
 }
@@ -172,10 +173,30 @@ fn short_id(id: &str) -> String {
     id.rsplit(['\\', '!']).next().unwrap_or(id).to_string()
 }
 
-/// Shows the menu at `pt` and returns the chosen action.
-pub fn track(owner: HWND, pt: POINT) -> Option<Action> {
+/// A built popup menu plus the actions its command ids map to.
+pub struct Built {
+    pub menu: HMENU,
+    actions: Vec<Action>,
+}
+
+impl Built {
+    /// Destroys the menu (and every submenu; bitmaps stay owned by the cache)
+    /// and returns the action for the chosen command id, if any.
+    pub fn finish(mut self, chosen: usize) -> Option<Action> {
+        unsafe {
+            let _ = DestroyMenu(self.menu);
+        }
+        if chosen == 0 || chosen > self.actions.len() {
+            return None;
+        }
+        Some(self.actions.swap_remove(chosen - 1))
+    }
+}
+
+/// The full launcher menu: recents, every root category, all apps, commands.
+pub fn build_main() -> Built {
     let autostart_on = autostart::is_enabled();
-    let (root, mut actions) = app::with(|s| {
+    app::with(|s| {
         let mut b = Builder { actions: Vec::new(), strings: Vec::new() };
         let root = Builder::popup();
 
@@ -215,6 +236,9 @@ pub fn track(owner: HWND, pt: POINT) -> Option<Action> {
         let (label, state) =
             if s.scanning { ("Scanning apps…", MFS_DISABLED) } else { ("Rescan apps", MENU_ITEM_STATE(0)) };
         b.item(root, label, id, None, None, state);
+        let id = b.command(Action::ToggleStrip);
+        let state = if s.cfg.settings.show_strip { MFS_CHECKED } else { MENU_ITEM_STATE(0) };
+        b.item(root, "Show icon strip", id, None, None, state);
         let id = b.command(Action::ToggleAutostart);
         let state = if autostart_on { MFS_CHECKED } else { MENU_ITEM_STATE(0) };
         b.item(root, "Start with Windows", id, None, None, state);
@@ -223,20 +247,31 @@ pub fn track(owner: HWND, pt: POINT) -> Option<Action> {
         b.separator(root);
         let id = b.command(Action::Exit);
         b.item(root, "Exit", id, None, None, MENU_ITEM_STATE(0));
-        (root, b.actions)
-    });
+        Built { menu: root, actions: b.actions }
+    })
+}
 
+/// One category's contents as a popup: its subcategories (each a cascading
+/// submenu, at any depth) followed by its apps.
+pub fn build_category(cat_id: u64) -> Option<Built> {
+    app::with(|s| {
+        let c = crate::tree::find(&s.cfg.categories, cat_id)?;
+        let mut b = Builder { actions: Vec::new(), strings: Vec::new() };
+        let menu = b.category(s, c);
+        Some(Built { menu, actions: b.actions })
+    })
+}
+
+/// Shows the main menu at `pt` and returns the chosen action.
+pub fn track(owner: HWND, pt: POINT) -> Option<Action> {
+    let built = build_main();
     // State is released here: the menu's modal loop dispatches other messages.
     let chosen = unsafe {
         // Required so the menu closes when the user clicks elsewhere.
         let _ = SetForegroundWindow(owner);
-        let id = TrackPopupMenuEx(root, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, pt.x, pt.y, owner, None).0 as usize;
+        let id = TrackPopupMenuEx(built.menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, pt.x, pt.y, owner, None).0 as usize;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(root); // destroys every submenu too; bitmaps stay owned by the cache
         id
     };
-    if chosen == 0 || chosen > actions.len() {
-        return None;
-    }
-    Some(actions.swap_remove(chosen - 1))
+    built.finish(chosen)
 }

@@ -1,11 +1,15 @@
 # FlexTaskbar
 
 A portable application launcher for Windows 10 (version 1703 or later) and
-Windows 11, for people with a lot of apps installed. You file apps into categories nested as deeply as you like, then
-launch them from a tray menu, a hotkey menu, or a type-to-search window.
+Windows 11, for people with a lot of apps installed. You file apps into
+categories nested as deeply as you like. Your categories and pinned apps then
+sit as a strip of icons docked against the Windows taskbar. Rest the pointer on
+a category and its contents pop up, with subcategories cascading on hover. The
+same categories are also available from the tray icon, a hotkey menu, and a
+type-to-search window.
 
-FlexTaskbar does **not** replace or change the Windows taskbar. It is a tray
-app that sits next to it.
+FlexTaskbar does **not** replace or change the Windows taskbar. The strip sits
+next to it (just above, or below a top taskbar), and can be turned off.
 
 - Written in Rust against the native Win32 API. There's no .NET runtime, web
   engine or UI framework to install.
@@ -23,13 +27,19 @@ app that sits next to it.
 
 ## Screenshots
 
-![Launching an app from the nested category menu, searching by name and by category, and the Manage window](screenshots/flow.gif)
+![Hovering categories on the icon strip, sliding between them, launching a pinned app, the full menu, search, and the Manage window](screenshots/flow.gif)
 
-| Nested category menu | Search (empty box: recent apps first) |
+**The icon strip**: the FlexTaskbar button, then root categories and pinned apps.
+
+![Icon strip with category and app icons](screenshots/strip.png)
+
+| Hover a category: subcategories cascade | FlexTaskbar button / tray: the full menu |
 |---|---|
-| ![Category menu three levels deep](screenshots/menu.png) | ![Search window listing apps with their category paths](screenshots/search.png) |
-| **Manage categories** | **Custom app (a browser web app)** |
-| ![Manage window with category tree, apps in the category, and all apps](screenshots/manage.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
+| ![Development › Editors › Notepad opened from the strip](screenshots/strip-menu.png) | ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) |
+| **Search (empty box: recent apps first)** | **Custom app (a browser web app)** |
+| ![Search window listing apps with their category paths](screenshots/search.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
+
+![Manage window with category tree, apps in the category, all apps, and strip settings](screenshots/manage.png)
 
 These were captured under Wine on Linux, using a demo setup: Wine's built-in
 programs filed into example categories, with custom icons. On Windows you see
@@ -38,14 +48,32 @@ your own apps with their real icons, in Windows' own control styling.
 ## Features
 
 **Nested categories.** Categories can contain subcategories to any depth, plus
-apps. The same app can be filed in several categories. In the tray menu every
-category is a submenu, with its subcategories first and then its apps.
+apps. The same app can be filed in several categories. In every menu a category
+is a submenu, with its subcategories first and then its apps.
 
-**Three ways to launch:**
+**The icon strip** is a bar docked against the Windows taskbar on the primary
+monitor:
+- **Layout.** The FlexTaskbar button is on the left. Your root categories and
+  pinned apps are centred, like the Windows 11 taskbar.
+- **Categories open on hover.** Resting the pointer on a category for a moment
+  opens its contents upward. Subcategories open as you hover them, at any depth.
+- **Slide between categories.** While a category is open, moving along the
+  strip switches to the next one, like a menu bar.
+- **Pinned apps** launch with a click. You can pin an app from the Manage
+  window (*Pin to strip*), or drag `.exe`/`.lnk` files onto the strip.
+- **Right-click** an icon to move it left or right, unpin it, or hide the strip.
+- **Screen space.** By default the strip reserves its space like the taskbar
+  does, so maximized windows stop above it. You can turn that off in the Manage
+  window, and then the strip floats on top instead.
+- **Full-screen apps.** It hides while a full-screen app (a game or a video) is
+  in front.
+
+**Four ways to launch:**
 
 | How | What you get |
 |---|---|
-| Left- or right-click the tray icon | The category menu |
+| The icon strip | Hover a category, click a pinned app; the FlexTaskbar button shows the full menu |
+| Left- or right-click the tray icon | The full menu |
 | **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
 | **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
 
@@ -81,19 +109,23 @@ custom icons are copied over.
 
 ### What changed from the .NET version
 
-The old version tried to be a full taskbar replacement. This one is only a
-launcher, so these features are gone on purpose:
-- the docked bar and screen-space reservation
+The docked bar is back as the icon strip, with the same idea as before:
+category and app icons in a row, with category contents popping up from them.
+It now sits beside the Windows taskbar instead of trying to replace it, so these
+old taskbar features are gone on purpose:
 - running-window buttons
-- the tray-icon mirror, clock and status indicators
+- the tray-icon mirror
+- the clock and status indicators
 
 Everything about organising and launching apps carried over:
 - categories, now nested to any depth
+- pinned apps
 - custom category and app icons
 - custom and web apps
 - search
 - recents
 - hotkeys
+- reserving screen space
 - crash recovery
 
 Your old categories can be imported (see above).
@@ -111,8 +143,12 @@ Your old categories can be imported (see above).
      several) and click *← Add to category*.
    - **Apps in this category** (middle): reorder or remove the apps in the
      selected category.
-3. Close the window. FlexTaskbar keeps running in the tray. To open the window
-   again, use the tray menu's *Manage categories…*, or just run the exe again.
+   - To put an app straight on the strip, select it under **All apps** and
+     click *Pin to strip*.
+3. Close the window. Your root categories now appear on the strip, and
+   FlexTaskbar keeps running in the tray. To open the window again, use
+   *Manage categories…* from the FlexTaskbar button or the tray menu, or just
+   run the exe again.
 
 ## Portable data
 
@@ -139,6 +175,9 @@ status line tells you which one is in use.
 a per-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry pointing at
 the exe. If you move the folder, the checkbox shows as off again; re-tick it to
 point the entry at the new location.
+
+The strip's reserved screen space is not stored anywhere. Windows gives it back
+as soon as FlexTaskbar exits or the strip is turned off.
 
 ## Crash and hang recovery
 
@@ -183,6 +222,10 @@ These can be edited in `data\config.json` while FlexTaskbar is not running:
 | `max_recents` | `10` | How many recently used apps are remembered |
 | `show_recents_in_menu` | `true` | Show the *Recent* submenu |
 | `group_all_apps_above` | `40` | Above this many apps, *All apps* is split into A–Z submenus |
+| `strip_height` | `48` | Strip height in DIPs (48 matches the Windows 11 taskbar; 24–96) |
+| `hover_delay_ms` | `250` | How long the pointer rests on a category before it opens |
+
+Showing the strip and reserving its space are checkboxes in the Manage window.
 
 The hotkeys are set in the Manage window. To turn a hotkey off, clear its box
 with Backspace and click *Apply hotkeys*.
@@ -190,12 +233,14 @@ with Backspace and click *Apply hotkeys*.
 ## Performance
 
 The launcher is built to cost almost nothing while idle:
-- It waits on Windows messages and never polls. The one timer is in the
-  supervisor, which wakes every 5 seconds to check that the launcher is still
+- It waits on Windows messages and never polls. The strip's only timer is the
+  short hover delay, started when the pointer enters a category icon. The
+  supervisor wakes every 5 seconds to check that the launcher is still
   responding.
 - The app scan and icon loading happen on background threads. Icons come from
   Windows' own icon cache and are kept in memory after the first load.
-- Menus are native Windows popup menus.
+- Menus are native Windows popup menus. The strip paints a handful of icons
+  with GDI, and it uses no animation, composition or GPU.
 - The search list is virtual, so it only creates rows for what's on screen.
 - The Manage window is fully destroyed when you close it.
 - The release build uses LTO and is stripped.
@@ -207,16 +252,26 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 22 unit tests cover:
+The 27 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
 - category tree operations at any depth: add, remove, reorder, indent/outdent,
   app membership
 - search ranking
+- strip layout (centring, overflow, hit testing) and pinning
 - the old-settings importer, including cycles in old data and bad JSON
 
 **Manually, under Wine 9 on Linux** (not real Windows):
+- the icon strip:
+  - hover-to-open categories with cascading subcategories
+  - sliding between open categories
+  - launching a pinned app
+  - the FlexTaskbar button
+  - the right-click menu (move, unpin)
+  - *Pin to strip*
+  - showing and hiding it
+  - coming back after a crash
 - first-run Manage window
 - creating three levels of nested categories, including renaming them
 - the custom-app dialog
@@ -240,6 +295,10 @@ The 22 unit tests cover:
 - *Start with Windows*
 - hang detection
 - tray behaviour with the real Windows taskbar
+- dragging files onto the strip or the Manage window
+- the strip next to the real Windows taskbar: reserving screen space,
+  hiding for full-screen apps, and a taskbar at the top of the screen. Wine
+  has no Windows taskbar, so there the strip sits at the bottom of the screen.
 
 ## Building
 
@@ -267,11 +326,13 @@ src/main.rs          entry point
 src/config.rs        config model + atomic save / backup recovery   (tested)
 src/tree.rs          nested category operations                       (tested)
 src/search.rs        search ranking                                   (tested)
+src/striplayout.rs   icon strip layout and hit testing                (tested)
 src/migrate.rs       import from the .NET version                     (tested)
 src/win/mod.rs       process model, single instance, command forwarding
 src/win/supervisor.rs  crash/hang restart
 src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon cache
-src/win/menu.rs      nested popup menu
+src/win/menu.rs      nested popup menus (full menu, one category)
+src/win/strip.rs     the icon strip: AppBar docking, painting, hover menus
 src/win/searchwin.rs search window
 src/win/manager.rs   Manage categories window
 src/win/appdialog.rs custom-app dialog

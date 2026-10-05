@@ -10,7 +10,7 @@ use super::catalog::{self, Catalog, ShellApp, Source as AppSource};
 use super::icons::{self, Source as IconSource};
 use super::launch::{self, Target};
 use super::ui::{self, wide};
-use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, supervisor, theme};
+use super::{Args, Command, MAIN_CLASS, autostart, manager, menu, paths, searchwin, strip, supervisor, theme};
 use crate::config::{Config, Hotkey, LoadOutcome, Store};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -160,6 +160,7 @@ pub fn run(args: &Args) -> i32 {
     }
     theme::allow_dark_for_window(main);
     add_tray_icon(main);
+    strip::apply_settings();
     let hotkey_problems = register_hotkeys();
     load_folder_icon();
     request_all_icons();
@@ -319,6 +320,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             if area == "ImmersiveColorSet" {
                 theme::allow_dark_menus();
                 searchwin::theme_changed();
+                strip::theme_changed();
             }
             LRESULT(0)
         }
@@ -326,6 +328,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_ENDSESSION => {
             if wparam.0 != 0 {
                 // Logoff/shutdown: settings are already saved after every change.
+                strip::destroy();
                 remove_tray_icon(hwnd);
                 std::process::exit(super::EXIT_CLEAN);
             }
@@ -337,8 +340,9 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             LRESULT(0)
         }
         _ if msg == taskbar_created_msg() && msg != 0 => {
-            // Explorer restarted: the tray icon is gone and must be re-added.
+            // Explorer restarted: the tray icon and AppBar are gone; re-add them.
             add_tray_icon(hwnd);
+            strip::shell_restarted();
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
@@ -357,6 +361,7 @@ pub fn run_command(cmd: Command) {
 pub fn exit() {
     searchwin::destroy();
     manager::destroy();
+    strip::destroy();
     let main = main_hwnd();
     unsafe {
         let _ = DestroyWindow(main);
@@ -369,16 +374,30 @@ pub fn show_menu() {
         let _ = GetCursorPos(&mut pt);
     }
     if let Some(action) = menu::track(main_hwnd(), pt) {
-        match action {
-            menu::Action::Launch(id) => launch_app(&id),
-            menu::Action::Search => searchwin::show(),
-            menu::Action::Manage => manager::show(),
-            menu::Action::Rescan => start_scan(),
-            menu::Action::ToggleAutostart => toggle_autostart(None),
-            menu::Action::OpenDataFolder => open_data_folder(),
-            menu::Action::Exit => exit(),
-        }
+        perform(action);
     }
+}
+
+pub fn perform(action: menu::Action) {
+    match action {
+        menu::Action::Launch(id) => launch_app(&id),
+        menu::Action::Search => searchwin::show(),
+        menu::Action::Manage => manager::show(),
+        menu::Action::Rescan => start_scan(),
+        menu::Action::ToggleAutostart => toggle_autostart(None),
+        menu::Action::ToggleStrip => set_strip(None),
+        menu::Action::OpenDataFolder => open_data_folder(),
+        menu::Action::Exit => exit(),
+    }
+}
+
+/// Shows/hides the strip (`None` toggles) and optionally changes whether it
+/// reserves screen space.
+pub fn set_strip(show: Option<bool>) {
+    with(|s| s.cfg.settings.show_strip = show.unwrap_or(!s.cfg.settings.show_strip));
+    save();
+    strip::apply_settings();
+    manager::settings_changed();
 }
 
 pub fn toggle_autostart(owner: Option<HWND>) {
@@ -412,6 +431,8 @@ pub fn save() {
         supervisor::log(&text);
         balloon(&text, true);
     }
+    // Every change goes through here, so the strip always shows the saved state.
+    strip::refresh();
 }
 
 /// Rebuilds the catalog after custom apps changed.
@@ -514,6 +535,7 @@ fn finish_scan(result: Result<Vec<ShellApp>, String>) {
     searchwin::catalog_changed();
     manager::catalog_changed();
     manager::scan_state_changed();
+    strip::refresh();
 }
 
 // ---------------------------------------------------------------- icons
@@ -534,6 +556,22 @@ fn icon_source(s: &State, app_id: &str) -> Option<IconSource> {
             Some(IconSource::Path(c.target.clone()))
         }
     }
+}
+
+/// Icon source for any cache key: an app id, `cat:<id>` (custom image or the
+/// folder icon), or [`FOLDER_ICON`].
+pub fn icon_source_for(s: &State, key: &str) -> Option<IconSource> {
+    if key == FOLDER_ICON {
+        return Some(IconSource::Path(paths::get().data.display().to_string()));
+    }
+    if let Some(cat) = key.strip_prefix("cat:") {
+        let id: u64 = cat.parse().ok()?;
+        return match crate::tree::find(&s.cfg.categories, id)?.icon.as_ref() {
+            Some(f) => Some(IconSource::Image(paths::get().icons.join(f))),
+            None => icon_source_for(s, FOLDER_ICON),
+        };
+    }
+    icon_source(s, key)
 }
 
 /// Starts background loading for every app and category icon not yet cached.
@@ -600,6 +638,7 @@ pub fn reload_icon(key: &str) {
     let keys = vec![key.to_string()];
     searchwin::icons_changed(&keys);
     manager::icons_changed(&keys);
+    strip::icon_changed(key);
 }
 
 // ---------------------------------------------------------------- hotkeys

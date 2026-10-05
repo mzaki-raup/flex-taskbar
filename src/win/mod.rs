@@ -10,6 +10,7 @@ mod manager;
 mod menu;
 mod paths;
 mod searchwin;
+mod strip;
 mod supervisor;
 mod theme;
 mod ui;

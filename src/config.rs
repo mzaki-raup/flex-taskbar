@@ -67,6 +67,15 @@ pub struct Settings {
     pub show_recents_in_menu: bool,
     /// "All apps" in the menu is split into A–Z submenus above this many apps.
     pub group_all_apps_above: usize,
+    /// The icon strip docked against the Windows taskbar.
+    pub show_strip: bool,
+    /// Reserve the strip's screen space (an AppBar), so maximized windows end
+    /// above it instead of underneath.
+    pub reserve_space: bool,
+    /// Strip height in DIPs (48 matches the Windows 11 taskbar).
+    pub strip_height: u32,
+    /// Milliseconds the pointer rests on a category icon before it opens.
+    pub hover_delay_ms: u32,
 }
 
 impl Default for Settings {
@@ -77,6 +86,10 @@ impl Default for Settings {
             max_recents: 10,
             show_recents_in_menu: true,
             group_all_apps_above: 40,
+            show_strip: true,
+            reserve_space: true,
+            strip_height: 48,
+            hover_delay_ms: 250,
         }
     }
 }
@@ -120,6 +133,8 @@ pub struct Config {
     pub app_icons: BTreeMap<String, String>,
     /// Most recent first.
     pub recents: Vec<String>,
+    /// Apps pinned to the icon strip, left to right (after the root categories).
+    pub pinned: Vec<String>,
     pub next_id: u64,
 }
 
@@ -132,6 +147,7 @@ impl Default for Config {
             custom_apps: Vec::new(),
             app_icons: BTreeMap::new(),
             recents: Vec::new(),
+            pinned: Vec::new(),
             next_id: 1,
         }
     }
@@ -157,6 +173,32 @@ impl Config {
         self.recents.retain(|r| r != app_id);
         self.recents.insert(0, app_id.to_string());
         self.recents.truncate(self.settings.max_recents.max(1));
+    }
+
+    /// Pins an app to the strip (at the end). Returns false if already pinned.
+    pub fn pin(&mut self, app_id: &str) -> bool {
+        if self.pinned.iter().any(|p| p == app_id) {
+            return false;
+        }
+        self.pinned.push(app_id.to_string());
+        true
+    }
+
+    pub fn unpin(&mut self, app_id: &str) -> bool {
+        let before = self.pinned.len();
+        self.pinned.retain(|p| p != app_id);
+        self.pinned.len() != before
+    }
+
+    /// Moves a pinned app one place left (`-1`) or right (`1`).
+    pub fn move_pinned(&mut self, app_id: &str, delta: isize) -> bool {
+        let Some(pos) = self.pinned.iter().position(|p| p == app_id) else { return false };
+        let target = pos as isize + delta;
+        if target < 0 || target as usize >= self.pinned.len() {
+            return false;
+        }
+        self.pinned.swap(pos, target as usize);
+        true
     }
 
     pub fn custom_app(&self, id: &str) -> Option<&CustomApp> {
@@ -356,6 +398,20 @@ mod tests {
         cfg.record_recent("a");
         cfg.record_recent("c");
         assert_eq!(cfg.recents, vec!["c".to_string(), "a".to_string()]);
+    }
+
+    #[test]
+    fn pinning() {
+        let mut cfg = Config::default();
+        assert!(cfg.pin("a"));
+        assert!(cfg.pin("b"));
+        assert!(!cfg.pin("a"));
+        assert!(cfg.move_pinned("b", -1));
+        assert!(!cfg.move_pinned("b", -1));
+        assert_eq!(cfg.pinned, vec!["b".to_string(), "a".to_string()]);
+        assert!(cfg.unpin("b"));
+        assert!(!cfg.unpin("b"));
+        assert_eq!(cfg.pinned, vec!["a".to_string()]);
     }
 
     #[test]

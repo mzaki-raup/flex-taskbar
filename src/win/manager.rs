@@ -80,6 +80,9 @@ const LBL_ALL: u16 = 62;
 const LBL_HK_SEARCH: u16 = 63;
 const LBL_HK_MENU: u16 = 64;
 const LBL_HINT: u16 = 65;
+const STRIP_SHOW: u16 = 66;
+const STRIP_RESERVE: u16 = 67;
+const ALL_PIN: u16 = 68;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -262,6 +265,7 @@ fn create() {
         controls.insert(ALL_FILTER, filter);
         for (text, id) in [
             ("← Add to category", ALL_ADD),
+            ("Pin to strip", ALL_PIN),
             ("Icon…", ALL_ICON),
             ("New custom app…", CUSTOM_NEW),
             ("Edit…", CUSTOM_EDIT),
@@ -281,6 +285,22 @@ fn create() {
                 AUTOSTART,
             ),
         );
+        for (text, id) in [
+            ("Show icon strip", STRIP_SHOW),
+            ("Reserve screen space for the strip (maximized windows stop above it)", STRIP_RESERVE),
+        ] {
+            controls.insert(
+                id,
+                ui::child(
+                    hwnd,
+                    "BUTTON",
+                    text,
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
+                    WINDOW_EX_STYLE(0),
+                    id,
+                ),
+            );
+        }
         controls.insert(LBL_HK_SEARCH, label("Search hotkey", LBL_HK_SEARCH));
         controls.insert(LBL_HK_MENU, label("Menu hotkey", LBL_HK_MENU));
         controls.insert(
@@ -360,7 +380,7 @@ fn layout() {
     let width = rc.right - 2 * m;
     let col_w = (width - 2 * s(12)) / 3;
     let cols = [m, m + col_w + s(12), m + 2 * (col_w + s(12))];
-    let bottom_h = 2 * bh + 3 * gap;
+    let bottom_h = 3 * bh + 4 * gap;
     let top = m;
     let pane_bottom = rc.bottom - m - bottom_h;
 
@@ -394,14 +414,16 @@ fn layout() {
     let all_top = top + lh + s(24) + gap;
     let all_bottom = pane_bottom - 2 * (bh + gap);
     place(ALL, cols[2], all_top, col_w, all_bottom - all_top);
-    row(&[ALL_ADD, ALL_ICON], cols[2], all_bottom + gap, col_w);
+    row(&[ALL_ADD, ALL_PIN, ALL_ICON], cols[2], all_bottom + gap, col_w);
     row(&[CUSTOM_NEW, CUSTOM_EDIT, CUSTOM_DELETE], cols[2], all_bottom + 2 * gap + bh, col_w);
 
-    // Settings row.
-    let y1 = pane_bottom + 2 * gap;
+    // Settings rows.
+    let y0 = pane_bottom + 2 * gap;
+    place(AUTOSTART, m, y0, s(150), bh);
+    place(STRIP_SHOW, m + s(160), y0, s(140), bh);
+    place(STRIP_RESERVE, m + s(310), y0, (rc.right - m - (m + s(310))).max(0), bh);
+    let y1 = y0 + bh + gap;
     let mut x = m;
-    place(AUTOSTART, x, y1, s(150), bh);
-    x += s(160);
     place(LBL_HK_SEARCH, x, y1 + s(5), s(90), lh);
     x += s(92);
     place(HK_SEARCH, x, y1 + s(2), s(140), s(24));
@@ -832,6 +854,7 @@ fn delete_custom_app(owner: HWND) {
             s.cfg.custom_apps.retain(|c| c.id != *id);
             tree::remove_app_everywhere(&mut s.cfg.categories, id);
             s.cfg.recents.retain(|r| r != id);
+            s.cfg.unpin(id);
             if let Some(f) = s.cfg.app_icons.remove(id) {
                 let _ = std::fs::remove_file(paths::get().icons.join(f));
             }
@@ -1110,6 +1133,36 @@ fn load_settings() {
         SendMessageW(ctl(HK_MENU), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(menu))), Some(LPARAM(0)));
         let check = if autostart::is_enabled() { BST_CHECKED } else { BST_UNCHECKED };
         SendMessageW(ctl(AUTOSTART), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
+        let (show, reserve) = app::with(|s| (s.cfg.settings.show_strip, s.cfg.settings.reserve_space));
+        for (id, on) in [(STRIP_SHOW, show), (STRIP_RESERVE, reserve)] {
+            let check = if on { BST_CHECKED } else { BST_UNCHECKED };
+            SendMessageW(ctl(id), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
+        }
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctl(STRIP_RESERVE), show);
+    }
+}
+
+/// The strip was shown/hidden from elsewhere (tray menu, strip context menu).
+pub fn settings_changed() {
+    if hwnd().is_some() {
+        load_settings();
+    }
+}
+
+fn is_checked(id: u16) -> bool {
+    unsafe { SendMessageW(ctl(id), BM_GETCHECK, Some(WPARAM(0)), Some(LPARAM(0))).0 == BST_CHECKED.0 as isize }
+}
+
+fn pin_selected(owner: HWND) {
+    let ids = selected_rows(ALL);
+    if ids.is_empty() {
+        ui::info(Some(owner), "Select one or more apps in the All apps list first.");
+        return;
+    }
+    let changed = app::with(|s| ids.iter().fold(false, |acc, id| s.cfg.pin(id) | acc));
+    if changed {
+        app::save();
+        ui::set_text(ctl(STATUS), "Pinned to the strip. Right-click an icon on the strip to move or unpin it.");
     }
 }
 
@@ -1284,6 +1337,14 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 APP_ICON => app_icon(hwnd, APPS, APP_ICON),
                 ALL_ADD => add_selected_to_category(hwnd),
                 ALL_ICON => app_icon(hwnd, ALL, ALL_ICON),
+                ALL_PIN => pin_selected(hwnd),
+                STRIP_SHOW => app::set_strip(Some(is_checked(STRIP_SHOW))),
+                STRIP_RESERVE => {
+                    let reserve = is_checked(STRIP_RESERVE);
+                    app::with(|s| s.cfg.settings.reserve_space = reserve);
+                    app::save();
+                    super::strip::apply_settings();
+                }
                 CUSTOM_NEW => new_custom_app(hwnd, CustomApp::default()),
                 CUSTOM_EDIT => edit_custom_app(hwnd),
                 CUSTOM_DELETE => delete_custom_app(hwnd),

@@ -3,6 +3,7 @@
 mod config;
 mod migrate;
 mod search;
+mod striplayout;
 mod tree;
 
 #[cfg(windows)]
