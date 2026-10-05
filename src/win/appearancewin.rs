@@ -23,6 +23,7 @@ use windows::core::{PCWSTR, w};
 // Combo boxes.
 const THEME: u16 = 10;
 const DOCK: u16 = 11;
+const POSITION: u16 = 12;
 // Colour buttons, and their "Default" buttons (+100).
 const ACCENT: u16 = 20;
 const BACKGROUND: u16 = 21;
@@ -83,7 +84,7 @@ const SLIDERS: [(u16, &str, u32, u32); 9] = [
     (RADIUS, "Corner radius", 0, 24),
     (MARGIN, "Gap from screen edge", 0, 24),
     (ICON_SIZE, "Icon size", 16, 48),
-    (BAR_HEIGHT, "Bar height", 32, 96),
+    (BAR_HEIGHT, "Bar thickness", 32, 96),
     (COLUMNS, "App tiles per row", 1, 12),
     (FLYOUT_RADIUS, "Corner radius", 0, 24),
     (FLYOUT_BORDER_WIDTH, "Border width", 0, 6),
@@ -98,30 +99,40 @@ const COLOURS: [(u16, &str); 4] = [
 
 /// The window's rows, top to bottom.
 enum Row {
+    /// Start the next column.
+    Column,
     Heading(&'static str),
     Combo(u16, &'static str, &'static [&'static str]),
     Colour(u16),
     Slider(u16),
 }
 
-const ROWS: [Row; 18] = [
+/// Two columns: general look and the flyouts on the left, the bar on the right.
+const ROWS: [Row; 21] = [
+    Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
     Row::Colour(BACKGROUND),
     Row::Slider(OPACITY),
     Row::Slider(ICON_SIZE),
+    Row::Heading("Category flyouts"),
+    Row::Slider(COLUMNS),
+    Row::Colour(FLYOUT_BORDER),
+    Row::Slider(FLYOUT_BORDER_WIDTH),
+    Row::Slider(FLYOUT_RADIUS),
+    Row::Column,
     Row::Heading("Bar"),
+    Row::Combo(
+        POSITION,
+        "Position (or drag the bar)",
+        &["Next to the Windows taskbar", "Bottom", "Top", "Left", "Right"],
+    ),
     Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
     Row::Colour(BORDER),
     Row::Slider(BORDER_WIDTH),
     Row::Slider(RADIUS),
     Row::Slider(MARGIN),
     Row::Slider(BAR_HEIGHT),
-    Row::Heading("Category flyouts"),
-    Row::Slider(COLUMNS),
-    Row::Colour(FLYOUT_BORDER),
-    Row::Slider(FLYOUT_BORDER_WIDTH),
-    Row::Slider(FLYOUT_RADIUS),
     Row::Heading(""),
 ];
 
@@ -218,35 +229,42 @@ fn create() {
             let _ = SetWindowPos(h, None, x, y + (row_h - height) / 2, w, height, SWP_NOZORDER);
         };
 
+        let (mut x0, mut bottom) = (0, 0);
         for row in &ROWS {
             match *row {
+                Row::Column => {
+                    bottom = bottom.max(y);
+                    x0 += ctl_x + ctl_w + m;
+                    y = m;
+                    continue;
+                }
                 Row::Heading(text) => {
                     if !text.is_empty() {
                         let h = label(&mut controls, text);
-                        place(h, m, label_w + ctl_w, s(18), y + s(4));
+                        place(h, x0 + m, label_w + ctl_w, s(18), y + s(4));
                         bold.push(h);
                     }
                 }
                 Row::Combo(id, text, items) => {
-                    place(label(&mut controls, text), m, label_w, s(18), y);
+                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
                     let h = combo(id, items);
                     // A combo box's height includes its drop-down list.
-                    let _ = SetWindowPos(h, None, ctl_x, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
+                    let _ = SetWindowPos(h, None, x0 + ctl_x, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
                     controls.insert(id, h);
                 }
                 Row::Colour(id) => {
                     let text = COLOURS.iter().find(|(c, _)| *c == id).map(|(_, t)| *t).unwrap_or_default();
-                    place(label(&mut controls, text), m, label_w, s(18), y);
+                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
                     let h = button("", id);
-                    place(h, ctl_x, s(160), ctl_h, y);
+                    place(h, x0 + ctl_x, s(160), ctl_h, y);
                     controls.insert(id, h);
                     let d = button("Default", id + DEFAULT_OFFSET);
-                    place(d, ctl_x + s(166), ctl_w - s(166), ctl_h, y);
+                    place(d, (x0 + ctl_x) + s(166), ctl_w - s(166), ctl_h, y);
                     controls.insert(id + DEFAULT_OFFSET, d);
                 }
                 Row::Slider(id) => {
                     let Some(&(_, text, min, max)) = SLIDERS.iter().find(|(s, ..)| *s == id) else { continue };
-                    place(label(&mut controls, text), m, label_w, s(18), y);
+                    place(label(&mut controls, text), x0 + m, label_w, s(18), y);
                     let h = ui::child(
                         hwnd,
                         "msctls_trackbar32",
@@ -256,7 +274,7 @@ fn create() {
                         id,
                     );
                     SendMessageW(h, TBM_SETRANGE, Some(WPARAM(1)), Some(LPARAM(((max << 16) | min) as isize)));
-                    place(h, ctl_x, ctl_w - s(44), ctl_h, y);
+                    place(h, x0 + ctl_x, ctl_w - s(44), ctl_h, y);
                     controls.insert(id, h);
                     let v = ui::child(
                         hwnd,
@@ -266,18 +284,20 @@ fn create() {
                         WINDOW_EX_STYLE(0),
                         id + VALUE_OFFSET,
                     );
-                    place(v, ctl_x + ctl_w - s(40), s(40), s(18), y);
+                    place(v, (x0 + ctl_x) + ctl_w - s(40), s(40), s(18), y);
                     controls.insert(id + VALUE_OFFSET, v);
                 }
             }
             y += if matches!(row, Row::Heading(_)) { row_h * 3 / 4 } else { row_h };
         }
+        y = y.max(bottom);
+        let right = x0 + ctl_x + ctl_w + m;
         y += s(8);
         let r = button("Reset to defaults", RESET);
         place(r, m, s(150), ctl_h + s(2), y);
         controls.insert(RESET, r);
         let c = button("Close", CLOSE);
-        place(c, ctl_x + ctl_w - s(100), s(100), ctl_h + s(2), y);
+        place(c, right - m - s(100), s(100), ctl_h + s(2), y);
         controls.insert(CLOSE, c);
         y += row_h + m;
 
@@ -292,7 +312,7 @@ fn create() {
         load();
 
         // Size the window around its client area and centre it.
-        let client = windows::Win32::Foundation::RECT { left: 0, top: 0, right: ctl_x + ctl_w + m, bottom: y };
+        let client = windows::Win32::Foundation::RECT { left: 0, top: 0, right, bottom: y };
         let mut outer = client;
         let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(
             &mut outer,
@@ -312,6 +332,13 @@ fn create() {
 }
 
 /// Puts the current settings into the controls.
+/// Settings changed elsewhere (the bar was dragged to another edge).
+pub fn settings_changed() {
+    if hwnd().is_some() {
+        load();
+    }
+}
+
 fn load() {
     let (a, height) = app::with(|s| (s.cfg.settings.appearance.clamped(), s.cfg.settings.strip_height.clamp(32, 96)));
     let sel = |id: u16, i: usize| unsafe {
@@ -319,6 +346,7 @@ fn load() {
     };
     sel(THEME, a.theme as usize);
     sel(DOCK, a.dock_width as usize);
+    sel(POSITION, app::with(|s| s.cfg.settings.strip_edge) as usize);
     for (id, value) in [
         (OPACITY, a.opacity as u32),
         (BORDER_WIDTH, a.border_width),
@@ -357,10 +385,14 @@ fn combo(id: u16) -> usize {
 
 /// Applies a change: shows it on the strip now, saves it shortly.
 fn change(f: impl FnOnce(&mut Appearance, &mut u32)) {
+    change_settings(|st| f(&mut st.appearance, &mut st.strip_height));
+}
+
+fn change_settings(f: impl FnOnce(&mut crate::config::Settings)) {
     let theme_before = app::with(|s| s.cfg.settings.appearance.theme);
     let theme_now = app::with(|s| {
         let st = &mut s.cfg.settings;
-        f(&mut st.appearance, &mut st.strip_height);
+        f(st);
         st.appearance.theme
     });
     if theme_now != theme_before {
@@ -430,6 +462,14 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             let id = ui::loword(wparam.0);
             let code = ui::hiword(wparam.0);
             match (id, code) {
+                (POSITION, CBN_SELCHANGE) => {
+                    use crate::config::StripEdge;
+                    let i = combo(id);
+                    let edge =
+                        [StripEdge::Taskbar, StripEdge::Bottom, StripEdge::Top, StripEdge::Left, StripEdge::Right]
+                            [i.min(4)];
+                    change_settings(|st| st.strip_edge = edge);
+                }
                 (THEME | DOCK, CBN_SELCHANGE) => {
                     let i = combo(id);
                     change(|a, _| match id {

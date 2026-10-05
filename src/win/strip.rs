@@ -1,10 +1,13 @@
-//! The icon strip: a bar docked against the Windows taskbar (just above it, or
-//! below it when the taskbar is at the top of the screen), styled after the
-//! original FlexTaskbar bar:
+//! The icon strip: a bar docked against an edge of the primary monitor — by
+//! default the Windows taskbar's, next to it — styled after the original
+//! FlexTaskbar bar:
 //!
-//! - left: **All** (every app, as a list);
+//! - start (left, or top on a side edge): **All** (every app, as a list);
 //! - centre: the root categories (marked ▾) and pinned apps;
-//! - right: **Link** (add an app, file, URL or web app) and ⚙ (settings).
+//! - end: **Link** (add an app, file, URL or web app) and ⚙ (settings).
+//!
+//! On the left or right edge the bar stands upright and everything runs top
+//! to bottom. Dragging the bar by an empty spot moves it to another edge.
 //!
 //! Resting the pointer on a category opens its flyout (see `flyout`). Pinned
 //! apps launch with a click. Categories and apps can be dragged along the bar
@@ -23,7 +26,7 @@ use super::theme;
 use super::ui::{self, scale, wide};
 use crate::appearance::{Appearance, Colors, DockWidth};
 use crate::config::CustomApp;
-use crate::striplayout::{self, BarLayout, Hit, Metrics, Slot};
+use crate::striplayout::{self, BarLayout, Edge, Hit, Metrics, Slot};
 use resvg::tiny_skia::Pixmap;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -39,17 +42,19 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows::Win32::UI::Shell::{
-    ABE_BOTTOM, ABE_TOP, ABM_GETTASKBARPOS, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, ABN_FULLSCREENAPP,
-    ABN_POSCHANGED, ABN_STATECHANGE, APPBARDATA, DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHAppBarMessage,
+    ABE_BOTTOM, ABE_LEFT, ABE_RIGHT, ABE_TOP, ABM_GETTASKBARPOS, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
+    ABN_FULLSCREENAPP, ABN_POSCHANGED, ABN_STATECHANGE, APPBARDATA, DragAcceptFiles, DragFinish, DragQueryFileW, HDROP,
+    SHAppBarMessage,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, GetSystemMetrics,
     HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING,
     PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SendMessageW,
-    SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenuEx, WINDOW_STYLE, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
-    WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WINDOW_STYLE, WM_APP,
+    WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
+    WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -86,12 +91,17 @@ struct Strip {
     open: Option<Hit>,
     tracking_leave: bool,
     reserved: bool,
-    edge: u32,
+    edge: Edge,
     tools: usize,
-    /// Left button held on an item: (item index, x where it went down).
+    /// Left button held on an item: (item index, position along the bar
+    /// where it went down).
     press: Option<(usize, i32)>,
-    /// Item being dragged, and the pointer's x.
+    /// Item being dragged, and the pointer's position along the bar.
     drag: Option<(usize, i32)>,
+    /// Left button held on an empty spot: where it went down (client), and
+    /// whether the bar is being dragged to another edge.
+    bar_press: Option<(i32, i32)>,
+    moving: bool,
 }
 
 thread_local! {
@@ -199,10 +209,12 @@ fn create() {
             open: None,
             tracking_leave: false,
             reserved: false,
-            edge: ABE_BOTTOM,
+            edge: Edge::Bottom,
             tools: 0,
             press: None,
             drag: None,
+            bar_press: None,
+            moving: false,
         })
     });
     unsafe {
@@ -313,8 +325,15 @@ fn empty_metrics() -> Metrics {
 
 fn metrics(s: &Strip) -> Metrics {
     let d = s.dpi;
-    let all = canvas::measure("All", s.font).0 + scale(20, d);
-    let link = scale(16 + 6, d) + canvas::measure("Link", s.font).0 + scale(20, d);
+    let (all, link) = if s.edge.vertical() {
+        // Upright: each button is a square-ish cell; Link shows just its glyph.
+        (scale(32, d), scale(36, d))
+    } else {
+        (
+            canvas::measure("All", s.font).0 + scale(20, d),
+            scale(16 + 6, d) + canvas::measure("Link", s.font).0 + scale(20, d),
+        )
+    };
     let settings = scale(36, d);
     Metrics {
         pad: scale(8, d),
@@ -330,16 +349,41 @@ fn margin(s: &Strip) -> i32 {
     scale(s.look.margin as i32, s.dpi)
 }
 
-fn bar_height(s: &Strip) -> i32 {
-    ui::rect_h(&s.win) - 2 * margin(s)
+/// The bar's thickness across its length (its height, or its width when it
+/// stands on a side edge), in pixels.
+fn thickness(s: &Strip) -> i32 {
+    (if s.edge.vertical() { ui::rect_w(&s.win) } else { ui::rect_h(&s.win) }) - 2 * margin(s)
+}
+
+/// The bar's length, along which its buttons run.
+fn length(s: &Strip) -> i32 {
+    (if s.edge.vertical() { ui::rect_h(&s.win) } else { ui::rect_w(&s.win) }) - 2 * margin(s)
+}
+
+/// A client-area point's position along the bar, and across it.
+fn along(s: &Strip, x: i32, y: i32) -> i32 {
+    if s.edge.vertical() { y } else { x }
+}
+
+fn across(s: &Strip, x: i32, y: i32) -> i32 {
+    if s.edge.vertical() { x } else { y }
+}
+
+/// Client rectangle of a slot, the bar's full thickness.
+fn slot_rect(s: &Strip, slot: Slot) -> RECT {
+    let (m, t) = (margin(s), thickness(s));
+    if s.edge.vertical() {
+        RECT { left: m, top: m + slot.x, right: m + t, bottom: m + slot.right() }
+    } else {
+        RECT { left: m + slot.x, top: m, right: m + slot.right(), bottom: m + t }
+    }
 }
 
 fn relayout() {
     let Some(h) = hwnd() else { return };
     let tools = with(|s| {
-        let m = margin(s);
-        let width = ui::rect_w(&s.win) - 2 * m;
-        s.layout = striplayout::bar_layout(width, &metrics(s), s.items.len(), s.look.dock_width == DockWidth::Fit);
+        let len = length(s);
+        s.layout = striplayout::bar_layout(len, &metrics(s), s.items.len(), s.look.dock_width == DockWidth::Fit);
         let mut tools: Vec<(String, Slot)> = vec![
             ("All apps".into(), s.layout.left[LEFT_ALL]),
             ("Add an app, file, website or web app".into(), s.layout.right[RIGHT_LINK]),
@@ -351,10 +395,10 @@ fn relayout() {
                 tools.push((s.names[i].clone(), *slot));
             }
         }
-        let bottom = m + bar_height(s);
-        (s.tooltip, std::mem::replace(&mut s.tools, tools.len()), tools, m, bottom)
+        let tools: Vec<(String, RECT)> = tools.into_iter().map(|(n, slot)| (n, slot_rect(s, slot))).collect();
+        (s.tooltip, std::mem::replace(&mut s.tools, tools.len()), tools)
     });
-    if let Some((tooltip, old_count, tools, m, bottom)) = tools {
+    if let Some((tooltip, old_count, tools)) = tools {
         unsafe {
             for id in 0..old_count {
                 let ti = TTTOOLINFOW {
@@ -365,14 +409,14 @@ fn relayout() {
                 };
                 SendMessageW(tooltip, TTM_DELTOOLW, Some(WPARAM(0)), Some(LPARAM(&ti as *const _ as isize)));
             }
-            for (id, (name, slot)) in tools.iter().enumerate() {
+            for (id, (name, rect)) in tools.iter().enumerate() {
                 let mut text = wide(name);
                 let ti = TTTOOLINFOW {
                     cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
                     uFlags: TTF_SUBCLASS,
                     hwnd: h,
                     uId: id + 1,
-                    rect: RECT { left: slot.x + m, top: m, right: slot.right() + m, bottom },
+                    rect: *rect,
                     lpszText: PWSTR(text.as_mut_ptr()),
                     ..Default::default()
                 };
@@ -389,10 +433,11 @@ fn hit_at(x: i32, y: i32) -> Option<Hit> {
         let b = s.borrow();
         let s = b.as_ref()?;
         let m = margin(s);
-        if y < m || y >= m + bar_height(s) {
+        let a = across(s, x, y);
+        if a < m || a >= m + thickness(s) {
             return None;
         }
-        striplayout::hit(&s.layout, x - m)
+        striplayout::hit(&s.layout, along(s, x, y) - m)
     })
 }
 
@@ -409,13 +454,12 @@ pub fn button_rect(hit: Hit) -> Option<RECT> {
     STRIP.with(|s| {
         let b = s.borrow();
         let s = b.as_ref()?;
-        let slot = slot_of(s, hit)?;
-        let m = margin(s);
+        let rc = slot_rect(s, slot_of(s, hit)?);
         Some(RECT {
-            left: s.win.left + m + slot.x,
-            top: s.win.top + m,
-            right: s.win.left + m + slot.right(),
-            bottom: s.win.top + m + bar_height(s),
+            left: s.win.left + rc.left,
+            top: s.win.top + rc.top,
+            right: s.win.left + rc.right,
+            bottom: s.win.top + rc.bottom,
         })
     })
 }
@@ -425,8 +469,9 @@ pub fn dpi() -> u32 {
     with(|s| s.dpi).unwrap_or(96)
 }
 
-pub fn edge_is_top() -> bool {
-    with(|s| s.edge == ABE_TOP).unwrap_or(false)
+/// The edge the strip is docked against (flyouts open away from it).
+pub fn edge() -> Edge {
+    with(|s| s.edge).unwrap_or(Edge::Bottom)
 }
 
 pub fn item(hit: Hit) -> Option<Item> {
@@ -474,44 +519,62 @@ fn primary_monitor() -> (RECT, RECT) {
     }
 }
 
-/// Docks the strip against the Windows taskbar's edge of the primary monitor.
+fn abe(edge: Edge) -> u32 {
+    match edge {
+        Edge::Bottom => ABE_BOTTOM,
+        Edge::Top => ABE_TOP,
+        Edge::Left => ABE_LEFT,
+        Edge::Right => ABE_RIGHT,
+    }
+}
+
+/// `rect` cut down to a band `thickness` deep along `edge`.
+fn band(rect: RECT, edge: Edge, thickness: i32) -> RECT {
+    match edge {
+        Edge::Bottom => RECT { top: rect.bottom - thickness, ..rect },
+        Edge::Top => RECT { bottom: rect.top + thickness, ..rect },
+        Edge::Left => RECT { right: rect.left + thickness, ..rect },
+        Edge::Right => RECT { left: rect.right - thickness, ..rect },
+    }
+}
+
+/// The Windows taskbar's edge of the primary monitor.
+fn taskbar_edge(h: HWND) -> Edge {
+    let mut tb = appbar_data(h);
+    let edge = unsafe { if SHAppBarMessage(ABM_GETTASKBARPOS, &mut tb) != 0 { tb.uEdge } else { ABE_BOTTOM } };
+    match edge {
+        ABE_TOP => Edge::Top,
+        ABE_LEFT => Edge::Left,
+        ABE_RIGHT => Edge::Right,
+        _ => Edge::Bottom,
+    }
+}
+
+/// Docks the strip against its edge of the primary monitor.
 fn reposition() {
     let Some(h) = hwnd() else { return };
     if REPOSITIONING.with(|r| r.replace(true)) {
         return; // our own ABM_SETPOS can notify us again
     }
-    let (height_dip, reserve) =
-        app::with(|s| (s.cfg.settings.strip_height.clamp(24, 96), s.cfg.settings.reserve_space));
+    let (size_dip, reserve, setting) = app::with(|s| {
+        (s.cfg.settings.strip_height.clamp(24, 96), s.cfg.settings.reserve_space, s.cfg.settings.strip_edge)
+    });
     let dpi = ui::dpi_of(h);
     let margin_dip = with(|s| s.look.margin).unwrap_or(0) as i32;
     // The window is the bar plus its floating margin on every side.
-    let height = scale(height_dip as i32, dpi) + 2 * scale(margin_dip, dpi);
+    let thickness = scale(size_dip as i32, dpi) + 2 * scale(margin_dip, dpi);
     let (monitor, work) = primary_monitor();
     let mut abd = appbar_data(h);
-    // The Windows taskbar's edge; a vertical taskbar still gets a bottom strip.
-    let taskbar_edge = unsafe {
-        let mut tb = appbar_data(h);
-        if SHAppBarMessage(ABM_GETTASKBARPOS, &mut tb) != 0 { tb.uEdge } else { ABE_BOTTOM }
-    };
-    let edge = if taskbar_edge == ABE_TOP { ABE_TOP } else { ABE_BOTTOM };
+    let edge = setting.resolve(taskbar_edge(h));
 
     let was_reserved = with(|s| std::mem::replace(&mut s.reserved, reserve)).unwrap_or(false);
     let rect = if reserve {
-        abd.uEdge = edge;
-        abd.rc = monitor;
-        if edge == ABE_TOP {
-            abd.rc.bottom = abd.rc.top + height;
-        } else {
-            abd.rc.top = abd.rc.bottom - height;
-        }
+        abd.uEdge = abe(edge);
+        abd.rc = band(monitor, edge, thickness);
         unsafe {
             SHAppBarMessage(ABM_QUERYPOS, &mut abd);
-            // QUERYPOS moved the proposed edge past the taskbar; restore our height.
-            if edge == ABE_TOP {
-                abd.rc.bottom = abd.rc.top + height;
-            } else {
-                abd.rc.top = abd.rc.bottom - height;
-            }
+            // QUERYPOS moved the proposed edge past other bars; restore our size.
+            abd.rc = band(abd.rc, edge, thickness);
             SHAppBarMessage(ABM_SETPOS, &mut abd);
         }
         abd.rc
@@ -524,11 +587,7 @@ fn reposition() {
             }
         }
         let (_, work) = if was_reserved { primary_monitor() } else { (monitor, work) };
-        if edge == ABE_TOP {
-            RECT { bottom: work.top + height, ..work }
-        } else {
-            RECT { top: work.bottom - height, ..work }
-        }
+        band(work, edge, thickness)
     };
     let dpi_changed = with(|s| {
         s.edge = edge;
@@ -570,9 +629,9 @@ fn reposition() {
 /// the order it would have if dropped now.
 fn display_order(s: &Strip) -> Vec<usize> {
     let mut order: Vec<usize> = (0..s.items.len()).collect();
-    if let Some((from, x)) = s.drag {
+    if let Some((from, pos)) = s.drag {
         order.remove(from);
-        order.insert(striplayout::drop_index(&s.layout.items, x - margin(s)).min(order.len()), from);
+        order.insert(striplayout::drop_index(&s.layout.items, pos - margin(s)).min(order.len()), from);
     }
     order
 }
@@ -582,9 +641,11 @@ fn display_order(s: &Strip) -> Vec<usize> {
 fn drop_item(from: usize, x: i32, y: i32) {
     let target = with(|s| {
         let m = margin(s);
-        let over_bar = y >= -bar_height(s) && y < ui::rect_h(&s.win) + bar_height(s);
+        let t = thickness(s);
+        let a = across(s, x, y);
+        let over_bar = a >= -t && a < 2 * m + 2 * t;
         let key = s.items.get(from).map(key_of)?;
-        over_bar.then(|| (key, striplayout::drop_index(&s.layout.items, x - m)))
+        over_bar.then(|| (key, striplayout::drop_index(&s.layout.items, along(s, x, y) - m)))
     })
     .flatten();
     match target {
@@ -592,6 +653,22 @@ fn drop_item(from: usize, x: i32, y: i32) {
             app::save();
         }
         _ => render(),
+    }
+}
+
+/// While the bar itself is dragged: dock it against the edge nearest the
+/// pointer (as the Windows taskbar does). Saved when the button is released.
+fn move_bar() {
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    let mon = primary_monitor().0;
+    let edge = striplayout::edge_for_point((mon.left, mon.top, mon.right, mon.bottom), pt.x, pt.y);
+    if with(|s| s.edge != edge).unwrap_or(false) {
+        flyout::close();
+        app::with(|s| s.cfg.settings.strip_edge = crate::config::StripEdge::fixed(edge));
+        reposition();
     }
 }
 
@@ -605,64 +682,74 @@ fn render() {
         let Some(mut cv) = Canvas::new(w, h) else { return };
         let d = s.dpi;
         let c = &s.colors;
+        let vertical = s.edge.vertical();
         let m = margin(s) as f32;
-        let bh = bar_height(s) as f32;
-        let bar = s.layout.bar;
-        let (bx, bw) = (m + bar.x as f32, bar.w as f32);
+        let bar = slot_rect(s, s.layout.bar);
+        let rf = |rc: &RECT| (rc.left as f32, rc.top as f32, ui::rect_w(rc) as f32, ui::rect_h(rc) as f32);
         let radius = scale(s.look.corner_radius as i32, d) as f32;
-        let border =
-            scale(s.look.border_width as i32, d).min(if s.look.border_width > 0 { i32::MAX } else { 0 }) as f32;
-        let border = if s.look.border_width > 0 { border.max(1.0) } else { 0.0 };
+        let border = if s.look.border_width > 0 { (scale(s.look.border_width as i32, d) as f32).max(1.0) } else { 0.0 };
 
-        cv.fill_round_rect(bx, m, bw, bh, radius, c.background);
+        let (bx, by, bw, bh) = rf(&bar);
+        cv.fill_round_rect(bx, by, bw, bh, radius, c.background);
         let docked_flush = radius == 0.0 && m == 0.0 && s.look.dock_width == DockWidth::Full;
         if border > 0.0 {
             if docked_flush {
                 // Like the Windows taskbar: just a line on the side facing the desktop.
-                let y = if s.edge == ABE_TOP { bh - border } else { 0.0 };
-                cv.fill_round_rect(bx, y, bw, border, 0.0, c.border);
+                match s.edge {
+                    Edge::Bottom => cv.fill_round_rect(bx, by, bw, border, 0.0, c.border),
+                    Edge::Top => cv.fill_round_rect(bx, by + bh - border, bw, border, 0.0, c.border),
+                    Edge::Left => cv.fill_round_rect(bx + bw - border, by, border, bh, 0.0, c.border),
+                    Edge::Right => cv.fill_round_rect(bx, by, border, bh, 0.0, c.border),
+                }
             } else {
-                cv.stroke_round_rect(bx, m, bw, bh, radius, border, c.border);
+                cv.stroke_round_rect(bx, by, bw, bh, radius, border, c.border);
             }
         }
 
         let inset = scale(5, d) as f32;
         let r4 = scale(4, d) as f32;
+        // A button's highlight: the slot, inset across the bar.
+        let cell = |rc: &RECT| {
+            let (x, y, w, h) = rf(rc);
+            if vertical { (x + inset, y, w - 2.0 * inset, h) } else { (x, y + inset, w, h - 2.0 * inset) }
+        };
         let draw_state = |cv: &mut Canvas, hit: Hit, slot: Slot| {
             let open = s.open == Some(hit);
             let hover = s.hover == Some(hit);
+            let rc = slot_rect(s, slot);
             if open || hover {
                 let fill = if open { c.pressed } else { c.hover };
-                cv.fill_round_rect(m + slot.x as f32, m + inset, slot.w as f32, bh - 2.0 * inset, r4, fill);
+                let (x, y, w, h) = cell(&rc);
+                cv.fill_round_rect(x, y, w, h, r4, fill);
             }
             if open {
-                // Accent pill under the button whose flyout is open.
-                let pw = scale(16, d) as f32;
-                let ph = scale(3, d) as f32;
-                let x = m + slot.x as f32 + (slot.w as f32 - pw) / 2.0;
-                let y = if s.edge == ABE_TOP { m + inset - ph / 2.0 } else { m + bh - inset - ph / 2.0 };
-                cv.fill_round_rect(x, y, pw, ph, ph / 2.0, c.accent);
+                // Accent pill on the screen-edge side of the button whose flyout is open.
+                let long = scale(16, d) as f32;
+                let short = scale(3, d) as f32;
+                let (x, y, w, h) = cell(&rc);
+                let (px, py, pw, ph) = match s.edge {
+                    Edge::Bottom => (x + (w - long) / 2.0, y + h - short / 2.0, long, short),
+                    Edge::Top => (x + (w - long) / 2.0, y - short / 2.0, long, short),
+                    Edge::Left => (x - short / 2.0, y + (h - long) / 2.0, short, long),
+                    Edge::Right => (x + w - short / 2.0, y + (h - long) / 2.0, short, long),
+                };
+                cv.fill_round_rect(px, py, pw, ph, short / 2.0, c.accent);
             }
         };
-        let text_rect = |slot: Slot| RECT {
-            left: m as i32 + slot.x,
-            top: m as i32,
-            right: m as i32 + slot.right(),
-            bottom: (m + bh) as i32,
-        };
+        let centre = |rc: &RECT| ((rc.left + rc.right) as f32 / 2.0, (rc.top + rc.bottom) as f32 / 2.0);
 
-        // Left: All.
+        // Start: All.
         let all = s.layout.left[LEFT_ALL];
         draw_state(&mut cv, Hit::Left(LEFT_ALL), all);
-        cv.text("All", text_rect(all), s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        cv.text("All", slot_rect(s, all), s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         // Centre: categories and pinned apps.
         let size = scale(s.look.icon_size as i32, d);
-        let cy = m + bh / 2.0;
         // While dragging, the others make room where the dragged one would land.
         let order = display_order(s);
-        let draw_item = |cv: &mut Canvas, i: usize, left: i32, w: i32| {
-            let x = m as i32 + left + (w - size) / 2;
+        let draw_item = |cv: &mut Canvas, i: usize, rc: RECT| {
+            let (cx, cy) = centre(&rc);
+            let x = (cx - size as f32 / 2.0) as i32;
             let y = (cy - size as f32 / 2.0) as i32;
             let is_cat = matches!(s.items[i], Item::Category(_));
             match s.icons.get(&key_of(&s.items[i])).and_then(|p| p.as_ref()) {
@@ -687,37 +774,47 @@ fn render() {
         };
         for (pos, slot) in s.layout.items.iter().enumerate() {
             let i = order[pos];
+            let rc = slot_rect(s, *slot);
             if s.drag.is_some_and(|(from, _)| from == i) {
                 // The drop spot.
-                cv.fill_round_rect(m + slot.x as f32, m + inset, slot.w as f32, bh - 2.0 * inset, r4, c.hover);
+                let (x, y, w, h) = cell(&rc);
+                cv.fill_round_rect(x, y, w, h, r4, c.hover);
                 continue;
             }
             if s.drag.is_none() {
                 draw_state(&mut cv, Hit::Item(pos), *slot);
             }
-            draw_item(&mut cv, i, slot.x, slot.w);
+            draw_item(&mut cv, i, rc);
         }
-        if let Some((from, x)) = s.drag
+        if let Some((from, p)) = s.drag
             && let Some(slot) = s.layout.items.first()
         {
             // The dragged button follows the pointer.
-            let left = (x - m as i32 - slot.w / 2).clamp(s.layout.bar.x, s.layout.bar.right() - slot.w);
-            cv.fill_round_rect(m + left as f32, m + inset, slot.w as f32, bh - 2.0 * inset, r4, c.pressed);
-            draw_item(&mut cv, from, left, slot.w);
+            let start = (p - m as i32 - slot.w / 2).clamp(s.layout.bar.x, s.layout.bar.right() - slot.w);
+            let rc = slot_rect(s, Slot { x: start, w: slot.w });
+            let (x, y, w, h) = cell(&rc);
+            cv.fill_round_rect(x, y, w, h, r4, c.pressed);
+            draw_item(&mut cv, from, rc);
         }
 
-        // Right: Link, settings.
+        // End: Link, settings.
         let link = s.layout.right[RIGHT_LINK];
         draw_state(&mut cv, Hit::Right(RIGHT_LINK), link);
         let glyph = scale(16, d) as f32;
-        let lx = m + link.x as f32 + scale(10, d) as f32;
-        cv.link(lx + glyph / 2.0, cy, glyph, c.text);
-        let mut rc = text_rect(link);
-        rc.left = (lx + glyph) as i32 + scale(6, d);
-        cv.text("Link", rc, s.font, c.text, DT_VCENTER | DT_SINGLELINE);
+        let lrc = slot_rect(s, link);
+        if vertical {
+            let (cx, cy) = centre(&lrc);
+            cv.link(cx, cy, glyph, c.text);
+        } else {
+            let lx = lrc.left as f32 + scale(10, d) as f32;
+            cv.link(lx + glyph / 2.0, centre(&lrc).1, glyph, c.text);
+            let rc = RECT { left: (lx + glyph) as i32 + scale(6, d), ..lrc };
+            cv.text("Link", rc, s.font, c.text, DT_VCENTER | DT_SINGLELINE);
+        }
         let gear = s.layout.right[RIGHT_SETTINGS];
         draw_state(&mut cv, Hit::Right(RIGHT_SETTINGS), gear);
-        cv.gear(m + gear.x as f32 + gear.w as f32 / 2.0, cy, scale(8, d) as f32, c.text);
+        let (gx, gy) = centre(&slot_rect(s, gear));
+        cv.gear(gx, gy, scale(8, d) as f32, c.text);
 
         cv.present(s.hwnd, s.win.left, s.win.top);
     });
@@ -765,6 +862,16 @@ fn add_link() {
     super::manager::catalog_changed();
 }
 
+/// Popup menus open away from the strip's edge.
+fn menu_align(edge: Edge) -> TRACK_POPUP_MENU_FLAGS {
+    match edge {
+        Edge::Bottom => TPM_BOTTOMALIGN,
+        Edge::Top => TPM_TOPALIGN,
+        Edge::Left => TPM_LEFTALIGN,
+        Edge::Right => TPM_RIGHTALIGN,
+    }
+}
+
 /// Right-click menu for one button; the full menu elsewhere.
 fn context_menu(hit: Option<Hit>) {
     // A pending hover would otherwise open a flyout over the menu.
@@ -807,8 +914,9 @@ fn context_menu(hit: Option<Hit>) {
             let _ = InsertMenuW(menu, pos, flags, id, PCWSTR(t.as_ptr()));
             pos += 1;
         };
-        add(LEFT, "Move left", can_left);
-        add(RIGHT, "Move right", can_right);
+        let (back, forward) = if edge().vertical() { ("Move up", "Move down") } else { ("Move left", "Move right") };
+        add(LEFT, back, can_left);
+        add(RIGHT, forward, can_right);
         if matches!(item, Item::App(_)) {
             add(UNPIN, "Unpin from strip", true);
         }
@@ -827,8 +935,9 @@ fn context_menu(hit: Option<Hit>) {
         let _ = GetCursorPos(&mut pt);
         let owner = app::main_hwnd();
         let _ = SetForegroundWindow(owner);
-        let id = TrackPopupMenuEx(menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN).0, pt.x, pt.y, owner, None)
-            .0 as usize;
+        let id =
+            TrackPopupMenuEx(menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON | menu_align(edge())).0, pt.x, pt.y, owner, None).0
+                as usize;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         id
@@ -904,29 +1013,60 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_LBUTTONDOWN => {
             let (x, y) = mouse_xy(lparam);
-            if let Some(Hit::Item(i)) = hit_at(x, y) {
-                with(|s| s.press = Some((i, x)));
-                unsafe {
-                    SetCapture(hwnd);
+            match hit_at(x, y) {
+                // An item: maybe the start of dragging it along the bar.
+                Some(Hit::Item(i)) => {
+                    with(|s| s.press = Some((i, along(s, x, y))));
                 }
+                Some(_) => return LRESULT(0),
+                // An empty spot: maybe the start of dragging the bar to another edge.
+                None => {
+                    with(|s| s.bar_press = Some((x, y)));
+                }
+            }
+            unsafe {
+                SetCapture(hwnd);
             }
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
             let (x, y) = mouse_xy(lparam);
-            // Dragging an item along the bar?
             let threshold = unsafe { GetSystemMetrics(SM_CXDRAG) }.max(2);
+            // Dragging the bar to another edge?
+            let moving = with(|s| match s.bar_press {
+                Some((x0, y0)) if s.moving || (x - x0).abs() >= threshold || (y - y0).abs() >= threshold => {
+                    s.moving = true;
+                    s.hover = None;
+                    true
+                }
+                _ => false,
+            })
+            .unwrap_or(false);
+            if moving {
+                unsafe {
+                    if let Ok(cur) = windows::Win32::UI::WindowsAndMessaging::LoadCursorW(
+                        None,
+                        windows::Win32::UI::WindowsAndMessaging::IDC_SIZEALL,
+                    ) {
+                        windows::Win32::UI::WindowsAndMessaging::SetCursor(Some(cur));
+                    }
+                }
+                move_bar();
+                return LRESULT(0);
+            }
+            // Dragging an item along the bar?
             let dragging = with(|s| {
-                if let Some((from, x0)) = s.press
+                let pos = along(s, x, y);
+                if let Some((from, p0)) = s.press
                     && s.drag.is_none()
-                    && (x - x0).abs() >= threshold
+                    && (pos - p0).abs() >= threshold
                 {
-                    s.drag = Some((from, x));
+                    s.drag = Some((from, pos));
                     s.hover = None;
                     return Some(true);
                 }
                 s.drag.as_mut().map(|d| {
-                    d.1 = x;
+                    d.1 = pos;
                     false
                 })
             })
@@ -1008,14 +1148,19 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_LBUTTONUP => {
             let (x, y) = mouse_xy(lparam);
-            let (press, drag) = with(|s| (s.press.take(), s.drag.take())).unwrap_or_default();
+            let (press, drag, bar_press, moved) =
+                with(|s| (s.press.take(), s.drag.take(), s.bar_press.take(), std::mem::take(&mut s.moving)))
+                    .unwrap_or_default();
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
-                if press.is_some() {
+                if press.is_some() || bar_press.is_some() {
                     let _ = ReleaseCapture();
                 }
             }
-            if let Some((from, _)) = drag {
+            if moved {
+                app::save();
+                super::appearancewin::settings_changed();
+            } else if let Some((from, _)) = drag {
                 drop_item(from, x, y);
             } else if let Some(h) = hit_at(x, y) {
                 click(h);
@@ -1026,6 +1171,15 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_CAPTURECHANGED => {
             // Capture lost mid-drag (another window took it): cancel.
+            let moved = with(|s| {
+                s.bar_press = None;
+                std::mem::take(&mut s.moving)
+            })
+            .unwrap_or(false);
+            if moved {
+                app::save();
+                super::appearancewin::settings_changed();
+            }
             if with(|s| s.press.take().is_some() | s.drag.take().is_some()).unwrap_or(false) {
                 render();
             }

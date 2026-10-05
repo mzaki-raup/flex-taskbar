@@ -127,6 +127,62 @@ pub fn drop_index(items: &[Slot], x: i32) -> usize {
     items.windows(2).filter(|w| x >= (centre(&w[0]) + centre(&w[1])) / 2).count()
 }
 
+/// A screen edge the strip can dock against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    Bottom,
+    Top,
+    Left,
+    Right,
+}
+
+impl Edge {
+    /// Left and right bars stand upright: their buttons run top to bottom.
+    pub fn vertical(self) -> bool {
+        matches!(self, Edge::Left | Edge::Right)
+    }
+}
+
+/// The edge a bar being dragged to `(x, y)` should dock against: the one the
+/// point is closest to, relative to the screen's size (as the Windows taskbar
+/// does). `screen` is (left, top, right, bottom).
+pub fn edge_for_point(screen: (i32, i32, i32, i32), x: i32, y: i32) -> Edge {
+    let (l, t, r, b) = screen;
+    let w = (r - l).max(1) as f32;
+    let h = (b - t).max(1) as f32;
+    let candidates = [
+        (Edge::Left, (x - l) as f32 / w),
+        (Edge::Right, (r - x) as f32 / w),
+        (Edge::Top, (y - t) as f32 / h),
+        (Edge::Bottom, (b - y) as f32 / h),
+    ];
+    candidates.into_iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| c.0).unwrap_or(Edge::Bottom)
+}
+
+/// Top-left corner for a flyout of `size` (w, h) hanging off `anchor` (a
+/// button, or a tile of the flyout below; left, top, right, bottom) of a bar
+/// on `edge`: it opens away from that edge, towards the middle of the
+/// screen, `gap` pixels clear, and is kept on `screen`.
+pub fn flyout_origin(
+    edge: Edge,
+    anchor: (i32, i32, i32, i32),
+    size: (i32, i32),
+    screen: (i32, i32, i32, i32),
+    gap: i32,
+) -> (i32, i32) {
+    let (al, at, ar, ab) = anchor;
+    let (w, h) = size;
+    let (sl, st, sr, sb) = screen;
+    let along_x = al.min(sr - w).max(sl);
+    let along_y = at.min(sb - h).max(st);
+    match edge {
+        Edge::Bottom => (along_x, (at - gap - h).max(st)),
+        Edge::Top => (along_x, (ab + gap).min(sb - h)),
+        Edge::Left => ((ar + gap).min(sr - w), along_y),
+        Edge::Right => ((al - gap - w).max(sl), along_y),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +234,37 @@ mod tests {
         let l = bar_layout(1000, &metrics(), 0, true);
         assert!(l.items.is_empty());
         assert_eq!(hit(&l, 100), None); // outside the shrunken bar
+    }
+
+    #[test]
+    fn edges() {
+        let screen = (0, 0, 1600, 900);
+        assert_eq!(edge_for_point(screen, 800, 880), Edge::Bottom);
+        assert_eq!(edge_for_point(screen, 800, 20), Edge::Top);
+        assert_eq!(edge_for_point(screen, 30, 450), Edge::Left);
+        assert_eq!(edge_for_point(screen, 1580, 450), Edge::Right);
+        // Relative to the screen's size: 200 px from the left of a wide
+        // screen is nearer (proportionally) than 150 px from the bottom.
+        assert_eq!(edge_for_point(screen, 200, 750), Edge::Left);
+        assert!(Edge::Left.vertical() && Edge::Right.vertical());
+        assert!(!Edge::Top.vertical() && !Edge::Bottom.vertical());
+    }
+
+    #[test]
+    fn flyouts_open_away_from_the_edge() {
+        let screen = (0, 0, 1600, 900);
+        let size = (300, 200);
+        // Bottom bar: above the button, left-aligned with it.
+        assert_eq!(flyout_origin(Edge::Bottom, (500, 852, 548, 900), size, screen, 4), (500, 648));
+        // Top bar: below it.
+        assert_eq!(flyout_origin(Edge::Top, (500, 0, 548, 48), size, screen, 4), (500, 52));
+        // Left bar: to its right, top-aligned with it.
+        assert_eq!(flyout_origin(Edge::Left, (0, 300, 48, 348), size, screen, 4), (52, 300));
+        // Right bar: to its left.
+        assert_eq!(flyout_origin(Edge::Right, (1552, 300, 1600, 348), size, screen, 4), (1248, 300));
+        // Kept on screen: a button near the far end shifts it back.
+        assert_eq!(flyout_origin(Edge::Bottom, (1500, 852, 1548, 900), size, screen, 4), (1300, 648));
+        assert_eq!(flyout_origin(Edge::Left, (0, 800, 48, 848), size, screen, 4), (52, 700));
     }
 
     #[test]

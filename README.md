@@ -3,16 +3,19 @@
 A portable application launcher for Windows 10 (version 1703 or later) and
 Windows 11, for people with a lot of apps installed. You file apps into
 categories nested as deeply as you like. Your categories and pinned apps then
-sit in a bar docked against the Windows taskbar, in the look of the original
-FlexTaskbar. Rest the pointer on a category and a flyout pops up with
+sit in a bar docked against an edge of the screen (by default next to the
+Windows taskbar; drag it to the bottom, top, left or right), in the look of the
+original FlexTaskbar. Rest the pointer on a category and a flyout pops up with
 its subcategories and apps as tiles. Rest on a subcategory and its own flyout
-floats above, the same way, as many levels deep as your categories go. Theme (dark, light or Windows default), colours,
-transparency, border and rounded corners are all adjustable. The same categories
+opens beyond it, the same way, as many levels deep as your categories go.
+Flyouts always open away from the bar's edge, towards the middle of the screen.
+Theme (dark, light or Windows default), colours, transparency, border and
+rounded corners are all adjustable. The same categories
 are also available from the tray icon, a hotkey menu, and a type-to-search
 window.
 
-FlexTaskbar does **not** replace or change the Windows taskbar. The strip sits
-next to it (just above, or below a top taskbar), and can be turned off.
+FlexTaskbar does **not** replace or change the Windows taskbar. By default the
+bar sits next to it, on the same edge, and it can be turned off.
 
 - Written in Rust against the native Win32 API. There's no .NET runtime, web
   engine or UI framework to install.
@@ -37,6 +40,17 @@ centre, *Link* and settings (⚙) on the right. These are the defaults, which
 match the original .NET version.
 
 ![The bar with All, category and app icons, Link and the settings gear](screenshots/strip.png)
+
+**Any edge**: drag the bar by an empty spot to the left, right, top or bottom.
+Its flyouts open towards the middle of the screen.
+
+![Dragging the bar to the left, right, top and back to the bottom edge, with flyouts opening away from each](screenshots/edges.gif)
+
+| Left edge: flyouts open to the right | Right edge: flyouts open to the left |
+|---|---|
+| ![An upright bar on the left with three flyout levels opening to the right](screenshots/edge-left.png) | ![An upright bar on the right with two flyout levels opening to the left](screenshots/edge-right.png) |
+| **Top edge: flyouts open downwards** | |
+| ![A bar at the top with three flyout levels opening downwards](screenshots/edge-top.png) | |
 
 | Hover a category: subcategories and apps as tiles | Hover a subcategory: its flyout floats above |
 |---|---|
@@ -67,21 +81,31 @@ apps. The same app can be filed in several categories. In the tray and hotkey
 menu a category is a submenu listing its subcategories, then its apps. From the
 bar, a category opens as a flyout (below).
 
-**The bar** is docked against the Windows taskbar on the primary monitor, laid
-out like the original FlexTaskbar:
-- **Left: *All*.** Click it for a list of every app (scroll with the wheel;
+**The bar** is docked against an edge of the primary monitor, laid out like the
+original FlexTaskbar:
+- **Any edge.** By default it sits next to the Windows taskbar, on the same
+  edge. To move it, press on an empty spot of the bar and drag it towards
+  another edge of the screen: it docks there as soon as the pointer is nearest
+  that edge, like the Windows taskbar. Or pick *Position* in the Appearance
+  window (*Next to the Windows taskbar*, *Bottom*, *Top*, *Left*, *Right*).
+  On the left or right edge the bar stands upright: *All* at the top, icons
+  down the middle, *Link* and ⚙ at the bottom.
+- **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
   right-click an app to pin or unpin it).
 - **Centre: root categories and pinned apps.** A small ▾ marks a category.
-- **Right: *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
+- **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
   path and pins it to the bar. ⚙ opens the Manage window.
-- **Category flyouts.** Resting the pointer on a category opens a flyout above
-  it:
+- **Category flyouts.** Resting the pointer on a category opens a flyout beside
+  it, on the screen side: above a bottom bar, below a top bar, to the right of
+  a left bar and to the left of a right bar:
   - its **subcategories and apps as tiles**, each a large icon with the name
     underneath, 4 per row by default. Subcategories come first and are marked
     with ▾, like categories on the bar;
-  - resting the pointer on a subcategory opens **its flyout floating above**
-    this one, and so on at any depth. Moving to another subcategory switches
-    the flyout above; resting on an app tile closes it;
+  - resting the pointer on a subcategory opens **its flyout beyond this one**
+    (further from the bar, lined up with the tile), and so on at any depth.
+    Moving to another subcategory switches it; resting on an app tile closes
+    it. On a top bar the subcategories sit in the bottom row, nearest where
+    their flyouts open;
   - *No apps in this category* when it's empty. Flyouts only launch apps;
     categories are managed in the Manage window (⚙ on the bar, or
     right-click a category and pick *Manage categories…*).
@@ -121,12 +145,13 @@ Every change shows on the bar straight away:
 | Background opacity | 10–100 % (icons and text stay solid) | 87 % |
 | Icon size | 16–48 | 32 |
 | **Bar** | | |
+| Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
 | Border colour | Any colour | A faint line in the text colour |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
 | Gap from screen edge | 0–24 | 0 (docked flush) |
-| Bar height | 32–96 | 48 |
+| Bar thickness | 32–96 (its height, or its width on a side edge) | 48 |
 | **Category flyouts** | | |
 | App tiles per row | 1–12 | 4 |
 | Border colour | Any colour | Same as the bar |
@@ -177,8 +202,8 @@ custom icons are copied over.
 The docked bar is back in its original look: *All* on the left, category and
 app icons in the centre, *Link* and ⚙ on the right, and category flyouts with
 subcategory and app tiles. Managing categories moved out of the flyouts into
-the Manage window. Subcategory flyouts float above
-the one they open from, like the bar's own categories. Its colours, transparency,
+the Manage window. Subcategory flyouts open beyond the one they come from,
+like the bar's own categories, and the bar can sit on any edge of the screen. Its colours, transparency,
 border and corners are now adjustable.
 It now sits beside the Windows taskbar instead of trying to replace it, so these
 old taskbar features are gone on purpose:
@@ -325,7 +350,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 37 unit tests cover:
+The 39 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -333,7 +358,9 @@ The 37 unit tests cover:
   app membership
 - search ranking
 - bar layout (the three zones, centring, overflow, the fitted dock, hit
-  testing, where a dragged icon lands), flyout tile grids, pinning, and the
+  testing, where a dragged icon lands), which edge a dragged bar docks to,
+  where flyouts open for each edge (and staying on screen), flyout tile
+  grids, pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, the flyout border
@@ -345,6 +372,10 @@ The 37 unit tests cover:
   - hover a category: subcategory and app tiles
   - hover subcategories three levels deep, each flyout floating above the
     last; switching to another subcategory; an app tile closing the level above
+  - the bar on each edge (bottom, top, left, right), set from *Position* and by
+    dragging the bar; flyouts and three-level cascades opening the right way
+    on each; dragging icons along an upright bar; the right-click menu opening
+    towards the screen
   - launching from a tile on the third level, sliding between categories, launching a pinned app
   - the *All* list
   - the right-click menus (move, unpin)
@@ -382,9 +413,10 @@ The 37 unit tests cover:
 - hang detection
 - tray behaviour with the real Windows taskbar
 - dragging files onto the strip or the Manage window
-- the strip next to the real Windows taskbar: reserving screen space,
-  hiding for full-screen apps, and a taskbar at the top of the screen. Wine
-  has no Windows taskbar, so there the strip sits at the bottom of the screen.
+- the strip next to the real Windows taskbar: reserving screen space beside
+  it on each edge, *Next to the Windows taskbar* following a taskbar on the
+  top or side, and hiding for full-screen apps. Wine has no Windows taskbar,
+  so there *Next to the Windows taskbar* means the bottom.
 
 ## Building
 

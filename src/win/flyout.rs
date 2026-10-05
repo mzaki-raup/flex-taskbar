@@ -2,13 +2,14 @@
 //!
 //! - a **category** flyout: its subcategories and apps as tiles (large icon,
 //!   name underneath, `flyout_columns` per row; subcategories first, marked
-//!   with ▾). Resting the pointer on a
-//!   subcategory opens *its* flyout floating above this one, the same way a
-//!   category on the strip opens, at any depth;
+//!   with ▾). Resting the pointer on a subcategory opens *its* flyout beyond
+//!   this one, the same way a category on the strip opens, at any depth;
 //! - the **All** flyout: every app as a scrollable list.
 //!
 //! The open flyouts form a stack of levels: level 0 hangs off a strip button,
-//! each further level off a subcategory tile of the level below. They close
+//! each further level off a subcategory tile of the level below. Every level
+//! opens away from the strip's edge (above a bottom strip, to the right of a
+//! left one, and so on). They close
 //! shortly after the pointer has left all of them and the strip button. Each is
 //! a per-pixel-alpha layered window drawn with `canvas`, using the strip's
 //! appearance settings.
@@ -18,7 +19,7 @@ use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
 use crate::appearance::{Appearance, Colors};
-use crate::striplayout::{self, Hit};
+use crate::striplayout::{self, Edge, Hit};
 use resvg::tiny_skia::Pixmap;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -314,11 +315,14 @@ fn rebuild(idx: usize) {
                 .map(|p| (p.rect, below.win))
         })
         .flatten()
-        .map(|(rc, win)| RECT {
-            left: win.left + rc.left,
-            top: win.top,
-            right: win.left + rc.right,
-            bottom: win.bottom,
+        .map(|(rc, win)| {
+            // The tile's span along the bar, the flyout's across it, so the
+            // next level opens beyond this one, lined up with the tile.
+            if strip::edge().vertical() {
+                RECT { left: win.left, top: win.top + rc.top, right: win.right, bottom: win.top + rc.bottom }
+            } else {
+                RECT { left: win.left + rc.left, top: win.top, right: win.left + rc.right, bottom: win.bottom }
+            }
         })
     };
     let Some(anchor_rc) = anchor_rc else {
@@ -384,7 +388,13 @@ fn rebuild(idx: usize) {
             let tiles_w = cols.min(items.len().max(1)) as i32 * (tile.0 + 2 * tm);
             inner_w = tiles_w.max(canvas::measure("No apps in this category", font).0 + s(16));
             let n = items.len();
+            // The subcategories (first) sit in the row nearest where their
+            // flyouts open: the top row for a bottom strip, the bottom row
+            // (rows flipped) for a top strip. Side strips keep reading order.
+            let rows = n.div_ceil(cols);
+            let flip = strip::edge() == Edge::Top;
             for ((col, row), (elem, text, icon)) in striplayout::grid(n, cols).into_iter().zip(items) {
+                let row = if flip { rows - 1 - row } else { row };
                 let left = pad + col as i32 * (tile.0 + 2 * tm) + tm;
                 let top = y + row as i32 * (tile.1 + 2 * tm) + tm;
                 elems.push(Placed {
@@ -434,18 +444,21 @@ fn rebuild(idx: usize) {
     let w = inner_w + 2 * pad;
     let h = y + pad;
 
-    // Above what it hangs off (below it for a top strip), kept on the monitor.
-    let top_strip = strip::edge_is_top();
+    // Away from the strip's edge (above a bottom strip, right of a left one…),
+    // kept on the monitor.
     let mon = unsafe {
         let m = MonitorFromPoint(POINT { x: anchor_rc.left, y: anchor_rc.top }, MONITOR_DEFAULTTONEAREST);
         let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
         let _ = GetMonitorInfoW(m, &mut mi);
         mi.rcMonitor
     };
-    let gap = s(4);
-    let x = anchor_rc.left.min(mon.right - w).max(mon.left);
-    let y =
-        if top_strip { (anchor_rc.bottom + gap).min(mon.bottom - h) } else { (anchor_rc.top - gap - h).max(mon.top) };
+    let (x, y) = striplayout::flyout_origin(
+        strip::edge(),
+        (anchor_rc.left, anchor_rc.top, anchor_rc.right, anchor_rc.bottom),
+        (w, h),
+        (mon.left, mon.top, mon.right, mon.bottom),
+        s(4),
+    );
     let win = RECT { left: x, top: y, right: x + w, bottom: y + h };
 
     // Icons for everything on show, loaded once per size.

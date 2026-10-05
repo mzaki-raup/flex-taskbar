@@ -72,8 +72,11 @@ pub struct Settings {
     /// Reserve the strip's screen space (an AppBar), so maximized windows end
     /// above it instead of underneath.
     pub reserve_space: bool,
-    /// Strip height in DIPs (48 matches the Windows 11 taskbar).
+    /// Strip height in DIPs (48 matches the Windows 11 taskbar); its width
+    /// when it stands on the left or right edge.
     pub strip_height: u32,
+    /// Which screen edge the strip docks against.
+    pub strip_edge: StripEdge,
     /// Milliseconds the pointer rests on a category icon before it opens.
     pub hover_delay_ms: u32,
     /// Theme, colours, transparency, border, corners and size of the strip.
@@ -91,8 +94,45 @@ impl Default for Settings {
             show_strip: true,
             reserve_space: true,
             strip_height: 48,
+            strip_edge: StripEdge::Taskbar,
             hover_delay_ms: 100,
             appearance: crate::appearance::Appearance::default(),
+        }
+    }
+}
+
+/// Where the strip docks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StripEdge {
+    /// The same edge as the Windows taskbar, next to it.
+    Taskbar,
+    Bottom,
+    Top,
+    Left,
+    Right,
+}
+
+impl StripEdge {
+    pub fn fixed(edge: crate::striplayout::Edge) -> StripEdge {
+        use crate::striplayout::Edge;
+        match edge {
+            Edge::Bottom => StripEdge::Bottom,
+            Edge::Top => StripEdge::Top,
+            Edge::Left => StripEdge::Left,
+            Edge::Right => StripEdge::Right,
+        }
+    }
+
+    /// The edge to use, given the Windows taskbar's.
+    pub fn resolve(self, taskbar: crate::striplayout::Edge) -> crate::striplayout::Edge {
+        use crate::striplayout::Edge;
+        match self {
+            StripEdge::Taskbar => taskbar,
+            StripEdge::Bottom => Edge::Bottom,
+            StripEdge::Top => Edge::Top,
+            StripEdge::Left => Edge::Left,
+            StripEdge::Right => Edge::Right,
         }
     }
 }
