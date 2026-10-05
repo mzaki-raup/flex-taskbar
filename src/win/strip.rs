@@ -3,7 +3,7 @@
 //! FlexTaskbar bar:
 //!
 //! - start (left, or top on a side edge): **All** (every app, as a list);
-//! - centre: the root categories (marked ▾) and pinned apps;
+//! - centre: the root categories (each with an arrow badge) and pinned apps;
 //! - end: **Link** (add an app, file, URL or web app) and ⚙ (settings).
 //!
 //! On the left or right edge the bar stands upright and everything runs top
@@ -779,13 +779,12 @@ fn render() {
                 }
             }
             if is_cat {
-                let cs = scale(7, d) as f32;
-                cv.chevron(
-                    x as f32 + size as f32 + scale(2, d) as f32,
-                    y as f32 + size as f32 - cs / 2.0,
-                    cs,
-                    c.subtle,
-                );
+                // A badge on the icon's corner, its arrow pointing where the
+                // flyout opens.
+                let r = size as f32 * 0.24;
+                let (dx, dy) = s.edge.opening();
+                let (bx, by) = (x as f32 + size as f32 - r * 0.35, y as f32 + size as f32 - r * 0.35);
+                cv.badge(bx, by, r, dx, dy, c.accent, c.on_accent, c.background.with_alpha(255));
             }
         };
         for (pos, slot) in s.layout.items.iter().enumerate() {

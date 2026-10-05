@@ -145,6 +145,8 @@ pub struct Colors {
     pub hover: Rgba,
     pub pressed: Rgba,
     pub accent: Rgba,
+    /// Readable on `accent` (the arrow on a category's badge).
+    pub on_accent: Rgba,
 }
 
 pub const DEFAULT_ACCENT: Rgba = Rgba::rgb(0x60, 0xCD, 0xFF);
@@ -181,6 +183,11 @@ impl Appearance {
             hover: text.with_alpha(0x1A),
             pressed: text.with_alpha(0x33),
             accent,
+            on_accent: if accent.luminance() > 0.55 {
+                Rgba::rgb(0x1A, 0x1A, 0x1A)
+            } else {
+                Rgba::rgb(0xFF, 0xFF, 0xFF)
+            },
         }
     }
 
@@ -213,6 +220,10 @@ mod tests {
         assert_eq!(c.border, Rgba { r: 0xFF, g: 0xFF, b: 0xFF, a: 0x33 });
         assert_eq!(c.hover, Rgba { r: 0xFF, g: 0xFF, b: 0xFF, a: 0x1A });
         assert_eq!(c.accent, DEFAULT_ACCENT);
+        // Dark arrows on the light blue accent; light ones on a dark accent.
+        assert_eq!(c.on_accent, Rgba::rgb(0x1A, 0x1A, 0x1A));
+        let dark = Appearance { accent: Some(Rgba::rgb(0x20, 0x30, 0x80)), ..Default::default() };
+        assert_eq!(dark.colors(true).on_accent, Rgba::rgb(0xFF, 0xFF, 0xFF));
         // Flyouts: the original's 6 px corners and 1 px border, in the bar's colour.
         let a = Appearance::default();
         assert_eq!((a.flyout_corner_radius, a.flyout_border_width), (6, 1));

@@ -2,7 +2,7 @@
 //!
 //! - a **category** flyout: its subcategories and apps as tiles (large icon,
 //!   name underneath, `flyout_columns` per row; subcategories first, marked
-//!   with ▾). Resting the pointer on a subcategory opens *its* flyout beyond
+//!   with an arrow badge). Resting the pointer on a subcategory opens *its* flyout beyond
 //!   this one, the same way a category on the strip opens, at any depth;
 //! - the **All** flyout: every app as a scrollable list.
 //!
@@ -565,9 +565,12 @@ fn render(idx: usize) {
                         None => {}
                     }
                     if is_sub {
-                        // ▾, as on the strip's category buttons.
-                        let cs = s(7) as f32;
-                        cv.chevron(x as f32 + size as f32 + s(2) as f32, y as f32 + size as f32 - cs / 2.0, cs, c.text);
+                        // The same badge as the strip's category buttons, pointing
+                        // where this subcategory's flyout opens.
+                        let r = size as f32 * 0.24;
+                        let (dx, dy) = strip::edge().opening();
+                        let (bx, by) = (x as f32 + size as f32 - r * 0.35, y as f32 + size as f32 - r * 0.35);
+                        cv.badge(bx, by, r, dx, dy, c.accent, c.on_accent, c.background.with_alpha(255));
                     }
                     // Two lines reserved for the name, as in the original.
                     let trc =

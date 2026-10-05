@@ -173,6 +173,17 @@ impl Edge {
     pub fn vertical(self) -> bool {
         matches!(self, Edge::Left | Edge::Right)
     }
+
+    /// The direction flyouts open from a bar on this edge (away from it), as
+    /// a unit (x, y) vector in screen coordinates.
+    pub fn opening(self) -> (f32, f32) {
+        match self {
+            Edge::Bottom => (0.0, -1.0),
+            Edge::Top => (0.0, 1.0),
+            Edge::Left => (1.0, 0.0),
+            Edge::Right => (-1.0, 0.0),
+        }
+    }
 }
 
 /// The edge a bar being dragged to `(x, y)` should dock against: the one the
@@ -307,6 +318,8 @@ mod tests {
         assert_eq!(edge_for_point(screen, 200, 750), Edge::Left);
         assert!(Edge::Left.vertical() && Edge::Right.vertical());
         assert!(!Edge::Top.vertical() && !Edge::Bottom.vertical());
+        assert_eq!(Edge::Bottom.opening(), (0.0, -1.0));
+        assert_eq!(Edge::Left.opening(), (1.0, 0.0));
     }
 
     #[test]

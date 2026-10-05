@@ -100,15 +100,28 @@ impl Canvas {
         self.pix.draw_pixmap(0, 0, img.as_ref(), &paint, t, None);
     }
 
-    /// Small downward-pointing triangle (the "▾" marking a category).
-    pub fn chevron(&mut self, cx: f32, cy: f32, size: f32, c: Rgba) {
+    /// A category's "has a flyout" badge: a filled circle in `fill` with a thin
+    /// `ring` (the background, so it stands off the icon) and a bold arrow
+    /// in `arrow` pointing where the flyout opens (`dx`, `dy`: a unit
+    /// direction, e.g. (0, -1) for up).
+    #[allow(clippy::too_many_arguments)]
+    pub fn badge(&mut self, cx: f32, cy: f32, r: f32, dx: f32, dy: f32, fill: Rgba, arrow: Rgba, ring: Rgba) {
+        let ring_w = (r * 0.22).max(1.0);
+        for (radius, c) in [(r + ring_w, ring), (r, fill)] {
+            if let Some(path) = PathBuilder::from_circle(cx, cy, radius) {
+                self.pix.fill_path(&path, &paint(c), FillRule::Winding, Transform::identity(), None);
+            }
+        }
+        // A triangle pointing along (dx, dy): tip ahead, base behind.
+        let (tip, half, back) = (r * 0.62, r * 0.6, r * 0.38);
+        let (px, py) = (-dy, dx); // perpendicular
         let mut pb = PathBuilder::new();
-        pb.move_to(cx - size / 2.0, cy - size / 4.0);
-        pb.line_to(cx + size / 2.0, cy - size / 4.0);
-        pb.line_to(cx, cy + size / 4.0);
+        pb.move_to(cx + dx * tip, cy + dy * tip);
+        pb.line_to(cx - dx * back + px * half, cy - dy * back + py * half);
+        pb.line_to(cx - dx * back - px * half, cy - dy * back - py * half);
         pb.close();
         if let Some(path) = pb.finish() {
-            self.pix.fill_path(&path, &paint(c), FillRule::Winding, Transform::identity(), None);
+            self.pix.fill_path(&path, &paint(arrow), FillRule::Winding, Transform::identity(), None);
         }
     }
 

@@ -36,7 +36,7 @@ bar sits next to it, on the same edge, and it can be turned off.
 
 ![Hovering a category, subcategory flyouts floating above it three levels deep, sliding between categories, launching a pinned app, All apps, dragging an icon to rearrange the bar, and changing the appearance live](screenshots/flow.gif)
 
-**The bar**: *All* on the left, root categories (▾) and pinned apps in the
+**The bar**: *All* on the left, root categories (marked with an arrow badge) and pinned apps in the
 centre, *Link* and settings (⚙) on the right. These are the defaults, which
 match the original .NET version.
 
@@ -104,14 +104,17 @@ original FlexTaskbar:
   down the middle, *Link* and ⚙ at the bottom.
 - **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
   right-click an app to pin or unpin it).
-- **Centre: root categories and pinned apps.** A small ▾ marks a category.
+- **Centre: root categories and pinned apps.** A category carries a
+  bright badge in the accent colour on its icon's corner, with an arrow pointing
+  where its flyout opens (up from a bottom bar, down from a top bar, sideways
+  from a side bar).
 - **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
   path and pins it to the bar. ⚙ opens the Manage window.
 - **Category flyouts.** Resting the pointer on a category opens a flyout beside
   it, on the screen side: above a bottom bar, below a top bar, to the right of
   a left bar and to the left of a right bar:
   - its **subcategories and apps as tiles**, each a large icon with the name
-    underneath. Subcategories come first and are marked with ▾, like
+    underneath. Subcategories come first and carry the same arrow badge, like
     categories on the bar. The flyout runs the same way as the bar: on a top
     or bottom bar it is a **horizontal strip** (4 tiles per row by default,
     wrapping into more rows); on a left or right bar it is a **vertical
