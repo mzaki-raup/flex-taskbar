@@ -69,6 +69,15 @@ pub fn parent_of(cats: &[Category], id: u64) -> Option<u64> {
     parent
 }
 
+/// Every app filed in a category or any of its subcategories.
+pub fn subtree_apps(c: &Category) -> Vec<String> {
+    let mut out = c.apps.clone();
+    for ch in &c.children {
+        out.extend(subtree_apps(ch));
+    }
+    out
+}
+
 /// How deep a category sits: 1 for a root category.
 pub fn depth(cats: &[Category], id: u64) -> Option<usize> {
     index_path(cats, id).map(|p| p.len())
@@ -329,5 +338,14 @@ mod tests {
         // Dev's subtree is 3 deep: moving it one level down needs 4.
         assert!(indent_fits(&cats, 1, 4));
         assert!(!indent_fits(&cats, 1, 3));
+    }
+
+    #[test]
+    fn apps_in_a_subtree() {
+        let mut cats = sample();
+        add_app(&mut cats, 3, "vim");
+        add_app(&mut cats, 1, "code");
+        assert_eq!(subtree_apps(&cats[0]), vec!["code".to_string(), "vim".to_string()]);
+        assert!(subtree_apps(&cats[1]).is_empty());
     }
 }

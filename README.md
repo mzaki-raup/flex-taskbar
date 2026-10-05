@@ -63,8 +63,8 @@ top or bottom bar and vertical strips from a side bar.
 | ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: the bar's buttons in order, with move buttons](screenshots/arrange.png) |
 | **Appearance window** | **Flyouts with their own corners and border** |
 | ![Appearance window with general, bar and category flyout settings](screenshots/appearance.png) | ![Flyouts with 12 px corners and a 2 px red border over a light floating dock](screenshots/flyout-style.png) |
-| **Right-click: the full menu** | |
-| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | |
+| **Right-click: the full menu** | **All, sorted by category with the System category hidden** |
+| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | ![All apps showing 12 of 15 apps under Development, Games and Not in a category headings, with Sort and Show buttons](screenshots/all-sorted.png) |
 | **Search** | **Custom app (a browser web app)** |
 | ![Search window listing apps with their category paths](screenshots/search.png) | ![Custom app dialog filled in for a Chrome web app](screenshots/custom-app.png) |
 
@@ -104,6 +104,16 @@ original FlexTaskbar:
   down the middle, *Link* and ⚙ at the bottom.
 - **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
   right-click an app to pin or unpin it).
+  - **Sort:** the *Sort* button at the top orders the list by name (A–Z or
+    Z–A), by type (desktop programs, Store apps, web apps, package managers'
+    apps, custom apps), by category (a heading per root category, an app filed
+    under two shows under both, then *Not in a category*), or with recently
+    used apps first.
+  - **Show:** the *Show* button ticks app types and root categories on and
+    off. Hiding a category hides the apps that are only in that category;
+    *Not in a category* covers the rest, and *Show everything* turns it all
+    back on. While anything is hidden the title reads e.g. "12 of 15 apps".
+  - Both choices are saved (`settings.all_apps`).
 - **Centre: root categories and pinned apps.** A category carries a
   bright badge in the accent colour on its icon's corner, with an arrow pointing
   where its flyout opens (up from a bottom bar, down from a top bar, sideways
@@ -450,7 +460,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 54 unit tests cover:
+The 60 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -479,6 +489,9 @@ The 54 unit tests cover:
 - telling app kinds apart from their shell names: Store/packaged apps,
   Chrome, Edge and other Chromium web apps, desktop programs, Start Menu
   shortcuts and custom browser web apps
+- the *All* list: sorting by name both ways, by type, by category (an app
+  under two categories in both) and by recent use; hiding types, categories
+  and uncategorised apps
 - the old-settings importer, including cycles in old data and bad JSON
 
 **Manually, under Wine 9 on Linux** (not real Windows):
@@ -492,7 +505,10 @@ The 54 unit tests cover:
     on each; dragging icons along an upright bar; the right-click menu opening
     towards the screen
   - launching from a tile on the third level, sliding between categories, launching a pinned app
-  - the *All* list
+  - the *All* list; sorting it by type and by category, hiding a type and a
+    category from *Show* (and the title counting what is shown), the choice
+    surviving a restart, and the flyout staying open while the menus are up
+    and when the chosen item lies outside it
   - the hover animations: Magnify following the pointer along the bar,
     Lift, Bounce and Pulse
   - each category indicator style, uploading a PNG as the indicator (copied
@@ -580,6 +596,7 @@ src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/pkgsources.rs    package managers' folders and console programs   (tested)
+src/allview.rs       sorting and filtering the All list               (tested)
 src/win/watch.rs     automatic rescan when apps are installed
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts

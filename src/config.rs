@@ -84,6 +84,8 @@ pub struct Settings {
     /// Also list programs from package managers' folders (winget portable,
     /// Scoop, Chocolatey, npm, pip, pipx, Cargo, .NET tools, Go).
     pub package_apps: bool,
+    /// How the All apps list is sorted, and what it hides.
+    pub all_apps: crate::allview::AllAppsView,
     /// Theme, colours, transparency, border, corners and size of the strip.
     pub appearance: crate::appearance::Appearance,
 }
@@ -103,6 +105,7 @@ impl Default for Settings {
             hover_delay_ms: 100,
             auto_rescan: true,
             package_apps: true,
+            all_apps: crate::allview::AllAppsView::default(),
             appearance: crate::appearance::Appearance::default(),
         }
     }

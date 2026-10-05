@@ -31,10 +31,11 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HWND_TOPMOST,
-    InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_STRING, PostMessageW, RegisterClassW, SW_SHOWNOACTIVATE,
-    SWP_NOACTIVATE, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenuEx, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NULL, WM_RBUTTONUP, WM_TIMER,
-    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
+    PostMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer, SetWindowPos,
+    ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -43,6 +44,9 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_CLOSE: usize = 1;
 const TIMER_HOVER: usize = 2;
 const CLOSE_DELAY_MS: u32 = 300;
+/// After a menu from a flyout closes, the pointer is often outside the
+/// flyout (where the menu was): give it this long to come back.
+const MENU_GRACE_MS: u64 = 2000;
 /// How long the pointer rests on a tile before the levels above follow it
 /// (a subcategory opens; anything else closes what was open above).
 const HOVER_DELAY_MS: u32 = 200;
@@ -60,6 +64,29 @@ enum Elem {
     Row(String),
     /// Static text ("No apps in this category", the All header).
     Label,
+    /// A section heading in the All list (when grouped).
+    Heading,
+    /// The All list's Sort and Show buttons.
+    SortButton,
+    ShowButton,
+}
+
+/// One line of the All list.
+enum AllLine {
+    Heading(String),
+    App { id: String, name: String, note: &'static str },
+}
+
+thread_local! {
+    /// A menu from a flyout is open: don't close the flyout under it.
+    static MENU_UP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// When the last such menu closed.
+    static MENU_CLOSED: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// Still within `MENU_GRACE_MS` of a menu closing.
+fn menu_grace() -> bool {
+    MENU_CLOSED.with(|m| m.get()).is_some_and(|t| t.elapsed().as_millis() < MENU_GRACE_MS as u128)
 }
 
 struct Placed {
@@ -340,7 +367,10 @@ fn rebuild(idx: usize) {
         subs: Vec<(u64, String)>,
         tiles: Vec<(String, String)>,
         empty: bool,
-        rows: Vec<(String, String, &'static str)>,
+        rows: Vec<AllLine>,
+        /// Apps shown / in total, and the Sort and Show buttons' texts.
+        counts: (usize, usize),
+        buttons: (String, String),
     }
     let content = app::with(|s| match &view {
         View::Category(id) => crate::tree::find(&s.cfg.categories, *id).map(|c| Content {
@@ -348,13 +378,18 @@ fn rebuild(idx: usize) {
             tiles: c.apps.iter().filter_map(|a| s.catalog.get(a).map(|e| (a.clone(), e.name.clone()))).collect(),
             empty: c.children.is_empty() && c.apps.is_empty(),
             rows: Vec::new(),
+            counts: (0, 0),
+            buttons: Default::default(),
         }),
-        View::All { .. } => Some(Content {
-            subs: Vec::new(),
-            tiles: Vec::new(),
-            empty: false,
-            rows: s.catalog.apps.iter().map(|a| (a.id.clone(), a.name.clone(), a.kind.label())).collect(),
-        }),
+        View::All { .. } => {
+            let (rows, counts) = all_lines(s);
+            let v = &s.cfg.settings.all_apps;
+            let buttons = (
+                format!("Sort: {}", v.sort.short()),
+                if v.filtering() { "Show: some".to_string() } else { "Show: all".to_string() },
+            );
+            Some(Content { subs: Vec::new(), tiles: Vec::new(), empty: false, rows, counts, buttons })
+        }
     });
     let mon = unsafe {
         let m = MonitorFromPoint(POINT { x: anchor_rc.left, y: anchor_rc.top }, MONITOR_DEFAULTTONEAREST);
@@ -433,26 +468,52 @@ fn rebuild(idx: usize) {
             }
         }
         View::All { first_row } => {
-            inner_w = s(340) - 2 * pad;
+            inner_w = s(360) - 2 * pad;
+            // Title, then the Sort and Show buttons on the right.
+            let (shown, total) = content.counts;
+            let title = if total == 0 {
+                "No apps found".to_string()
+            } else if shown < total {
+                format!("{shown} of {total} apps")
+            } else {
+                format!("All apps ({total})")
+            };
+            let bh = s(24);
+            let (sort_text, show_text) = &content.buttons;
+            let bw = |t: &str| canvas::measure(t, font).0 + s(20);
+            let show_left = pad + inner_w - bw(show_text);
+            let sort_left = show_left - s(4) - bw(sort_text);
             elems.push(Placed {
-                rect: RECT { left: pad + s(4), top: y + s(4), right: pad + inner_w, bottom: y + s(22) },
+                rect: RECT { left: pad + s(4), top: y, right: sort_left - s(4), bottom: y + bh },
                 elem: Elem::Label,
-                text: if content.rows.is_empty() { "No apps found".into() } else { "All apps".into() },
+                text: title,
                 icon: None,
                 note: "",
             });
-            y += s(24);
+            for (left, w, elem, text) in [
+                (sort_left, bw(sort_text), Elem::SortButton, sort_text.clone()),
+                (show_left, bw(show_text), Elem::ShowButton, show_text.clone()),
+            ] {
+                elems.push(Placed {
+                    rect: RECT { left, top: y, right: left + w, bottom: y + bh },
+                    elem,
+                    text,
+                    icon: None,
+                    note: "",
+                });
+            }
+            y += bh + s(4);
             let row_h = s(28);
             let visible = ((s(480) - y - pad) / row_h).max(1) as usize;
             let first = (*first_row).min(content.rows.len().saturating_sub(visible));
             all_rows = Some((content.rows.len(), visible, first));
-            for &(ref id, ref name, note) in content.rows.iter().skip(first).take(visible) {
-                elems.push(Placed {
-                    rect: RECT { left: pad, top: y, right: pad + inner_w, bottom: y + row_h },
-                    elem: Elem::Row(id.clone()),
-                    text: name.clone(),
-                    icon: Some(id.clone()),
-                    note,
+            for line in content.rows.iter().skip(first).take(visible) {
+                let rect = RECT { left: pad, top: y, right: pad + inner_w, bottom: y + row_h };
+                elems.push(match line {
+                    AllLine::Heading(h) => Placed { rect, elem: Elem::Heading, text: h.clone(), icon: None, note: "" },
+                    AllLine::App { id, name, note } => {
+                        Placed { rect, elem: Elem::Row(id.clone()), text: name.clone(), icon: Some(id.clone()), note }
+                    }
                 });
                 y += row_h;
             }
@@ -543,7 +604,7 @@ fn render(idx: usize) {
             let rc = p.rect;
             let fill = if open_child == Some(i) {
                 Some(c.pressed)
-            } else if l.hover == Some(i) && p.elem != Elem::Label {
+            } else if l.hover == Some(i) && interactive(&p.elem) {
                 Some(c.hover)
             } else {
                 None
@@ -613,6 +674,28 @@ fn render(idx: usize) {
                     let trc = RECT { left: rc.left + s(4), ..rc };
                     cv.text(&p.text, trc, f.font, c.subtle, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
+                Elem::Heading => {
+                    // A section title in the accent colour, with a rule after it.
+                    let trc = RECT { left: rc.left + s(8), top: rc.top + s(6), ..rc };
+                    cv.text(&p.text, trc, f.small, c.accent, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    let tw = canvas::measure(&p.text, f.small).0.min(ui::rect_w(&rc) - s(24));
+                    let ly = (rc.top + rc.bottom) as f32 / 2.0 + s(3) as f32;
+                    let lx = (rc.left + s(16) + tw) as f32;
+                    cv.fill_round_rect(lx, ly, rc.right as f32 - s(8) as f32 - lx, 1.0, 0.0, c.border);
+                }
+                Elem::SortButton | Elem::ShowButton => {
+                    if l.hover != Some(i) {
+                        cv.fill_round_rect(
+                            rc.left as f32,
+                            rc.top as f32,
+                            ui::rect_w(&rc) as f32,
+                            ui::rect_h(&rc) as f32,
+                            r4,
+                            c.hover,
+                        );
+                    }
+                    cv.text(&p.text, rc, f.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                }
             }
         }
         // A thin scroll indicator for a long All list.
@@ -635,7 +718,7 @@ fn render(idx: usize) {
 fn elem_at(idx: usize, x: i32, y: i32) -> Option<usize> {
     with(|f| {
         f.levels.get(idx)?.elems.iter().position(|p| {
-            p.elem != Elem::Label && x >= p.rect.left && x < p.rect.right && y >= p.rect.top && y < p.rect.bottom
+            interactive(&p.elem) && x >= p.rect.left && x < p.rect.right && y >= p.rect.top && y < p.rect.bottom
         })
     })
     .flatten()
@@ -679,8 +762,141 @@ fn open_sub(idx: usize, i: usize, id: u64) {
     render(idx);
 }
 
+/// Whether the pointer can hover or click an element.
+fn interactive(e: &Elem) -> bool {
+    !matches!(e, Elem::Label | Elem::Heading)
+}
+
+/// The All list's lines with the current sort and filter, and how many apps
+/// are shown out of all of them.
+fn all_lines(s: &app::State) -> (Vec<AllLine>, (usize, usize)) {
+    use crate::allview::{Entry, KindGroup, Line, lines};
+    let roots: Vec<(u64, String)> = s.cfg.categories.iter().map(|c| (c.id, c.name.clone())).collect();
+    let in_root: Vec<(u64, std::collections::HashSet<String>)> =
+        s.cfg.categories.iter().map(|c| (c.id, crate::tree::subtree_apps(c).into_iter().collect())).collect();
+    let apps = &s.catalog.apps;
+    let entries: Vec<Entry> = apps
+        .iter()
+        .map(|a| Entry {
+            name: &a.name,
+            group: KindGroup::of(a.kind),
+            roots: in_root.iter().filter(|(_, set)| set.contains(&a.id)).map(|(id, _)| *id).collect(),
+            recent: s.cfg.recents.iter().position(|r| *r == a.id),
+        })
+        .collect();
+    let ls = lines(&entries, &s.cfg.settings.all_apps, &roots);
+    let mut shown = std::collections::HashSet::new();
+    let out = ls
+        .into_iter()
+        .map(|l| match l {
+            Line::Header(h) => AllLine::Heading(h),
+            Line::App(i) => {
+                shown.insert(i);
+                let a = &apps[i];
+                AllLine::App { id: a.id.clone(), name: a.name.clone(), note: a.kind.label() }
+            }
+        })
+        .collect();
+    (out, (shown.len(), apps.len()))
+}
+
+/// Shows a popup menu at the pointer, keeping the flyouts open meanwhile.
+/// `items`: (id, text, checked); id 0 is a separator. Returns the chosen id.
+fn popup(items: &[(usize, String, bool)]) -> usize {
+    MENU_UP.with(|m| m.set(true));
+    let chosen = unsafe {
+        let m = CreatePopupMenu().unwrap_or_default();
+        for (pos, (id, text, checked)) in items.iter().enumerate() {
+            if *id == 0 {
+                let _ = InsertMenuW(m, pos as u32, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+                continue;
+            }
+            let t = wide(text);
+            let flags = MF_BYPOSITION | MF_STRING | if *checked { MF_CHECKED } else { MF_UNCHECKED };
+            let _ = InsertMenuW(m, pos as u32, flags, *id, PCWSTR(t.as_ptr()));
+        }
+        let mut pt = POINT::default();
+        let _ = GetCursorPos(&mut pt);
+        let owner = app::main_hwnd();
+        let _ = SetForegroundWindow(owner);
+        let r = TrackPopupMenuEx(m, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, pt.x, pt.y, owner, None).0 as usize;
+        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
+        let _ = DestroyMenu(m);
+        r
+    };
+    MENU_UP.with(|m| m.set(false));
+    MENU_CLOSED.with(|m| m.set(Some(std::time::Instant::now())));
+    start_close_timer();
+    chosen
+}
+
+/// The All list's settings changed: save, and show it from the top.
+fn all_view_changed(f: impl FnOnce(&mut crate::allview::AllAppsView)) {
+    app::with(|s| f(&mut s.cfg.settings.all_apps));
+    with(|fl| {
+        for l in &mut fl.levels {
+            if let View::All { first_row } = &mut l.view {
+                *first_row = 0;
+            }
+        }
+    });
+    app::save(); // refreshes the open flyout
+}
+
+fn sort_menu() {
+    use crate::allview::AllSort;
+    let current = app::with(|s| s.cfg.settings.all_apps.sort);
+    let items: Vec<(usize, String, bool)> = AllSort::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (i + 1, format!("Sort by {}", k.title()), *k == current))
+        .collect();
+    let chosen = popup(&items);
+    if let Some(&k) = chosen.checked_sub(1).and_then(|i| AllSort::ALL.get(i)) {
+        all_view_changed(|v| v.sort = k);
+    }
+}
+
+fn show_menu() {
+    use crate::allview::KindGroup;
+    const KIND: usize = 100;
+    const CATEGORY: usize = 1000;
+    const UNCATEGORIZED: usize = 2;
+    const EVERYTHING: usize = 3;
+    let (v, roots) = app::with(|s| {
+        (s.cfg.settings.all_apps.clone(), s.cfg.categories.iter().map(|c| (c.id, c.name.clone())).collect::<Vec<_>>())
+    });
+    let mut items: Vec<(usize, String, bool)> = KindGroup::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (KIND + i, k.title().to_string(), !v.hidden_kinds.contains(k)))
+        .collect();
+    items.push((0, String::new(), false));
+    for (i, (id, name)) in roots.iter().enumerate() {
+        items.push((CATEGORY + i, format!("In “{name}”"), !v.hidden_categories.contains(id)));
+    }
+    items.push((UNCATEGORIZED, "Not in a category".into(), !v.hide_uncategorized));
+    items.push((0, String::new(), false));
+    items.push((EVERYTHING, "Show everything".into(), false));
+    let chosen = popup(&items);
+    match chosen {
+        EVERYTHING => all_view_changed(|v| v.show_all()),
+        UNCATEGORIZED => all_view_changed(|v| v.hide_uncategorized = !v.hide_uncategorized),
+        c if (KIND..KIND + KindGroup::ALL.len()).contains(&c) => {
+            all_view_changed(|v| v.toggle_kind(KindGroup::ALL[c - KIND]))
+        }
+        c if (CATEGORY..CATEGORY + roots.len()).contains(&c) => {
+            let id = roots[c - CATEGORY].0;
+            all_view_changed(|v| v.toggle_category(id))
+        }
+        _ => {}
+    }
+}
+
 fn activate(idx: usize, i: usize) {
     match elem(idx, i) {
+        Some(Elem::SortButton) => sort_menu(),
+        Some(Elem::ShowButton) => show_menu(),
         Some(Elem::Sub(id)) => open_sub(idx, i, id),
         Some(Elem::Tile(id) | Elem::Row(id)) => {
             close();
@@ -694,20 +910,8 @@ fn row_menu(app_id: &str) {
     const PIN: usize = 1;
     const UNPIN: usize = 2;
     let pinned = app::with(|s| s.cfg.pinned.iter().any(|p| p == app_id));
-    let chosen = unsafe {
-        let m = CreatePopupMenu().unwrap_or_default();
-        let (id, text) = if pinned { (UNPIN, "Unpin from strip") } else { (PIN, "Pin to strip") };
-        let t = wide(text);
-        let _ = InsertMenuW(m, 0, MF_BYPOSITION | MF_STRING, id, PCWSTR(t.as_ptr()));
-        let mut pt = POINT::default();
-        let _ = GetCursorPos(&mut pt);
-        let owner = app::main_hwnd();
-        let _ = SetForegroundWindow(owner);
-        let r = TrackPopupMenuEx(m, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, pt.x, pt.y, owner, None).0 as usize;
-        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(m);
-        r
-    };
+    let (id, text) = if pinned { (UNPIN, "Unpin from strip") } else { (PIN, "Pin to strip") };
+    let chosen = popup(&[(id, text.to_string(), false)]);
     match chosen {
         PIN => {
             app::with(|s| s.cfg.pin(app_id));
@@ -722,6 +926,9 @@ fn row_menu(app_id: &str) {
 }
 
 fn pointer_inside() -> bool {
+    if MENU_UP.with(|m| m.get()) {
+        return true;
+    }
     let mut pt = POINT::default();
     unsafe {
         let _ = GetCursorPos(&mut pt);
@@ -794,7 +1001,13 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 let _ = KillTimer(Some(hwnd), wparam.0);
             }
             match wparam.0 {
-                TIMER_CLOSE if !pointer_inside() => close(),
+                TIMER_CLOSE if !pointer_inside() => {
+                    if menu_grace() {
+                        start_close_timer();
+                    } else {
+                        close();
+                    }
+                }
                 TIMER_HOVER => follow_hover(HOVER_LEVEL.with(|h| h.get())),
                 _ => {}
             }
