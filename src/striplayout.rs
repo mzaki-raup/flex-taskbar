@@ -128,10 +128,10 @@ pub fn drop_index(items: &[Slot], x: i32) -> usize {
 /// Where each of `n` tiles goes in a category flyout of a bar on `edge`, as
 /// (column, row). The flyout runs the same way as its bar: tiles left to
 /// right for a top or bottom bar, top to bottom for a side bar, wrapping
-/// after `per_line`. The first tiles (the subcategories) end up on the side
-/// nearest where their own flyouts open: the top row above a bottom bar, the
-/// bottom row below a top bar, the right column beside a left bar, the left
-/// column beside a right bar.
+/// after `per_line`. Tiles fill from the bar's side outwards with no gaps
+/// there: the first row is the top row below a top bar, the first column the
+/// one nearest a side bar. Above a bottom bar the first row is the top one,
+/// where the subcategories' own flyouts open.
 pub fn flyout_cells(n: usize, per_line: usize, edge: Edge) -> Vec<(usize, usize)> {
     let per = per_line.max(1);
     let lines = n.div_ceil(per);
@@ -140,7 +140,7 @@ pub fn flyout_cells(n: usize, per_line: usize, edge: Edge) -> Vec<(usize, usize)
             let (line, pos) = (i / per, i % per);
             match edge {
                 Edge::Bottom => (pos, line),
-                Edge::Top => (pos, lines - 1 - line),
+                Edge::Top => (pos, line),
                 Edge::Left => (lines - 1 - line, pos),
                 Edge::Right => (line, pos),
             }
@@ -272,8 +272,8 @@ mod tests {
     fn flyouts_run_the_way_their_bar_does() {
         // Bottom bar: a horizontal strip, wrapping upwards (first row on top).
         assert_eq!(flyout_cells(5, 4, Edge::Bottom), vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]);
-        // Top bar: the first row at the bottom, nearest the next level.
-        assert_eq!(flyout_cells(5, 4, Edge::Top), vec![(0, 1), (1, 1), (2, 1), (3, 1), (0, 0)]);
+        // Top bar: filled from the top row, right under the bar.
+        assert_eq!(flyout_cells(5, 4, Edge::Top), vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]);
         // Side bars: a vertical strip, wrapping into further columns.
         assert_eq!(flyout_cells(3, 4, Edge::Right), vec![(0, 0), (0, 1), (0, 2)]);
         assert_eq!(flyout_cells(5, 4, Edge::Right), vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0)]);

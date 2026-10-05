@@ -129,7 +129,7 @@ const ROWS: [Row; 22] = [
         &["Next to the Windows taskbar", "Bottom", "Top", "Left", "Right"],
     ),
     Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
-    Row::Combo(ALIGN, "Icons", &["At the start, right after All", "Centred"]),
+    Row::Combo(ALIGN, "Icons", &["Centred", "At the start, right after All"]),
     Row::Colour(BORDER),
     Row::Slider(BORDER_WIDTH),
     Row::Slider(RADIUS),
@@ -348,7 +348,7 @@ fn load() {
     };
     sel(THEME, a.theme as usize);
     sel(DOCK, a.dock_width as usize);
-    sel(ALIGN, a.icon_align as usize);
+    sel(ALIGN, if a.icon_align == IconAlign::Centre { 0 } else { 1 });
     sel(POSITION, app::with(|s| s.cfg.settings.strip_edge) as usize);
     for (id, value) in [
         (OPACITY, a.opacity as u32),
@@ -475,7 +475,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 }
                 (ALIGN, CBN_SELCHANGE) => {
                     let i = combo(id);
-                    change(|a, _| a.icon_align = [IconAlign::Start, IconAlign::Centre][i.min(1)]);
+                    change(|a, _| a.icon_align = [IconAlign::Centre, IconAlign::Start][i.min(1)]);
                 }
                 (THEME | DOCK, CBN_SELCHANGE) => {
                     let i = combo(id);

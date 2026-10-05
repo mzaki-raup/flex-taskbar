@@ -2,8 +2,7 @@
 //! border, corners, size. Pure data plus the colour resolution, so it can be
 //! unit-tested off Windows.
 //!
-//! The defaults reproduce the original .NET FlexTaskbar bar, except that icons
-//! are packed after All instead of centred.
+//! The defaults reproduce the original .NET FlexTaskbar bar.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -136,7 +135,7 @@ impl Default for Appearance {
             corner_radius: 0,
             margin: 0,
             dock_width: DockWidth::Full,
-            icon_align: IconAlign::Start,
+            icon_align: IconAlign::Centre,
             icon_size: 32,
             flyout_columns: 4,
             flyout_corner_radius: 6,
