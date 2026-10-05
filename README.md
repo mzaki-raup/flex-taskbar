@@ -2,7 +2,8 @@
 
 A portable application launcher for Windows 10 (version 1703 or later) and
 Windows 11, for people with a lot of apps installed. You file apps into
-categories nested as deeply as you like. Your categories and pinned apps then
+categories nested several levels deep (as many as your screen can show,
+up to 7). Your categories and pinned apps then
 sit in a bar docked against an edge of the screen (by default next to the
 Windows taskbar; drag it to the bottom, top, left or right), in the look of the
 original FlexTaskbar. Rest the pointer on a category and a flyout pops up with
@@ -77,10 +78,20 @@ Windows they show the desktop behind them.
 
 ## Features
 
-**Nested categories.** Categories can contain subcategories to any depth, plus
+**Nested categories.** Categories can contain subcategories, plus
 apps. The same app can be filed in several categories. In the tray and hotkey
 menu a category is a submenu listing its subcategories, then its apps. From the
 bar, a category opens as a flyout (below).
+
+**How deep.** Every level of subcategories opens another flyout, so the nesting
+depth follows the screen: as many levels as fit their flyouts, between 3 and 7.
+A level counts as two rows of tiles above or below a top or bottom bar, or one
+column beside a side bar. For example, a 1920×1080 screen with the bar at the
+bottom allows 5 levels (a root category plus 4 levels of subcategories),
+2560×1440 allows 7, and a bar on the left or right of a wide screen allows 7.
+The Manage window shows the limit above the category tree and won't add or
+indent a category past it. Categories already deeper (from an import, or after
+switching to a smaller screen) keep working; their flyouts just overlap.
 
 **The bar** is docked against an edge of the primary monitor, laid out like the
 original FlexTaskbar:
@@ -107,7 +118,7 @@ original FlexTaskbar:
     strip**, one column top to bottom, wrapping into another column only if
     it would be taller than the screen;
   - resting the pointer on a subcategory opens **its flyout beyond this one**
-    (further from the bar, lined up with the tile), and so on at any depth.
+    (further from the bar, lined up with the tile), and so on down the levels.
     Moving to another subcategory switches it; resting on an app tile closes
     it. Tiles fill from the bar's side outwards, so a flyout below a top bar
     starts with a full row right under the bar;
@@ -217,7 +228,7 @@ old taskbar features are gone on purpose:
 - the clock and status indicators
 
 Everything about organising and launching apps carried over:
-- categories, now nested to any depth
+- categories, now nested up to 7 levels deep
 - pinned apps
 - custom category and app icons
 - custom and web apps
@@ -355,16 +366,18 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 39 unit tests cover:
+The 41 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
 - category tree operations at any depth: add, remove, reorder, indent/outdent,
-  app membership
+  app membership, and the nesting limit (depth, subtree height, what may be
+  added or indented)
 - search ranking
 - bar layout (the three zones, centring, overflow, the fitted dock, hit
   testing, where a dragged icon lands), which edge a dragged bar docks to,
-  where flyouts open for each edge (and staying on screen), how flyout tiles
+  where flyouts open for each edge (and staying on screen), how many levels
+  fit on a screen, how flyout tiles
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
@@ -396,7 +409,8 @@ The 39 unit tests cover:
   own corner radius, border width and border colour, all applied live and
   saved
 - first-run Manage window
-- creating three levels of nested categories, including renaming them
+- creating four levels of nested categories, including renaming them, and the
+  limit refusing a fifth (New sub and In → on a 1280×800 screen, where it is 4)
 - the custom-app dialog
 - the nested tray menu, launching from it, and recents
 - the search window: filtering, category-path matches, no-match state

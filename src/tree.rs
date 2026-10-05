@@ -1,5 +1,6 @@
 //! Operations on the nested category tree. Categories are addressed by id; every
-//! operation walks the tree, so nesting depth is unbounded.
+//! operation walks the tree. The tree itself has no depth limit; the Manage
+//! window keeps it within what the screen can show (`striplayout::max_levels`).
 
 use crate::config::Category;
 
@@ -66,6 +67,30 @@ pub fn parent_of(cats: &[Category], id: u64) -> Option<u64> {
         list = &list[i].children;
     }
     parent
+}
+
+/// How deep a category sits: 1 for a root category.
+pub fn depth(cats: &[Category], id: u64) -> Option<usize> {
+    index_path(cats, id).map(|p| p.len())
+}
+
+/// Levels in a category's subtree: 1 for one without subcategories.
+pub fn height(c: &Category) -> usize {
+    1 + c.children.iter().map(height).max().unwrap_or(0)
+}
+
+/// Whether a new subcategory of `parent` stays within `limit` levels.
+pub fn sub_fits(cats: &[Category], parent: u64, limit: usize) -> bool {
+    depth(cats, parent).is_some_and(|d| d < limit)
+}
+
+/// Whether indenting `id` (one level deeper, under its previous sibling) keeps
+/// its whole subtree within `limit` levels.
+pub fn indent_fits(cats: &[Category], id: u64, limit: usize) -> bool {
+    match (depth(cats, id), find(cats, id)) {
+        (Some(d), Some(c)) => d + height(c) <= limit,
+        _ => false,
+    }
 }
 
 /// Adds `cat` as the last child of `parent` (or as a root category). Returns false
@@ -282,5 +307,27 @@ mod tests {
         assert!(app_paths(&t).iter().all(|(a, _)| a != "a"));
         assert!(remove_app(&mut t, 3, "b"));
         assert!(!remove_app(&mut t, 3, "b"));
+    }
+
+    #[test]
+    fn depth_limits() {
+        let cats = sample();
+        assert_eq!(depth(&cats, 1), Some(1));
+        assert_eq!(depth(&cats, 3), Some(3));
+        assert_eq!(depth(&cats, 99), None);
+        assert_eq!(height(&cats[0]), 3);
+        assert_eq!(height(&cats[1]), 1);
+        // A subcategory under Vim (level 3) would be level 4.
+        assert!(sub_fits(&cats, 3, 4));
+        assert!(!sub_fits(&cats, 3, 3));
+        assert!(!sub_fits(&cats, 99, 7));
+        // Indenting Games under Dev puts it at level 2; Tools under Editors
+        // at level 3; Editors (with Vim) under nothing above it can't move.
+        assert!(indent_fits(&cats, 5, 2));
+        assert!(indent_fits(&cats, 4, 3));
+        assert!(!indent_fits(&cats, 4, 2));
+        // Dev's subtree is 3 deep: moving it one level down needs 4.
+        assert!(indent_fits(&cats, 1, 4));
+        assert!(!indent_fits(&cats, 1, 3));
     }
 }

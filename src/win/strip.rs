@@ -469,6 +469,22 @@ pub fn dpi() -> u32 {
     with(|s| s.dpi).unwrap_or(96)
 }
 
+/// How deep categories may nest so every level of flyouts fits on the
+/// primary monitor, given where the bar is (see `striplayout::max_levels`).
+pub fn max_levels() -> usize {
+    let (mon, _) = primary_monitor();
+    let (edge, dpi, height) = {
+        let st = with(|s| (s.edge, s.dpi));
+        let (setting, height) = app::with(|s| (s.cfg.settings.strip_edge, s.cfg.settings.strip_height));
+        match st {
+            Some((edge, dpi)) => (edge, dpi, height),
+            None => (setting.resolve(Edge::Bottom), 96, height),
+        }
+    };
+    let bar = scale(height.clamp(24, 96) as i32, dpi);
+    striplayout::max_levels(edge, (ui::rect_w(&mon), ui::rect_h(&mon)), bar, dpi)
+}
+
 /// The edge the strip is docked against (flyouts open away from it).
 pub fn edge() -> Edge {
     with(|s| s.edge).unwrap_or(Edge::Bottom)

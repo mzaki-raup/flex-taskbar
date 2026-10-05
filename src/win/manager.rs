@@ -498,6 +498,10 @@ fn tree_image(key: &str) -> i32 {
 /// Rebuilds the tree from the configuration and selects `select` (or keeps the
 /// current selection).
 fn rebuild_tree(select: Option<u64>) {
+    ui::set_text(
+        ctl(LBL_CATS),
+        &format!("Categories, up to {} levels deep (drag files here to add apps)", super::strip::max_levels()),
+    );
     let select = select.or_else(selected_category);
     let tree_hwnd = ctl(TREE);
     let cats = app::with(|s| s.cfg.categories.clone());
@@ -563,7 +567,28 @@ fn rebuild_tree(select: Option<u64>) {
     refresh_category_apps();
 }
 
+/// Subcategories can nest only as deep as the screen can show their flyouts.
+fn too_deep(owner: HWND) {
+    let limit = super::strip::max_levels();
+    ui::info(
+        Some(owner),
+        &format!(
+            "Categories can be nested {limit} levels deep on this screen, so that every level of flyouts fits.\n\n\
+             Move this category up a level first, or put it somewhere less deep."
+        ),
+    );
+}
+
 fn new_category(parent: Option<u64>) {
+    if let Some(p) = parent {
+        let limit = super::strip::max_levels();
+        if !app::with(|s| tree::sub_fits(&s.cfg.categories, p, limit)) {
+            if let Some(h) = hwnd() {
+                too_deep(h);
+            }
+            return;
+        }
+    }
     let id = app::with(|s| {
         let id = s.cfg.alloc_id();
         let cat = Category { id, name: "New category".into(), ..Default::default() };
@@ -1341,7 +1366,16 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 CAT_UP => tree_op(|t, id| tree::move_sibling(t, id, -1)),
                 CAT_DOWN => tree_op(|t, id| tree::move_sibling(t, id, 1)),
                 CAT_OUT => tree_op(tree::outdent),
-                CAT_IN => tree_op(tree::indent),
+                CAT_IN => {
+                    let limit = super::strip::max_levels();
+                    let fits = selected_category()
+                        .is_some_and(|id| app::with(|s| tree::indent_fits(&s.cfg.categories, id, limit)));
+                    if fits {
+                        tree_op(tree::indent)
+                    } else if selected_category().is_some() {
+                        too_deep(hwnd);
+                    }
+                }
                 CAT_ICON => category_icon(hwnd),
                 APP_REMOVE => remove_selected_from_category(),
                 APP_UP => move_selected_app(-1),

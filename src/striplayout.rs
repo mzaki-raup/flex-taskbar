@@ -143,6 +143,22 @@ pub fn flyout_cells(n: usize, per_line: usize, edge: Edge) -> Vec<(usize, usize)
         .collect()
 }
 
+/// How many levels of category flyouts fit on a screen of `screen` (w, h)
+/// pixels, with the bar `bar` pixels thick on `edge`: the nesting limit for
+/// categories, between 3 and 7. A level is taken as two rows of tiles deep
+/// for a top or bottom bar (flyouts stack up or down) and one column wide for
+/// a side bar (they stack sideways). `dpi` scales the tile sizes.
+pub fn max_levels(edge: Edge, screen: (i32, i32), bar: i32, dpi: u32) -> usize {
+    let px = |v: i32| v * dpi as i32 / 96;
+    // Tile plus margins, flyout padding and the gap to the next level.
+    let (room, level) = if edge.vertical() {
+        (screen.0 - bar, px(84 + 4 + 10 + 4))
+    } else {
+        (screen.1 - bar, px(2 * (76 + 4) + 10 + 4))
+    };
+    ((room / level.max(1)).max(0) as usize).clamp(3, 7)
+}
+
 /// A screen edge the strip can dock against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
@@ -263,6 +279,20 @@ mod tests {
         assert_eq!(flyout_cells(5, 4, Edge::Right), vec![(0, 0), (0, 1), (0, 2), (0, 3), (1, 0)]);
         assert_eq!(flyout_cells(5, 4, Edge::Left), vec![(1, 0), (1, 1), (1, 2), (1, 3), (0, 0)]);
         assert!(flyout_cells(0, 4, Edge::Left).is_empty());
+    }
+
+    #[test]
+    fn nesting_limit_follows_the_screen() {
+        // 1080p with a bottom bar: five levels of two-row flyouts fit.
+        assert_eq!(max_levels(Edge::Bottom, (1920, 1080), 48, 96), 5);
+        // 1440p: seven.
+        assert_eq!(max_levels(Edge::Top, (2560, 1440), 48, 96), 7);
+        // A small or high-DPI screen still allows three.
+        assert_eq!(max_levels(Edge::Bottom, (1366, 768), 48, 96), 4);
+        assert_eq!(max_levels(Edge::Bottom, (1366, 768), 72, 192), 3);
+        // Side bars stack levels sideways: plenty of room on a wide screen.
+        assert_eq!(max_levels(Edge::Left, (1920, 1080), 48, 96), 7);
+        assert_eq!(max_levels(Edge::Right, (800, 600), 48, 144), 4);
     }
 
     #[test]
