@@ -878,12 +878,8 @@ fn render() {
                 }
             }
             if is_cat {
-                // A badge on the icon's corner, its arrow pointing where the
-                // flyout opens.
-                let r = size as f32 * 0.24;
-                let (dx, dy) = s.edge.opening();
-                let (bx, by) = (x as f32 + size as f32 - r * 0.35, y as f32 + size as f32 - r * 0.35);
-                cv.badge(bx, by, r, dx, dy, c.accent, c.on_accent, c.background.with_alpha(255));
+                // The "opens a flyout" mark (see `indicator`).
+                super::indicator::draw(cv, &s.look, c, s.edge, x, y, size);
             }
         };
         for (pos, slot) in s.layout.items.iter().enumerate() {

@@ -949,7 +949,7 @@ fn on_drop(owner: HWND, drop: HDROP) {
 
 // ---------------------------------------------------------------- icons
 
-fn pick_image(owner: HWND) -> Option<PathBuf> {
+pub(super) fn pick_image(owner: HWND) -> Option<PathBuf> {
     let filter: String = format!(
         "Images ({})\0{}\0All files\0*.*\0\0",
         ICON_EXTENSIONS.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(", "),

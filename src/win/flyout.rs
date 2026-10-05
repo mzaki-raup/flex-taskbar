@@ -573,10 +573,7 @@ fn render(idx: usize) {
                     if is_sub {
                         // The same badge as the strip's category buttons, pointing
                         // where this subcategory's flyout opens.
-                        let r = size as f32 * 0.24;
-                        let (dx, dy) = strip::edge().opening();
-                        let (bx, by) = (x as f32 + size as f32 - r * 0.35, y as f32 + size as f32 - r * 0.35);
-                        cv.badge(bx, by, r, dx, dy, c.accent, c.on_accent, c.background.with_alpha(255));
+                        super::indicator::draw(&mut cv, &f.look, &c, strip::edge(), x, y, size);
                     }
                     // Two lines reserved for the name, as in the original.
                     let trc =

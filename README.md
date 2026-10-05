@@ -107,7 +107,15 @@ original FlexTaskbar:
 - **Centre: root categories and pinned apps.** A category carries a
   bright badge in the accent colour on its icon's corner, with an arrow pointing
   where its flyout opens (up from a bottom bar, down from a top bar, sideways
-  from a side bar).
+  from a side bar). That mark can be changed in the Appearance window
+  (*Category indicator*): a badge with an arrow, a plain arrow, a dot, a folded
+  corner, an underline, none at all, or **your own picture**. Pick *Your own
+  picture* (or *Choose…*) and select any PNG, JPEG, BMP, GIF, ICO or SVG file;
+  a copy is kept in the data folder (`data\icons\`), so the original can be
+  moved or deleted. *Remove* deletes the copy. The mark's size is adjustable
+  too.
+
+  ![The seven indicator styles on the bar's category icons](screenshots/indicators.png)
 - **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
   path and pins it to the bar. ⚙ opens the Manage window.
 - **Category flyouts.** Resting the pointer on a category opens a flyout beside
@@ -179,6 +187,10 @@ Every change shows on the bar straight away:
 | Background opacity | 10–100 % (icons and text stay solid) | 87 % |
 | Icon size | 16–48 | 32 |
 | Hover animation | Off, Magnify (like the macOS Dock), Lift, Bounce, Pulse | Magnify |
+| **Category indicator** | | |
+| Style | Badge with arrow, Arrow, Dot, Folded corner, Underline, Your own picture, None | Badge with arrow |
+| Picture | Any PNG, JPEG, BMP, GIF, ICO or SVG; copied into `data\icons\` | none |
+| Size | 25–80 % of the icon | 48 % |
 | **Bar** | | |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
@@ -303,7 +315,7 @@ data\
   config.json           categories, custom apps, icon choices, recents, settings
   config.json.bak       the previous good version (automatic)
   apps-cache.json       last app scan, for instant startup (safe to delete)
-  icons\                copies of the custom icons you picked
+  icons\                copies of the custom icons and indicator picture you picked
   crash.log             restarts and problems, newest last
 ```
 
@@ -401,7 +413,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 49 unit tests cover:
+The 50 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -421,7 +433,8 @@ The 49 unit tests cover:
   pulse ending, and each style's effect
 - appearance settings: the default colours matching the original, the three
   themes, readable text on a custom background, opacity, the flyout border
-  following the bar's unless set, colour parsing and clamping
+  following the bar's unless set, the indicator style falling back to the
+  badge when no picture was chosen, colour parsing and clamping
 - telling app kinds apart from their shell names: Store/packaged apps,
   Chrome, Edge and other Chromium web apps, desktop programs, Start Menu
   shortcuts and custom browser web apps
@@ -441,6 +454,8 @@ The 49 unit tests cover:
   - the *All* list
   - the hover animations: Magnify following the pointer along the bar,
     Lift, Bounce and Pulse
+  - each category indicator style, uploading a PNG as the indicator (copied
+    into `data\icons\` and shown on the bar), and removing it
   - the right-click menus (move, unpin)
   - dragging a pinned app and a category to new places, and the *Arrange the
     bar* window (buttons and dragging rows), all updating the bar live
@@ -521,6 +536,7 @@ src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
+src/win/indicator.rs the mark on category icons (styles, own picture)
 src/win/canvas.rs    anti-aliased drawing into layered windows
 src/win/appearancewin.rs  Appearance window
 src/win/arrangewin.rs     Arrange the bar window

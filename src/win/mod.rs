@@ -9,6 +9,7 @@ mod canvas;
 mod catalog;
 mod flyout;
 mod icons;
+mod indicator;
 mod launch;
 mod manager;
 mod menu;

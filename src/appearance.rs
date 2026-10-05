@@ -39,6 +39,27 @@ pub enum HoverAnim {
     Pulse,
 }
 
+/// The mark on a category (and subcategory) icon that says "this opens a
+/// flyout".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Indicator {
+    /// An accent circle with an arrow pointing where the flyout opens.
+    Badge,
+    /// Just the arrow.
+    Arrow,
+    /// A small accent dot.
+    Dot,
+    /// A folded corner in the accent colour.
+    Corner,
+    /// An accent bar along the icon's bottom edge.
+    Underline,
+    /// The user's own picture (`indicator_image`).
+    Image,
+    /// No mark.
+    None,
+}
+
 /// An sRGB colour with alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba {
@@ -117,6 +138,13 @@ pub struct Appearance {
     pub dock_width: DockWidth,
     /// Animation when the pointer moves over the strip's icons.
     pub hover_animation: HoverAnim,
+    /// The mark on category icons.
+    pub indicator: Indicator,
+    /// File name (in the data folder's `icons`) of the picture for
+    /// `Indicator::Image`.
+    pub indicator_image: Option<String>,
+    /// Size of the mark, in percent of the icon.
+    pub indicator_size: u32,
     /// Icon size on the bar and in flyout tiles, in DIPs.
     pub icon_size: u32,
     /// App tiles per row in a category flyout.
@@ -142,6 +170,9 @@ impl Default for Appearance {
             margin: 0,
             dock_width: DockWidth::Full,
             hover_animation: HoverAnim::Magnify,
+            indicator: Indicator::Badge,
+            indicator_image: None,
+            indicator_size: 48,
             icon_size: 32,
             flyout_columns: 4,
             flyout_corner_radius: 6,
@@ -220,6 +251,13 @@ impl Appearance {
             flyout_columns: self.flyout_columns.clamp(1, 12),
             flyout_corner_radius: self.flyout_corner_radius.min(24),
             flyout_border_width: self.flyout_border_width.min(6),
+            indicator_size: self.indicator_size.clamp(25, 80),
+            // A picture that was never chosen falls back to the badge.
+            indicator: if self.indicator == Indicator::Image && self.indicator_image.is_none() {
+                Indicator::Badge
+            } else {
+                self.indicator
+            },
             ..self.clone()
         }
     }
@@ -298,6 +336,18 @@ mod tests {
         assert_eq!(partial.opacity, 40);
         assert_eq!(partial.dock_width, DockWidth::Fit);
         assert_eq!(partial.icon_size, 32);
+    }
+
+    #[test]
+    fn indicator_settings() {
+        let a = Appearance::default();
+        assert_eq!((a.indicator, a.indicator_size), (Indicator::Badge, 48));
+        let a = Appearance { indicator: Indicator::Image, indicator_size: 200, ..Default::default() }.clamped();
+        assert_eq!((a.indicator, a.indicator_size), (Indicator::Badge, 80)); // no picture chosen
+        let a = Appearance { indicator: Indicator::Image, indicator_image: Some("i.png".into()), ..Default::default() };
+        assert_eq!(a.clamped().indicator, Indicator::Image);
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"indicator\":\"image\"") && json.contains("\"indicator_image\":\"i.png\""));
     }
 
     #[test]

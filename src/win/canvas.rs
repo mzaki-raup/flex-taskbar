@@ -100,29 +100,37 @@ impl Canvas {
         self.pix.draw_pixmap(0, 0, img.as_ref(), &paint, t, None);
     }
 
-    /// A category's "has a flyout" badge: a filled circle in `fill` with a thin
-    /// `ring` (the background, so it stands off the icon) and a bold arrow
-    /// in `arrow` pointing where the flyout opens (`dx`, `dy`: a unit
-    /// direction, e.g. (0, -1) for up).
-    #[allow(clippy::too_many_arguments)]
-    pub fn badge(&mut self, cx: f32, cy: f32, r: f32, dx: f32, dy: f32, fill: Rgba, arrow: Rgba, ring: Rgba) {
-        let ring_w = (r * 0.22).max(1.0);
-        for (radius, c) in [(r + ring_w, ring), (r, fill)] {
-            if let Some(path) = PathBuilder::from_circle(cx, cy, radius) {
-                self.pix.fill_path(&path, &paint(c), FillRule::Winding, Transform::identity(), None);
-            }
+    pub fn circle(&mut self, cx: f32, cy: f32, r: f32, c: Rgba) {
+        if let Some(path) = PathBuilder::from_circle(cx, cy, r) {
+            self.pix.fill_path(&path, &paint(c), FillRule::Winding, Transform::identity(), None);
         }
-        // A triangle pointing along (dx, dy): tip ahead, base behind.
-        let (tip, half, back) = (r * 0.62, r * 0.6, r * 0.38);
-        let (px, py) = (-dy, dx); // perpendicular
+    }
+
+    pub fn polygon(&mut self, points: &[(f32, f32)], c: Rgba) {
         let mut pb = PathBuilder::new();
-        pb.move_to(cx + dx * tip, cy + dy * tip);
-        pb.line_to(cx - dx * back + px * half, cy - dy * back + py * half);
-        pb.line_to(cx - dx * back - px * half, cy - dy * back - py * half);
+        for (i, &(x, y)) in points.iter().enumerate() {
+            if i == 0 { pb.move_to(x, y) } else { pb.line_to(x, y) }
+        }
         pb.close();
         if let Some(path) = pb.finish() {
-            self.pix.fill_path(&path, &paint(arrow), FillRule::Winding, Transform::identity(), None);
+            self.pix.fill_path(&path, &paint(c), FillRule::Winding, Transform::identity(), None);
         }
+    }
+
+    /// A bold triangle of "radius" `r` centred on (cx, cy), pointing along
+    /// the unit direction (dx, dy).
+    #[allow(clippy::too_many_arguments)]
+    pub fn arrow(&mut self, cx: f32, cy: f32, r: f32, dx: f32, dy: f32, c: Rgba) {
+        let (tip, half, back) = (r * 0.62, r * 0.6, r * 0.38);
+        let (px, py) = (-dy, dx); // perpendicular
+        self.polygon(
+            &[
+                (cx + dx * tip, cy + dy * tip),
+                (cx - dx * back + px * half, cy - dy * back + py * half),
+                (cx - dx * back - px * half, cy - dy * back - py * half),
+            ],
+            c,
+        );
     }
 
     /// Settings cog.
