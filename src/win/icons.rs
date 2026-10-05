@@ -122,7 +122,7 @@ fn svg_pixels(path: &Path, size: i32) -> Option<Vec<u8>> {
     resvg::render(&tree, tiny_skia::Transform::from_row(s, 0.0, 0.0, s, dx, dy), &mut pixmap.as_mut());
     // tiny-skia is premultiplied RGBA; DIBs want BGRA.
     let mut px = pixmap.take();
-    for p in px.chunks_exact_mut(4) {
+    for p in px.as_chunks_mut::<4>().0 {
         p.swap(0, 2);
     }
     Some(px)
@@ -172,7 +172,7 @@ fn dib_from_bgra(pixels: &[u8], size: i32) -> Option<HBITMAP> {
 /// an all-zero alpha channel as "no alpha" and would draw it as solid black.
 pub fn blank(size: i32) -> Option<HBITMAP> {
     let mut px = vec![0u8; (size * size * 4) as usize];
-    for p in px.chunks_exact_mut(4) {
+    for p in px.as_chunks_mut::<4>().0 {
         p[3] = 1;
     }
     dib_from_bgra(&px, size)
