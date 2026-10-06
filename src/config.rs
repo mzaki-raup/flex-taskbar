@@ -254,6 +254,23 @@ impl Config {
         true
     }
 
+    /// Pins an app (or moves it, if already pinned) so it lands in front of
+    /// the button now at `index` of the bar (`bar_keys().len()`: at the end).
+    /// Returns false if nothing changed.
+    pub fn pin_at(&mut self, app_id: &str, index: usize) -> bool {
+        let keys = self.bar_keys();
+        let index = index.min(keys.len());
+        let newly = self.pin(app_id);
+        match keys.iter().position(|k| k == app_id) {
+            // Taking it out first shifts what follows it one place back.
+            Some(pos) => self.move_bar_item(app_id, if pos < index { index - 1 } else { index }),
+            None => {
+                self.move_bar_item(app_id, index);
+                newly
+            }
+        }
+    }
+
     pub fn unpin(&mut self, app_id: &str) -> bool {
         let before = self.pinned.len();
         self.pinned.retain(|p| p != app_id);
@@ -569,6 +586,28 @@ mod tests {
         cfg.unpin("x");
         cfg.categories.retain(|c| c.id != 2);
         assert_eq!(cfg.bar_keys(), keys(&["y", "cat:1", "z"]));
+    }
+
+    #[test]
+    fn pinning_at_a_place() {
+        let mut cfg = Config::default();
+        cfg.categories.push(Category { id: 1, name: "A".into(), ..Default::default() });
+        cfg.pin("x");
+        // A new app lands in front of the button at the index.
+        assert!(cfg.pin_at("n", 1));
+        assert_eq!(cfg.bar_keys(), keys(&["cat:1", "n", "x"]));
+        assert!(cfg.pin_at("m", 0));
+        assert!(cfg.pin_at("e", 99));
+        assert_eq!(cfg.bar_keys(), keys(&["m", "cat:1", "n", "x", "e"]));
+        // A pinned one moves: forwards and backwards, counted before it moves.
+        assert!(cfg.pin_at("m", 4));
+        assert_eq!(cfg.bar_keys(), keys(&["cat:1", "n", "x", "m", "e"]));
+        assert!(cfg.pin_at("e", 0));
+        assert_eq!(cfg.bar_keys(), keys(&["e", "cat:1", "n", "x", "m"]));
+        // Dropped either side of itself: nothing changes.
+        assert!(!cfg.pin_at("n", 2));
+        assert!(!cfg.pin_at("n", 3));
+        assert_eq!(cfg.bar_keys(), keys(&["e", "cat:1", "n", "x", "m"]));
     }
 
     #[test]

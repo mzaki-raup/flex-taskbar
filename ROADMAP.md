@@ -49,7 +49,7 @@ can collect real numbers there, then pick from the unticked items below.
 - [x] **Pin folders and files to the bar** · 🟡
   A folder on the bar opens a flyout listing its contents (like Dock
   stacks), folders first then by name; sub-folders open further flyouts.
-- [ ] **Drag from a flyout or the All list** · 🟡
+- [x] **Drag from a flyout or the All list** · 🟡
   Drag an app onto the bar to pin it, or onto a category to file it there.
 - [ ] **Smart categories** · 🟡
   Filled automatically ("Recently installed", "Most used", "Package

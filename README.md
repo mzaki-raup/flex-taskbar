@@ -238,8 +238,20 @@ original FlexTaskbar:
 - **Slide between categories.** While a flyout is open, moving along the bar
   switches to the next category straight away.
 - **Pinned apps** launch with a click. You can pin an app from the Manage
-  window (*Pin to strip*), from the *All* list, with *Link*, or by dragging
-  `.exe`/`.lnk` files onto the bar.
+  window (*Pin to strip*), from the *All* list, with *Link*, by dragging
+  `.exe`/`.lnk` files onto the bar, or by dragging it out of a flyout.
+- **Drag apps out of a flyout or the *All* list.** Press on a tile or a row
+  and drag: a see-through copy of its icon follows the pointer.
+  - Let go **between two buttons on the bar** (a line shows where) and the
+    app is pinned there. If it is pinned already, it moves there.
+  - Let go **on a category's button** (it gets a ring) and the app is filed
+    in that category. The same works on a **subcategory's tile** in an open
+    flyout.
+  - The app stays wherever else it was filed; an app can be in several
+    categories.
+  - Letting go anywhere else, or pressing Esc, cancels.
+
+  ![Registry Editor dragged out of the Development flyout, a line on the bar where it would be pinned](screenshots/drag-from-flyout.png)
 - **Folders on the bar.** Drag a folder onto the bar (or use *Link* with a
   folder as the target) and it opens like a category: rest on it, or
   click it, and a flyout lists what is in it, like the Dock's stacks.
@@ -678,7 +690,7 @@ Run *Diagnostics…* on your PC for real Windows numbers.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 98 unit tests cover:
+The 100 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -687,12 +699,14 @@ The 98 unit tests cover:
   added or indented)
 - search ranking
 - bar layout (the three zones, centring, overflow, the fitted dock, hit
-  testing, where a dragged icon lands), which edge a dragged bar docks to,
-  where flyouts open for each edge (and staying on screen), how many levels
-  fit on a screen, how flyout tiles
-  run for each edge (rows for top and bottom bars, columns for side bars),
-  pinning, and the
-  bar order (mixing categories and apps, moves, new and removed buttons)
+  testing, where a dragged icon lands, where an app dragged in from a
+  flyout lands: into a category or between two buttons), which edge a
+  dragged bar docks to, where flyouts open for each edge (and staying on
+  screen), how many levels fit on a screen, how flyout tiles run for each
+  edge (rows for top and bottom bars, columns for side bars), pinning
+  (including pinning at a place, or moving an app already pinned there),
+  and the bar order (mixing categories and apps, moves, new and removed
+  buttons)
 - pinned folders: hidden and system files left out, folders first, then
   by name ignoring case, the cap with the number left over, and shortcut
   names shown without `.lnk`/`.url`
@@ -848,6 +862,11 @@ The 98 unit tests cover:
   - dragging a pinned app and a category to new places, and the *Arrange the
     bar* window (buttons and dragging rows), all updating the bar live
   - *Pin to strip*
+  - dragging apps out of flyouts: a tile pinned between two bar buttons,
+    an *All* row filed in a bar category, a tile filed in a subcategory
+    tile of the same flyout, an app already in that subcategory left as it
+    was, letting go on the desktop and Esc both cancelling (nothing
+    saved), and a click without dragging still launching the app
   - showing and hiding it
   - coming back after a crash
 - the Appearance window: Light and Dark themes, fitted dock, corner radius,
@@ -940,6 +959,7 @@ src/allview.rs       sorting and filtering the All list               (tested)
 src/win/watch.rs     automatic rescan when apps are installed
 src/win/backupwin.rs Back up settings… and Restore…
 src/win/prompt.rs    asking for one line of text (a look's name)
+src/win/dragimage.rs the icon following the pointer while dragging an app out
 src/win/diagnostics.rs  Diagnostics…: memory, CPU, objects, draw times
 src/win/running.rs   following open windows (shell notifications), switching
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks

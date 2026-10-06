@@ -9,6 +9,7 @@ mod backupwin;
 mod canvas;
 mod catalog;
 mod diagnostics;
+mod dragimage;
 mod flyout;
 mod icons;
 mod indicator;

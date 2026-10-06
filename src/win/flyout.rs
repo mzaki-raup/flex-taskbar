@@ -30,14 +30,17 @@ use windows::Win32::Graphics::Gdi::{
     DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ,
     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HTTRANSPARENT,
-    HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING,
-    MF_UNCHECKED, PostMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer,
-    SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_ACTIVATE, WM_CHAR, WM_KEYDOWN,
-    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL, WM_RBUTTONUP, WM_TIMER,
-    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, GetSystemMetrics,
+    HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_NO, InsertMenuW, KillTimer, LoadCursorW, MA_NOACTIVATE, MF_BYPOSITION,
+    MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, PostMessageW, RegisterClassW, SM_CXDRAG, SM_CYDRAG,
+    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CHAR, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL, WM_RBUTTONUP,
+    WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -97,6 +100,30 @@ thread_local! {
     static MENU_UP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// When the last such menu closed.
     static MENU_CLOSED: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// An app tile or row held down with the left button, maybe being dragged
+/// out to the bar or onto a subcategory.
+struct Drag {
+    level: usize,
+    elem: usize,
+    app_id: String,
+    /// Where the button went down (screen).
+    start: POINT,
+    /// It has moved far enough to be a drag rather than a click.
+    active: bool,
+    /// The subcategory tile it would be filed in: (level, element).
+    target: Option<(usize, usize)>,
+    /// Esc was pressed: nothing happens until the button is let go.
+    cancelled: bool,
+}
+
+thread_local! {
+    static DRAG: RefCell<Option<Drag>> = const { RefCell::new(None) };
+}
+
+fn dragging() -> bool {
+    DRAG.with(|d| d.borrow().as_ref().is_some_and(|d| d.active))
 }
 
 /// Still within `MENU_GRACE_MS` of a menu closing.
@@ -487,6 +514,7 @@ mod closing {
 }
 
 pub fn close() {
+    end_drag();
     if let Some(base) = base() {
         unsafe {
             let _ = KillTimer(Some(base), TIMER_CLOSE);
@@ -910,8 +938,10 @@ fn render(idx: usize) {
                     fill,
                 );
             }
-            if f.keyboard && f.keys_used && f.key_level == idx && l.focus == Some(i) {
-                // The keyboard focus: a ring in the accent colour.
+            let drop_here = DRAG.with(|d| d.borrow().as_ref().is_some_and(|d| d.target == Some((idx, i))));
+            if drop_here || (f.keyboard && f.keys_used && f.key_level == idx && l.focus == Some(i)) {
+                // The keyboard focus, or where a dragged app would be filed: a
+                // ring in the accent colour.
                 let (x, y, w, h) = (rc.left as f32, rc.top as f32, ui::rect_w(&rc) as f32, ui::rect_h(&rc) as f32);
                 cv.stroke_round_rect(x, y, w, h, r4, s(2) as f32, c.accent);
             }
@@ -1802,8 +1832,169 @@ fn on_char(ch: char) -> bool {
     true
 }
 
+// ---------------------------------------------------------------- dragging out
+
+/// The subcategory tile under the screen point `pt`, if any: (level, element, id).
+fn sub_at(pt: POINT) -> Option<(usize, usize, u64)> {
+    let hit = with(|f| {
+        f.levels.iter().enumerate().find_map(|(idx, l)| {
+            let inside = pt.x >= l.win.left && pt.x < l.win.right && pt.y >= l.win.top && pt.y < l.win.bottom;
+            inside.then(|| (idx, pt.x - l.win.left + l.pad.0, pt.y - l.win.top + l.pad.1))
+        })
+    })
+    .flatten()?;
+    let (idx, x, y) = hit;
+    let i = elem_at(idx, x, y)?;
+    match elem(idx, i)? {
+        Elem::Sub(id) => Some((idx, i, id)),
+        _ => None,
+    }
+}
+
+/// The pointer moved with an app held: start dragging once it has gone far
+/// enough, then show where it would land. Returns whether a drag is under way.
+fn drag_moved() -> bool {
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    let Some((start, active, level, i, cancelled)) =
+        DRAG.with(|d| d.borrow().as_ref().map(|d| (d.start, d.active, d.level, d.elem, d.cancelled)))
+    else {
+        return false;
+    };
+    if cancelled {
+        return true;
+    }
+    // Hovered flyouts don't have the keyboard, so Esc is checked here too.
+    if active && unsafe { GetAsyncKeyState(0x1B) } < 0 {
+        cancel_drag();
+        return true;
+    }
+    if !active {
+        let (cx, cy) = unsafe { (GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG)) };
+        if (pt.x - start.x).abs() <= cx && (pt.y - start.y).abs() <= cy {
+            return false;
+        }
+        DRAG.with(|d| d.borrow_mut().as_mut().map(|d| d.active = true));
+        // The picture under the pointer: the tile's icon, see-through.
+        let shown = with(|f| {
+            let p = f.levels.get(level)?.elems.get(i)?;
+            let size = scale(f.look.icon_size as i32, f.dpi);
+            // A row's icon is loaded small: use the largest one there is.
+            let icon = p.icon.as_deref().and_then(|k| {
+                icon_for(f, k, size).or_else(|| {
+                    let mut sizes: Vec<_> =
+                        f.icons.iter().filter(|((key, _), pix)| key == k && pix.is_some()).collect();
+                    sizes.sort_by_key(|((_, sz), _)| *sz);
+                    sizes.last().and_then(|(_, pix)| (*pix).clone())
+                })
+            });
+            let letter = super::dragimage::Letter {
+                text: p.text.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default(),
+                font: f.font,
+                tile: f.colors.pressed,
+                colour: f.colors.text,
+            };
+            Some((icon, letter, size))
+        })
+        .flatten();
+        if let Some((icon, letter, size)) = shown {
+            super::dragimage::show(icon.as_ref(), letter, size, pt);
+        }
+        // Nothing stays highlighted for the pointer meanwhile.
+        cancel_close();
+    }
+    super::dragimage::move_to(pt);
+    let on_bar = strip::app_drag_over(Some(pt));
+    let target = if on_bar { None } else { sub_at(pt).map(|(l, i, _)| (l, i)) };
+    let before = DRAG.with(|d| d.borrow_mut().as_mut().map(|d| std::mem::replace(&mut d.target, target))).flatten();
+    if before != target {
+        for (l, _) in before.into_iter().chain(target) {
+            render(l);
+        }
+    }
+    let cursor = if on_bar || target.is_some() { IDC_ARROW } else { IDC_NO };
+    unsafe {
+        let _ = SetCursor(LoadCursorW(None, cursor).ok());
+    }
+    true
+}
+
+/// The button was let go with an app held. A click (it hardly moved) does
+/// what a click does; a drag drops the app where the pointer is: pinned to
+/// the bar, filed in the category under it, or nowhere.
+fn drag_released(idx: usize, x: i32, y: i32) {
+    let Some(d) = DRAG.with(|d| d.borrow_mut().take()) else { return };
+    unsafe {
+        let _ = ReleaseCapture();
+    }
+    if d.cancelled {
+        return;
+    }
+    if !d.active {
+        if elem_at(idx, x, y) == Some(d.elem) && idx == d.level {
+            activate(idx, d.elem);
+        }
+        return;
+    }
+    super::dragimage::hide();
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    let sub = sub_at(pt).map(|(_, _, id)| id);
+    close();
+    if strip::app_drop(pt, &d.app_id) {
+        return;
+    }
+    if let Some(id) = sub {
+        app::with(|s| crate::tree::add_app(&mut s.cfg.categories, id, &d.app_id));
+        app::save();
+    }
+}
+
+/// Esc during a drag: put everything back; letting go then does nothing.
+fn cancel_drag() -> bool {
+    let target = DRAG.with(|d| {
+        let mut d = d.borrow_mut();
+        let d = d.as_mut().filter(|d| d.active && !d.cancelled)?;
+        d.cancelled = true;
+        Some(d.target.take())
+    });
+    let Some(target) = target else { return false };
+    super::dragimage::hide();
+    strip::app_drag_over(None);
+    if let Some((l, _)) = target {
+        render(l);
+    }
+    true
+}
+
+/// Stops a drag without dropping (the flyouts closed, or another window
+/// took the mouse).
+fn end_drag() {
+    let Some(d) = DRAG.with(|d| d.borrow_mut().take()) else { return };
+    if d.active {
+        super::dragimage::hide();
+        strip::app_drag_over(None);
+        if let Some((l, _)) = d.target {
+            render(l);
+        }
+    }
+    unsafe {
+        if GetCapture() == base_or(d.level) {
+            let _ = ReleaseCapture();
+        }
+    }
+}
+
+fn base_or(level: usize) -> HWND {
+    with(|f| f.levels.get(level).map(|l| l.hwnd)).flatten().unwrap_or_default()
+}
+
 fn pointer_inside() -> bool {
-    if MENU_UP.with(|m| m.get()) || with(|f| f.keyboard && f.keys_used) == Some(true) {
+    if dragging() || MENU_UP.with(|m| m.get()) || with(|f| f.keyboard && f.keys_used) == Some(true) {
         return true;
     }
     let mut pt = POINT::default();
@@ -1843,6 +2034,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         // The shadow lets the pointer through to what's under it (the bar,
         // or the flyout below), so it never gets in the way.
         (WM_NCHITTEST, Some(idx)) if !over_flyout(idx, lparam) => LRESULT(HTTRANSPARENT as isize),
+        (WM_MOUSEMOVE, Some(_)) if drag_moved() => LRESULT(0),
         (WM_MOUSEMOVE, Some(idx)) => {
             // Over the shadow (nothing of ours underneath): like being outside.
             let (cx, cy) = mouse_xy(lparam);
@@ -1893,6 +2085,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
+        (WM_MOUSELEAVE, Some(_)) if dragging() => LRESULT(0),
         (WM_MOUSELEAVE, Some(idx)) => {
             with(|f| {
                 let l = &mut f.levels[idx];
@@ -1940,6 +2133,43 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
+        (WM_LBUTTONDOWN, Some(idx)) => {
+            // An app might be dragged out to the bar or a subcategory.
+            let (x, y) = mouse_xy(lparam);
+            if let Some(i) = elem_at(idx, x, y)
+                && let Some(Elem::Tile(id) | Elem::Row(id)) = elem(idx, i)
+            {
+                let mut start = POINT::default();
+                unsafe {
+                    let _ = GetCursorPos(&mut start);
+                }
+                end_drag();
+                DRAG.with(|d| {
+                    *d.borrow_mut() = Some(Drag {
+                        level: idx,
+                        elem: i,
+                        app_id: id,
+                        start,
+                        active: false,
+                        target: None,
+                        cancelled: false,
+                    })
+                });
+                unsafe {
+                    SetCapture(hwnd);
+                }
+            }
+            LRESULT(0)
+        }
+        (WM_LBUTTONUP, Some(idx)) if DRAG.with(|d| d.borrow().is_some()) => {
+            let (x, y) = mouse_xy(lparam);
+            drag_released(idx, x, y);
+            LRESULT(0)
+        }
+        (WM_CAPTURECHANGED, Some(_)) => {
+            end_drag();
+            LRESULT(0)
+        }
         (WM_LBUTTONUP, Some(idx)) => {
             let (x, y) = mouse_xy(lparam);
             if let Some(i) = elem_at(idx, x, y) {
@@ -1954,6 +2184,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
+        (WM_KEYDOWN, Some(_)) if wparam.0 == 0x1B && cancel_drag() => LRESULT(0),
         (WM_KEYDOWN, Some(_)) if mark_keys_used() && on_key(wparam.0 as u16) => LRESULT(0),
         (WM_CHAR, Some(_)) if mark_keys_used() && on_char(char::from_u32(wparam.0 as u32).unwrap_or('\0')) => {
             LRESULT(0)

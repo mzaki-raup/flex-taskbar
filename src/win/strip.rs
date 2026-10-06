@@ -127,6 +127,8 @@ struct Strip {
     hide_last: std::time::Instant,
     /// The bar's context menu is open (don't hide under it).
     menu_up: bool,
+    /// An app dragged out of a flyout is over the bar: where it would go.
+    incoming: Option<striplayout::DropOn>,
 }
 
 thread_local! {
@@ -244,6 +246,7 @@ fn create() {
             tools: 0,
             press: None,
             drag: None,
+            incoming: None,
             bar_press: None,
             moving: false,
             anim_levels: Vec::new(),
@@ -863,6 +866,88 @@ fn drop_item(from: usize, x: i32, y: i32) {
     }
 }
 
+/// Where an app dragged out of a flyout to the screen point `pt` would go,
+/// if `pt` is on the bar's buttons.
+fn incoming_at(s: &Strip, pt: POINT) -> Option<striplayout::DropOn> {
+    let (x, y) = (pt.x - s.win.left, pt.y - s.win.top);
+    let m = margin(s);
+    let a = across(s, x, y);
+    if a < m || a >= m + thickness(s) {
+        return None;
+    }
+    let along = along(s, x, y) - m;
+    let bar = s.layout.bar;
+    // Not on All, Link or settings.
+    let lo = s.layout.left.last().map_or(bar.x, |l| l.right());
+    let hi = s.layout.right.first().map_or(bar.right(), |r| r.x);
+    if along < lo || along >= hi {
+        return None;
+    }
+    let is_category = |i: usize| matches!(s.items.get(i), Some(Item::Category(_)));
+    Some(striplayout::drop_on(&s.layout.items, is_category, along))
+}
+
+/// An app is being dragged out of a flyout, the pointer now at `pt` (`None`
+/// when it ended): show where it would land. Returns whether it would land
+/// somewhere.
+pub fn app_drag_over(pt: Option<POINT>) -> bool {
+    let changed = with(|s| {
+        let target = pt.and_then(|pt| incoming_at(s, pt));
+        let changed = s.incoming != target;
+        s.incoming = target;
+        (changed, target.is_some())
+    });
+    let Some((changed, over)) = changed else { return false };
+    if changed {
+        render();
+    }
+    over
+}
+
+/// An app dragged out of a flyout was dropped at `pt`: filed in the
+/// category under it, or pinned there. Returns whether it landed.
+pub fn app_drop(pt: POINT, app_id: &str) -> bool {
+    enum Landing {
+        File(u64),
+        /// In front of this button (`None`: at the end).
+        Pin(Option<String>),
+    }
+    let landing = with(|s| {
+        let target = incoming_at(s, pt);
+        s.incoming = None;
+        match target? {
+            striplayout::DropOn::Into(i) => match s.items.get(i)? {
+                Item::Category(id) => Some(Landing::File(*id)),
+                Item::App(_) => None,
+            },
+            striplayout::DropOn::Before(i) => Some(Landing::Pin(s.items.get(i).map(key_of))),
+        }
+    })
+    .flatten();
+    let landed = match landing {
+        Some(Landing::File(id)) => {
+            app::with(|s| crate::tree::add_app(&mut s.cfg.categories, id, app_id));
+            true
+        }
+        Some(Landing::Pin(before)) => {
+            app::with(|s| {
+                // The bar's own order counts buttons it can't show too.
+                let keys = s.cfg.bar_keys();
+                let index = before.and_then(|k| keys.iter().position(|b| *b == k)).unwrap_or(keys.len());
+                s.cfg.pin_at(app_id, index);
+            });
+            true
+        }
+        None => false,
+    };
+    if landed {
+        app::save();
+    } else {
+        render();
+    }
+    landed
+}
+
 /// While the bar itself is dragged: dock it against the edge nearest the
 /// pointer (as the Windows taskbar does). Saved when the button is released.
 fn move_bar() {
@@ -1093,6 +1178,28 @@ fn render() {
                 draw_state(&mut cv, Hit::Item(pos), *slot);
             }
             draw_item(&mut cv, i, rc, effect_of(pos));
+        }
+        // An app dragged in from a flyout: the category it would be filed in,
+        // or a line where it would be pinned.
+        match s.incoming {
+            Some(striplayout::DropOn::Into(pos)) => {
+                if let Some(slot) = s.layout.items.get(pos) {
+                    let (x, y, w, h) = cell(&slot_rect(s, *slot));
+                    cv.stroke_round_rect(x, y, w, h, r4, scale(2, d) as f32, c.accent);
+                }
+            }
+            Some(striplayout::DropOn::Before(pos)) => {
+                let gap = scale(4, d);
+                let at = match (s.layout.items.get(pos), s.layout.items.last()) {
+                    (Some(slot), _) => slot.x - gap / 2,
+                    (None, Some(last)) => last.right() + gap / 2,
+                    (None, None) => s.layout.bar.x + s.layout.bar.w / 2,
+                };
+                let w = scale(3, d);
+                let (x, y, cw, ch) = cell(&slot_rect(s, Slot { x: at - w / 2, w }));
+                cv.fill_round_rect(x, y, cw, ch, w as f32 / 2.0, c.accent);
+            }
+            None => {}
         }
         if let Some((from, p)) = s.drag
             && let Some(slot) = s.layout.items.first()

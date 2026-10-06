@@ -120,6 +120,30 @@ pub fn drop_index(items: &[Slot], x: i32) -> usize {
     items.windows(2).filter(|w| x >= (centre(&w[0]) + centre(&w[1])) / 2).count()
 }
 
+/// Where an app dragged in from a flyout to bar position `x` would go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropOn {
+    /// Into the category shown in item slot `n`.
+    Into(usize),
+    /// Pinned in front of item slot `n` (`items.len()`: after the last).
+    Before(usize),
+}
+
+/// Over the middle half of a category's slot (`is_category`) the app is
+/// filed in that category; anywhere else it is pinned between the buttons
+/// either side of the pointer.
+pub fn drop_on(items: &[Slot], is_category: impl Fn(usize) -> bool, x: i32) -> DropOn {
+    if let Some(i) = items.iter().position(|s| s.contains(x))
+        && is_category(i)
+    {
+        let s = items[i];
+        if x >= s.x + s.w / 4 && x < s.right() - s.w / 4 {
+            return DropOn::Into(i);
+        }
+    }
+    DropOn::Before(items.iter().filter(|s| x >= s.x + s.w / 2).count())
+}
+
 /// Where each of `n` tiles goes in a category flyout of a bar on `edge`, as
 /// (column, row). The flyout runs the same way as its bar: tiles left to
 /// right for a top or bottom bar, top to bottom for a side bar, wrapping
@@ -348,5 +372,24 @@ mod tests {
         assert_eq!(drop_index(items, items[2].x + items[2].w / 2), 2);
         assert_eq!(drop_index(items, items[3].right() + 300), 3);
         assert_eq!(drop_index(&[], 50), 0);
+    }
+
+    #[test]
+    fn dropping_from_a_flyout() {
+        let l = bar_layout(1000, &metrics(), 3, false);
+        let items = &l.items;
+        // Slot 1 is a category, the others are apps.
+        let cat = |i: usize| i == 1;
+        let mid = |i: usize| items[i].x + items[i].w / 2;
+        assert_eq!(drop_on(items, cat, mid(1)), DropOn::Into(1));
+        // Its outer quarters insert beside it instead.
+        assert_eq!(drop_on(items, cat, items[1].x + 2), DropOn::Before(1));
+        assert_eq!(drop_on(items, cat, items[1].right() - 2), DropOn::Before(2));
+        // An app's slot is never a target itself.
+        assert_eq!(drop_on(items, cat, mid(0)), DropOn::Before(1));
+        assert_eq!(drop_on(items, cat, mid(0) - 1), DropOn::Before(0));
+        assert_eq!(drop_on(items, cat, 0), DropOn::Before(0));
+        assert_eq!(drop_on(items, cat, items[2].right() + 100), DropOn::Before(3));
+        assert_eq!(drop_on(&[], cat, 500), DropOn::Before(0));
     }
 }
