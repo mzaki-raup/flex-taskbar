@@ -10,18 +10,12 @@ and described in the README.
 ## Recommended order
 
 Done: dark settings windows, keyboard control of the flyouts, running-app
-indicators, auto-hide, and settings backup and restore.
+indicators, auto-hide, settings backup and restore, closing animations, a
+hotkey per category, saved looks (theme presets), pinned folders and the
+Diagnostics report.
 
-Suggested next:
-
-1. **Closing animations** (🟢). Rounds off the opening animations already
-   there.
-2. **A hotkey per category** (🟢). Builds on the keyboard control.
-3. **Theme presets** (🟢). Builds on the backup format for import and
-   export.
-4. **Pin folders and files to the bar** (🟡). The most-asked-for dock
-   feature still missing.
-5. **Measured performance** (🟡). Real numbers for the README.
+Suggested next: **Checks on real Windows** (🔴), now that *Diagnostics…*
+can collect real numbers there, then pick from the unticked items below.
 
 ## Everyday use
 
@@ -91,10 +85,11 @@ Suggested next:
   Export everything (`config.json` and the `icons` folder) as one zip, and
   import it on another PC, after checking the names in it the same way
   pictures are checked today.
-- [ ] **Measured performance** · 🟡
-  The README says memory and CPU use haven't been measured on Windows. Add
-  a small diagnostics page (memory, redraw times, timers running) and
-  publish real numbers.
+- [x] **Measured performance** · 🟡
+  *Diagnostics…* (tray menu, `--diagnostics`) reports memory, CPU time,
+  GDI/USER objects, handles and bar and flyout drawing times; the README
+  has numbers measured under Wine. Numbers from real Windows are still to
+  come (see *Checks on real Windows*).
 - [ ] **Checks on real Windows** · 🔴
   What Wine couldn't verify (see the README): high-DPI scaling, Store and web-app icons, dragging files in, the bar beside the
   real taskbar, *Start with Windows*. A UI-automation smoke test in CI

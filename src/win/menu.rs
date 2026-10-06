@@ -25,6 +25,7 @@ pub enum Action {
     ToggleAutostart,
     ToggleStrip,
     OpenDataFolder,
+    Diagnostics,
     Exit,
 }
 
@@ -248,6 +249,8 @@ pub fn build_main() -> Built {
         let id = b.command(Action::ToggleAutostart);
         let state = if autostart_on { MFS_CHECKED } else { MENU_ITEM_STATE(0) };
         b.item(root, "Start with Windows", id, None, None, state);
+        let id = b.command(Action::Diagnostics);
+        b.item(root, "Diagnostics…", id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::OpenDataFolder);
         b.item(root, "Open data folder", id, None, None, MENU_ITEM_STATE(0));
         b.separator(root);

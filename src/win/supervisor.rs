@@ -51,6 +51,9 @@ pub fn run(args: &Args) -> i32 {
                 Some(Command::Bar) => {
                     cmd.arg("--bar");
                 }
+                Some(Command::Diagnostics) => {
+                    cmd.arg("--diagnostics");
+                }
                 _ => {}
             }
         } else if !std::mem::take(&mut fresh) {

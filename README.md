@@ -580,6 +580,7 @@ handy for binding to other tools such as AutoHotkey or a mouse utility.
 | `--menu` | Show the category menu at the mouse pointer |
 | `--bar` | Open the bar's *All* list with the keyboard in it (like the bar hotkey) |
 | `--manage` | Open the Manage window (`--settings` does the same) |
+| `--diagnostics` | Show what FlexTaskbar is costing right now (see [Performance](#performance)) |
 | `--exit` | Close FlexTaskbar cleanly (it is not restarted) |
 | `--reset` | Start with default settings. The current `config.json` is kept as `config.json.reset-<time>`. Only works when FlexTaskbar isn't already running. |
 | `--no-supervisor` | Run without crash/hang recovery (for debugging) |
@@ -644,14 +645,40 @@ The launcher is built to cost almost nothing while idle:
 - The Manage window is fully destroyed when you close it.
 - The release build uses LTO and is stripped.
 
-Memory and CPU use have **not yet been measured on Windows**, so no numbers are
-claimed here.
+### Measuring it yourself
+
+*Diagnostics…* in the tray (and right-click) menu, or
+`FlexTaskbar.exe --diagnostics`, shows what the running launcher is costing:
+memory (working set, private bytes and the peak), CPU time in all and on
+average since it started, GDI and USER objects, handles, and how many times
+the bar and the flyouts have been drawn, with the average and longest time.
+Ctrl+C copies the message, and the same text is saved to
+`data\diagnostics.txt`. Timing a redraw is two clock reads; nothing is
+collected unless something is drawn, and nothing leaves the PC. The
+supervisor process is separate and small, and isn't counted.
+
+### Measured numbers
+
+These were **measured under Wine 9 on Linux, not on Windows**, with 16 apps
+in 7 categories, so take them as a rough guide; Windows' own numbers will
+differ (Wine doesn't report private bytes, GDI/USER objects or handles, so
+those lines are left out there):
+
+| | Wine 9 (1280×800, 96 DPI) |
+|---|---|
+| Memory (working set) after start | 33.5 MB |
+| Memory after opening flyouts 16 times | 33.9 MB (peak 39.1 MB) |
+| CPU while idle | 20 ms over 64 s (about 0.03 % of one core) |
+| Drawing the bar | 4.0 ms on average, 10.3 ms at most (836 draws, mostly hover animation frames) |
+| Drawing a flyout | 7.9 ms on average, 25.2 ms at most (37 draws; animation frames aren't redrawn) |
+
+Run *Diagnostics…* on your PC for real Windows numbers.
 
 ## What has been tested
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 96 unit tests cover:
+The 98 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -694,6 +721,8 @@ The 96 unit tests cover:
 - flyout shadows: each style's look, the room each needs around the flyout
   (following its offset and the DPI), and the blur spreading softly while
   keeping the shadow's amount, symmetric, and safe on empty or short input
+- the diagnostics report's figures: the running statistics (count,
+  average, longest) and how times, sizes, durations and CPU use are written
 - flyout opening animations: every style ending on the finished flyout,
   Scale growing out of its button, Drawer showing the far end first, Genie
   narrowing towards the button with no gaps between its slices, Fade and
@@ -802,6 +831,11 @@ The 96 unit tests cover:
   - a hand-edited config pointing the *All* picture at `..\victim.txt`:
     the picture ignored (the word shown), and *Use text* leaving the file
     alone
+  - *Diagnostics…* via `--diagnostics` while running: the report shown and
+    saved to `data\diagnostics.txt`, its draw counts growing after
+    flyouts were opened, the lines Wine can't fill (private bytes,
+    GDI/USER objects, handles) left out, and idle CPU staying flat over a
+    minute
   - the settings windows in the dark theme (cards, labels, check boxes,
     sliders, lists, text boxes and drop-downs), and switching to Light and
     back with both the Manage and Appearance windows open. Wine ignores
@@ -895,6 +929,7 @@ src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
 src/backup.rs        settings backups: writing and checking the zip   (tested)
 src/looks.rs         saved looks: names, their pictures                (tested)
 src/folders.rs       pinned folders: what their flyouts list           (tested)
+src/perf.rs          Diagnostics: drawing-time statistics, wording     (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)
@@ -905,6 +940,7 @@ src/allview.rs       sorting and filtering the All list               (tested)
 src/win/watch.rs     automatic rescan when apps are installed
 src/win/backupwin.rs Back up settings… and Restore…
 src/win/prompt.rs    asking for one line of text (a look's name)
+src/win/diagnostics.rs  Diagnostics…: memory, CPU, objects, draw times
 src/win/running.rs   following open windows (shell notifications), switching
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts

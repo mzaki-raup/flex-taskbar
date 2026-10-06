@@ -950,6 +950,7 @@ fn anim_pointer(hwnd: HWND, pos: Option<i32>, entered: Option<usize>) {
 // ---------------------------------------------------------------- drawing
 
 fn render() {
+    let started = std::time::Instant::now();
     let drawn = STRIP.with(|cell| {
         let b = cell.borrow();
         let s = b.as_ref()?;
@@ -1128,6 +1129,7 @@ fn render() {
     if let Some(pix) = drawn {
         with(|s| s.frame = Some(pix));
         present_frame();
+        super::diagnostics::bar_drawn(started);
     }
 }
 

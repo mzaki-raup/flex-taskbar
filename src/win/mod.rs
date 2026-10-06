@@ -8,6 +8,7 @@ mod autostart;
 mod backupwin;
 mod canvas;
 mod catalog;
+mod diagnostics;
 mod flyout;
 mod icons;
 mod indicator;
@@ -49,6 +50,8 @@ pub enum Command {
     Exit = 3,
     /// Open the bar's *All* list with the keyboard in it.
     Bar = 4,
+    /// Show the diagnostics report.
+    Diagnostics = 5,
 }
 
 impl Command {
@@ -59,6 +62,7 @@ impl Command {
             2 => Some(Command::Menu),
             3 => Some(Command::Exit),
             4 => Some(Command::Bar),
+            5 => Some(Command::Diagnostics),
             _ => None,
         }
     }
@@ -85,6 +89,7 @@ fn parse_args() -> Args {
             "--menu" => a.command = Some(Command::Menu),
             "--exit" => a.command = Some(Command::Exit),
             "--bar" => a.command = Some(Command::Bar),
+            "--diagnostics" => a.command = Some(Command::Diagnostics),
             _ => {}
         }
     }

@@ -146,6 +146,7 @@ pub fn restart() {
 
 pub fn run(args: &Args) -> i32 {
     SUPERVISED.with(|s| s.set(args.worker));
+    super::diagnostics::start();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         let icc = INITCOMMONCONTROLSEX {
@@ -431,6 +432,7 @@ pub fn run_command(cmd: Command) {
         Command::Search => searchwin::show(),
         Command::Menu => show_menu(),
         Command::Bar => super::flyout::keyboard_open(),
+        Command::Diagnostics => super::diagnostics::show(),
         Command::Exit => exit(),
     }
 }
@@ -466,6 +468,7 @@ pub fn perform(action: menu::Action) {
         menu::Action::ToggleAutostart => toggle_autostart(None),
         menu::Action::ToggleStrip => set_strip(None),
         menu::Action::OpenDataFolder => open_data_folder(),
+        menu::Action::Diagnostics => super::diagnostics::show(),
         menu::Action::Exit => exit(),
     }
 }

@@ -872,6 +872,7 @@ fn rebuild(idx: usize) {
 // ---------------------------------------------------------------- drawing
 
 fn render(idx: usize) {
+    let started = std::time::Instant::now();
     let drawn = FLYOUT.with(|cell| {
         let b = cell.borrow();
         let f = b.as_ref()?;
@@ -1025,6 +1026,7 @@ fn render(idx: usize) {
             }
         });
         present(idx);
+        super::diagnostics::flyout_drawn(started);
     }
 }
 
