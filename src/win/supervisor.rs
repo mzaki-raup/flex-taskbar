@@ -28,6 +28,8 @@ const HUNG_POLLS: u32 = 8;
 pub fn run(args: &Args) -> i32 {
     let mut crashes: VecDeque<Instant> = VecDeque::new();
     let mut first = true;
+    // The next start follows a requested restart, not a crash.
+    let mut fresh = false;
 
     loop {
         let mut cmd = std::process::Command::new(&paths::get().exe);
@@ -51,7 +53,7 @@ pub fn run(args: &Args) -> i32 {
                 }
                 _ => {}
             }
-        } else {
+        } else if !std::mem::take(&mut fresh) {
             cmd.arg("--restarted");
         }
         first = false;
@@ -77,6 +79,13 @@ pub fn run(args: &Args) -> i32 {
 
         if code == super::EXIT_CLEAN as u32 {
             return 0; // user chose Exit
+        }
+        if code == super::EXIT_RESTART as u32 {
+            // Asked to start again (a backup was restored): not a crash.
+            log("worker asked to be restarted");
+            first = false;
+            fresh = true;
+            continue;
         }
         if unsafe { GetSystemMetrics(SM_SHUTTINGDOWN) } != 0 {
             return 0; // logoff/shutdown killed it; don't fight the OS

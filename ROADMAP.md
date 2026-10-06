@@ -9,15 +9,19 @@ and described in the README.
 
 ## Recommended order
 
-1. **Dark mode for the settings windows** (🟢). Quick, visible, and builds
-   on the card painter that already exists.
-2. **Keyboard control of the flyouts** (🟡). Makes the launcher usable
-   without the mouse; all within FlexTaskbar's own windows.
-3. **Running-app indicators** (🟡). The biggest gap compared with a real
-   dock.
-4. **Auto-hide bar** (🟡). Builds on the animation code already there.
-5. **Settings backup and restore** (🟢). Small, and makes everything
-   after it safer to try.
+Done: dark settings windows, keyboard control of the flyouts, running-app
+indicators, auto-hide, and settings backup and restore.
+
+Suggested next:
+
+1. **Closing animations** (🟢). Rounds off the opening animations already
+   there.
+2. **A hotkey per category** (🟢). Builds on the keyboard control.
+3. **Theme presets** (🟢). Builds on the backup format for import and
+   export.
+4. **Pin folders and files to the bar** (🟡). The most-asked-for dock
+   feature still missing.
+5. **Measured performance** (🟡). Real numbers for the README.
 
 ## Everyday use
 
@@ -83,7 +87,7 @@ and described in the README.
 
 ## Reliability and upkeep
 
-- [ ] **Settings backup and restore** · 🟢
+- [x] **Settings backup and restore** · 🟢
   Export everything (`config.json` and the `icons` folder) as one zip, and
   import it on another PC, after checking the names in it the same way
   pictures are checked today.

@@ -5,6 +5,7 @@ mod appdialog;
 mod appearancewin;
 mod arrangewin;
 mod autostart;
+mod backupwin;
 mod canvas;
 mod catalog;
 mod flyout;
@@ -33,6 +34,9 @@ pub const MAIN_CLASS: &str = "FlexTaskbar.Main";
 /// Exit code of a deliberate, clean exit. Anything else — including 0, which a
 /// killed process can also report — tells the supervisor to restart the app.
 pub const EXIT_CLEAN: i32 = 0x464C_4558; // "FLEX"
+/// Exit code asking the supervisor to start the app again straight away
+/// (after restoring a backup), without counting it as a crash.
+pub const EXIT_RESTART: i32 = 0x5253_5452; // "RSTR"
 
 /// What a second launch (or a CLI flag) asks the running instance to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

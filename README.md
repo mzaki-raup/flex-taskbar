@@ -482,8 +482,23 @@ data\
   crash.log             restarts and problems, newest last
 ```
 
-To move or back up your setup, copy the folder. To remove FlexTaskbar, turn off
-*Start with Windows* (if you turned it on) and then delete the folder.
+To move or back up your setup, copy the folder, or use **Back up settings…**
+on the Manage window's *Apps and settings* card. It saves one `.zip` with
+`config.json` and the pictures in `icons\` (named like
+`FlexTaskbar backup 2026-10-06.zip`). **Restore…** on any PC brings a backup
+back:
+- the whole file is checked first: every name (only `config.json` and plain
+  file names under `icons/`, nothing that could reach outside the data
+  folder), every size (8 MB a picture, 256 MB in all) and every checksum,
+  and the settings must load, so a damaged or hand-made file changes
+  nothing;
+- the current settings are kept as `config.json.before-restore-<time>` in
+  the data folder;
+- FlexTaskbar then starts again by itself with the restored settings (the
+  supervisor treats it as a requested restart, not a crash).
+
+To remove FlexTaskbar, turn off *Start with Windows* (if you turned it on)
+and then delete the folder.
 
 If the exe's folder isn't writable (for example under `C:\Program Files`),
 FlexTaskbar uses `%LOCALAPPDATA%\FlexTaskbar\` instead. The Manage window's
@@ -592,7 +607,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 84 unit tests cover:
+The 89 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -607,6 +622,11 @@ The 84 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- settings backups: the zip round trip (including an empty file), the CRC
+  check value, only `config.json` and plain picture names accepted (no `..`,
+  sub-folders, drives or other files), damaged, cut-short and non-zip files
+  refused, a backup without settings or with them twice refused, and the
+  size limit
 - auto-hide: the slide and fade stepping towards their target and never
   past it, where the bar goes on each edge (leaving the 2-pixel line) and
   how opaque it is part-way, and Fade waiting off screen at full opacity so
@@ -672,6 +692,12 @@ The 84 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - settings backups: *Back up settings…* writing a zip that Python's
+    `zipfile` reads and checks without errors (settings and 17 pictures),
+    switching to the Light theme, *Restore…* bringing Dark back after the
+    confirmation, keeping `config.json.before-restore-…`, and the app
+    starting again by itself; a zip with `icons/../../evil.txt` refused
+    with the settings unchanged and nothing written outside the data folder
   - auto-hide: Slide and Fade hiding after the delay, coming back when the
     pointer touches the 2-pixel line at the bottom edge, `--bar` bringing
     the hidden bar back with its *All* list and the bar hiding again after
@@ -803,6 +829,7 @@ src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
+src/backup.rs        settings backups: writing and checking the zip   (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)
@@ -811,6 +838,7 @@ src/pkgsources.rs    package managers' folders and console programs   (tested)
 src/running.rs       which windows count, matching them to apps, clicks (tested)
 src/allview.rs       sorting and filtering the All list               (tested)
 src/win/watch.rs     automatic rescan when apps are installed
+src/win/backupwin.rs Back up settings… and Restore…
 src/win/running.rs   following open windows (shell notifications), switching
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
@@ -859,6 +887,10 @@ analytics or cloud services.
   their windows are listed and their processes opened for reading their
   program path (the limited "query information" right). A window is
   brought to the front or minimised only when you click its app.
+- **Backups.** Restoring checks every name, size and checksum in the zip
+  and that its settings load before anything is replaced, and writes only
+  `config.json` and plain file names in `icons\`; the current settings are
+  kept. See *Portable data*.
 - **Settings** are plain JSON in the data folder, saved atomically with a
   backup; a corrupt file is restored from the backup rather than trusted.
 - Nothing runs elevated unless you tick *Run as administrator* on a custom

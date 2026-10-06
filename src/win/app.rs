@@ -120,7 +120,25 @@ pub fn app_icon(size: i32) -> HICON {
     }
 }
 
+thread_local! {
+    /// Started by the supervisor (which can start it again).
+    static SUPERVISED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Starts FlexTaskbar again without saving (a backup's settings were just
+/// written to disk). Without a supervisor it just exits after saying so.
+pub fn restart() {
+    if !SUPERVISED.with(|s| s.get()) {
+        ui::info(None, "The backup was restored. Start FlexTaskbar again to use it.");
+        std::process::exit(super::EXIT_CLEAN);
+    }
+    strip::destroy();
+    remove_tray_icon(main_hwnd());
+    std::process::exit(super::EXIT_RESTART);
+}
+
 pub fn run(args: &Args) -> i32 {
+    SUPERVISED.with(|s| s.set(args.worker));
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         let icc = INITCOMMONCONTROLSEX {

@@ -91,6 +91,8 @@ const PACKAGE_APPS: u16 = 72;
 const HK_BAR: u16 = 73;
 const LBL_HK_BAR: u16 = 74;
 const SWITCH_RUNNING: u16 = 75;
+const BACKUP: u16 = 76;
+const RESTORE: u16 = 77;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -341,6 +343,8 @@ fn create() {
         for (text, id) in [
             ("Rescan apps", RESCAN),
             ("Import old settings…", IMPORT),
+            ("Back up settings…", BACKUP),
+            ("Restore…", RESTORE),
             ("Open data folder", OPEN_DATA),
             ("Arrange the bar…", ARRANGE),
             ("Appearance…", APPEARANCE),
@@ -469,6 +473,7 @@ fn layout() {
     place(AUTO_RESCAN, ix[1], line(0), inner_w, bh);
     place(PACKAGE_APPS, ix[1], line(1), inner_w, bh);
     row(&[RESCAN, IMPORT], ix[1], line(2), inner_w);
+    row(&[BACKUP, RESTORE], ix[1], line(3), inner_w);
     let lw = s(70);
     place(LBL_HK_SEARCH, ix[2], line(0) + s(5), lw, lh);
     place(HK_SEARCH, ix[2] + lw, line(0) + s(2), inner_w - lw, s(24));
@@ -496,7 +501,7 @@ fn layout() {
                 card(1, top, pane_bottom, "In this category"),
                 card(2, top, pane_bottom, "All apps"),
                 card(0, options_top, footer - pm.margin, "Startup and bar"),
-                card(1, options_top, footer - pm.margin, "App list"),
+                card(1, options_top, footer - pm.margin, "Apps and settings"),
                 card(2, options_top, footer - pm.margin, "Hotkeys"),
             ],
             footer: Some(footer),
@@ -1451,6 +1456,8 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 ALL_ICON => app_icon(hwnd, ALL, ALL_ICON),
                 ALL_PIN => pin_selected(hwnd),
                 STRIP_SHOW => app::set_strip(Some(is_checked(STRIP_SHOW))),
+                BACKUP => super::backupwin::back_up(hwnd),
+                RESTORE => super::backupwin::restore(hwnd),
                 SWITCH_RUNNING => {
                     let on = is_checked(SWITCH_RUNNING);
                     app::with(|s| s.cfg.settings.switch_to_running = on);
