@@ -55,6 +55,13 @@ const NIN_KEYSELECT: u32 = NIN_SELECT | 0x1;
 const HOTKEY_SEARCH: i32 = 1;
 const HOTKEY_MENU: i32 = 2;
 const HOTKEY_BAR: i32 = 3;
+/// Category hotkeys are numbered from here.
+const HOTKEY_CATEGORY: i32 = 100;
+
+thread_local! {
+    /// The category hotkeys registered now: (hotkey id, category id).
+    static CATEGORY_HOTKEYS: std::cell::RefCell<Vec<(i32, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 
 pub const FOLDER_ICON: &str = "folder";
 
@@ -313,6 +320,12 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 HOTKEY_SEARCH => searchwin::toggle(),
                 HOTKEY_MENU => show_menu(),
                 HOTKEY_BAR => super::flyout::keyboard_open(),
+                n if n >= HOTKEY_CATEGORY => {
+                    let cat = CATEGORY_HOTKEYS.with(|c| c.borrow().iter().find(|(h, _)| *h == n).map(|(_, c)| *c));
+                    if let Some(cat) = cat {
+                        open_category_by_hotkey(cat);
+                    }
+                }
                 _ => {}
             }
             LRESULT(0)
@@ -774,7 +787,45 @@ pub fn register_hotkeys() -> Vec<String> {
             problems.push(format!("The {what} hotkey {} is already used by another program.", hk.describe()));
         }
     }
+    // Each category with a hotkey, at any depth.
+    for (hid, _) in CATEGORY_HOTKEYS.with(|c| std::mem::take(&mut *c.borrow_mut())) {
+        unsafe {
+            let _ = UnregisterHotKey(Some(main), hid);
+        }
+    }
+    let mut wanted: Vec<(u64, String, Hotkey)> = Vec::new();
+    with(|s| {
+        crate::tree::walk(&s.cfg.categories, &mut |c, _| {
+            if let Some(hk) = c.hotkey {
+                wanted.push((c.id, c.name.clone(), hk));
+            }
+        })
+    });
+    for (i, (cat, name, hk)) in wanted.into_iter().enumerate() {
+        let hid = HOTKEY_CATEGORY + i as i32;
+        if register(main, hid, hk) {
+            CATEGORY_HOTKEYS.with(|c| c.borrow_mut().push((hid, cat)));
+        } else {
+            problems.push(format!("The hotkey {} for “{name}” is already used by another program.", hk.describe()));
+        }
+    }
     problems
+}
+
+/// A category's hotkey: its flyout when it has a button on the bar, or
+/// else its menu at the pointer.
+fn open_category_by_hotkey(id: u64) {
+    if let Some((hit, _)) = strip::flyout_buttons().into_iter().find(|(_, c)| *c == Some(id)) {
+        super::flyout::keyboard_open_category(hit, id);
+        return;
+    }
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    if let Some(action) = menu::track_category(main_hwnd(), pt, id) {
+        perform(action);
+    }
 }
 
 fn register(hwnd: HWND, id: i32, hk: Hotkey) -> bool {

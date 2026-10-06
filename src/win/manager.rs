@@ -93,6 +93,9 @@ const LBL_HK_BAR: u16 = 74;
 const SWITCH_RUNNING: u16 = 75;
 const BACKUP: u16 = 76;
 const RESTORE: u16 = 77;
+const LBL_CAT_HOTKEY: u16 = 78;
+const CAT_HOTKEY: u16 = 79;
+const CAT_HOTKEY_SET: u16 = 80;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -325,6 +328,12 @@ fn create() {
         controls.insert(LBL_HK_SEARCH, label("Search", LBL_HK_SEARCH));
         controls.insert(LBL_HK_MENU, label("Menu", LBL_HK_MENU));
         controls.insert(LBL_HK_BAR, label("Bar", LBL_HK_BAR));
+        controls.insert(LBL_CAT_HOTKEY, label("Hotkey", LBL_CAT_HOTKEY));
+        controls.insert(
+            CAT_HOTKEY,
+            ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), CAT_HOTKEY),
+        );
+        controls.insert(CAT_HOTKEY_SET, button("Set", CAT_HOTKEY_SET));
         controls.insert(
             HK_BAR,
             ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), HK_BAR),
@@ -443,8 +452,14 @@ fn layout() {
 
     // Categories.
     place(LBL_CATS, ix[0], sub_y, inner_w, s(16));
-    let tree_bottom = last_row - bh - 2 * gap;
+    // Under the tree: the selected category's hotkey, then its buttons.
+    let tree_bottom = last_row - 2 * bh - 3 * gap;
     place(TREE, ix[0], content, inner_w, tree_bottom - content);
+    let hk_y = tree_bottom + gap;
+    place(LBL_CAT_HOTKEY, ix[0], hk_y + s(5), s(56), lh);
+    place(CAT_HOTKEY, ix[0] + s(56), hk_y + s(2), inner_w - s(56) - s(80) - gap, s(24));
+    place(CAT_HOTKEY_SET, ix[0] + inner_w - s(80), hk_y, s(80), bh);
+    let tree_bottom = hk_y + bh;
     row(&[CAT_NEW, CAT_SUB, CAT_RENAME, CAT_DELETE, CAT_ICON], ix[0], tree_bottom + gap, inner_w);
     row(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN], ix[0], last_row, inner_w);
 
@@ -1182,6 +1197,67 @@ pub fn scan_state_changed() {
 
 // ---------------------------------------------------------------- settings
 
+/// Puts the selected category's hotkey in its box.
+fn show_category_hotkey() {
+    let hk = selected_category().and_then(|id| app::with(|s| tree::find(&s.cfg.categories, id).and_then(|c| c.hotkey)));
+    unsafe {
+        SendMessageW(ctl(CAT_HOTKEY), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(hk))), Some(LPARAM(0)));
+    }
+}
+
+/// *Set*: gives the selected category the hotkey in the box (an empty box
+/// takes it away).
+fn set_category_hotkey(owner: HWND) {
+    let Some(id) = selected_category() else {
+        ui::info(Some(owner), "Select a category first.");
+        return;
+    };
+    let hk = hotkey_from_control(CAT_HOTKEY);
+    if let Some(hk) = hk {
+        if let Some(problem) = hotkey_problem(hk) {
+            ui::warn(Some(owner), &problem);
+            return;
+        }
+        let taken = app::with(|s| {
+            let st = &s.cfg.settings;
+            let mut used = [st.search_hotkey, st.menu_hotkey, st.bar_hotkey].contains(&Some(hk));
+            tree::walk(&s.cfg.categories, &mut |c, _| used |= c.id != id && c.hotkey == Some(hk));
+            used
+        });
+        if taken {
+            ui::warn(Some(owner), &format!("{} is already one of FlexTaskbar's hotkeys.", hk.describe()));
+            return;
+        }
+    }
+    app::with(|s| {
+        if let Some(c) = tree::find_mut(&mut s.cfg.categories, id) {
+            c.hotkey = hk;
+        }
+    });
+    app::save();
+    let problems = app::register_hotkeys();
+    if problems.is_empty() {
+        let text = match hk {
+            Some(hk) => format!("{} now opens this category.", hk.describe()),
+            None => "This category has no hotkey now.".to_string(),
+        };
+        ui::set_text(ctl(STATUS), &text);
+    } else {
+        ui::warn(Some(owner), &problems.join("\n"));
+    }
+}
+
+/// Why `hk` can't be a hotkey, if it can't.
+fn hotkey_problem(hk: Hotkey) -> Option<String> {
+    let is_f_key = (0x70..=0x87).contains(&hk.key);
+    (hk.modifiers == 0 && !is_f_key).then(|| {
+        format!(
+            "{} has no Ctrl/Alt/Shift, so it would steal that key from every program. Add a modifier.",
+            hk.describe()
+        )
+    })
+}
+
 fn hotkey_to_control(hk: Option<Hotkey>) -> usize {
     let Some(hk) = hk else { return 0 };
     let mut flags = 0;
@@ -1273,17 +1349,24 @@ fn apply_hotkeys(owner: HWND) {
     let menu = hotkey_from_control(HK_MENU);
     let bar = hotkey_from_control(HK_BAR);
     for hk in [search, menu, bar].into_iter().flatten() {
-        let is_f_key = (0x70..=0x87).contains(&hk.key);
-        if hk.modifiers == 0 && !is_f_key {
-            ui::warn(
-                Some(owner),
-                &format!(
-                    "{} has no Ctrl/Alt/Shift, so it would steal that key from every program. Add a modifier.",
-                    hk.describe()
-                ),
-            );
+        if let Some(problem) = hotkey_problem(hk) {
+            ui::warn(Some(owner), &problem);
             return;
         }
+    }
+    let set: Vec<_> = [search, menu, bar].into_iter().flatten().collect();
+    let clash = app::with(|s| {
+        let mut clash = None;
+        tree::walk(&s.cfg.categories, &mut |c, _| {
+            if c.hotkey.is_some_and(|h| set.contains(&h)) {
+                clash = Some(c.name.clone());
+            }
+        });
+        clash
+    });
+    if let Some(name) = clash {
+        ui::warn(Some(owner), &format!("One of these hotkeys is already the hotkey of “{name}”."));
+        return;
     }
     let set: Vec<_> = [search, menu, bar].into_iter().flatten().collect();
     if (1..set.len()).any(|i| set[..i].contains(&set[i])) {
@@ -1456,6 +1539,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 ALL_ICON => app_icon(hwnd, ALL, ALL_ICON),
                 ALL_PIN => pin_selected(hwnd),
                 STRIP_SHOW => app::set_strip(Some(is_checked(STRIP_SHOW))),
+                CAT_HOTKEY_SET => set_category_hotkey(hwnd),
                 BACKUP => super::backupwin::back_up(hwnd),
                 RESTORE => super::backupwin::restore(hwnd),
                 SWITCH_RUNNING => {
@@ -1558,6 +1642,7 @@ unsafe fn on_notify(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
     match (id, hdr.code) {
         (TREE, TVN_SELCHANGEDW) => {
             if !SUPPRESS.with(|s| s.get()) {
+                show_category_hotkey();
                 refresh_category_apps();
             }
             LRESULT(0)

@@ -64,7 +64,7 @@ Suggested next:
 - [ ] **Bar profiles** · 🟡
   Several bars ("Work", "Gaming") with their own pinned apps and order,
   switched from the tray menu or a hotkey.
-- [ ] **A hotkey per category** · 🟢
+- [x] **A hotkey per category** · 🟢
   Opens that category's flyout at the pointer, like the menu hotkey.
 
 ## Look
@@ -96,8 +96,7 @@ Suggested next:
   a small diagnostics page (memory, redraw times, timers running) and
   publish real numbers.
 - [ ] **Checks on real Windows** · 🔴
-  What Wine couldn't verify (see the README): high-DPI scaling, global
-  hotkeys, Store and web-app icons, dragging files in, the bar beside the
+  What Wine couldn't verify (see the README): high-DPI scaling, Store and web-app icons, dragging files in, the bar beside the
   real taskbar, *Start with Windows*. A UI-automation smoke test in CI
   would keep them working.
 - [ ] **Accessibility** · 🟡

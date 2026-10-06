@@ -166,6 +166,8 @@ pub struct Category {
     /// App ids, in display order.
     pub apps: Vec<String>,
     pub children: Vec<Category>,
+    /// Opens this category from anywhere.
+    pub hotkey: Option<Hotkey>,
 }
 
 /// An app the user added by hand (an exe, a shortcut, a URL, a `shell:` target,

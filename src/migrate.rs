@@ -129,7 +129,7 @@ pub fn import(categories_json: &str, apps_json: &str, cfg: &mut Config) -> Resul
             }
             summary.categories += 1;
             let children = build(Some(&oc.id), old_cats, new_ids, apps_by_cat, cfg, summary, depth + 1);
-            out.push(Category { id, name: oc.name.clone(), icon: None, apps, children });
+            out.push(Category { id, name: oc.name.clone(), icon: None, apps, children, hotkey: None });
         }
         out
     }

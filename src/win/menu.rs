@@ -257,6 +257,23 @@ pub fn build_main() -> Built {
     })
 }
 
+/// Shows one category's menu (its subcategories and apps) at `pt`.
+pub fn track_category(owner: HWND, pt: POINT, id: u64) -> Option<Action> {
+    let built = app::with(|s| {
+        let c = crate::tree::find(&s.cfg.categories, id)?;
+        let mut b = Builder { actions: Vec::new(), strings: Vec::new() };
+        let menu = b.category(s, c);
+        Some(Built { menu, actions: b.actions })
+    })?;
+    let chosen = unsafe {
+        let _ = SetForegroundWindow(owner);
+        let id = TrackPopupMenuEx(built.menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, pt.x, pt.y, owner, None).0 as usize;
+        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
+        id
+    };
+    built.finish(chosen)
+}
+
 /// Shows the main menu at `pt` and returns the chosen action.
 pub fn track(owner: HWND, pt: POINT) -> Option<Action> {
     let built = build_main();

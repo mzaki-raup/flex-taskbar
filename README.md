@@ -351,6 +351,7 @@ brings back the original look.
 | **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
 | **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
 | **Ctrl+Alt+B** (changeable) | The bar's *All* list, ready for the keyboard (see below) |
+| **A category's own hotkey** (none until you set one) | That category's flyout, ready for the keyboard; for a subcategory (no button on the bar), its menu at the pointer |
 
 Search matches the app name, its file name, and the names of the categories it
 is filed under. So typing "dev" finds every app inside "Dev › Editors" too.
@@ -575,6 +576,13 @@ Everything about its look is in the Appearance window and is stored under
 The hotkeys are set on the Manage window's *Hotkeys* card. To turn a hotkey
 off, clear its box with Backspace and click *Apply hotkeys*.
 
+Any category can have its own hotkey too: select it on the *Categories*
+card, press the keys in the *Hotkey* box under the tree and click *Set*
+(an empty box takes it away). A root category's hotkey opens its flyout
+from the bar with the keyboard in it; a subcategory's opens its menu at
+the pointer. Hotkeys need Ctrl, Alt or Shift (or an F key), and can't be
+one FlexTaskbar already uses.
+
 ## Performance
 
 The launcher is built to cost almost nothing while idle:
@@ -729,6 +737,10 @@ The 89 unit tests cover:
     focus by itself, so the tests set it with `xdotool`; Windows gives
     them the focus when they take the foreground.
   - the *Bar* hotkey row on the Manage window's *Hotkeys* card
+  - global hotkeys, with keys sent to the X server: Ctrl+Alt+B opening
+    *All*; a category hotkey set on the *Categories* card (saved, Ctrl+Alt+1
+    opening *Development* with the keyboard focus on its first tile), and a
+    subcategory's (Ctrl+Alt+2 opening *Tools* as a menu at the pointer)
   - the flyout shadows, with a compositor: all six styles on category
     flyouts two levels deep and on the *All* list, choosing one in the
     Appearance window (applied and saved), the shadow stopping at the bar's
@@ -787,7 +799,6 @@ The 89 unit tests cover:
   Wine their labels and search were checked with those apps' real parsing
   names, seeded into the app cache)
 - shell app icons
-- the global hotkeys
 - *Windows default* theme following a live light/dark switch
 - the dark style of push buttons and list selections in the settings
   windows

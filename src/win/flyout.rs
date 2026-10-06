@@ -231,6 +231,19 @@ pub fn keyboard_open() {
     with(|f| f.keys_used = true);
 }
 
+/// A category's hotkey: opens its flyout from its bar button with the
+/// keyboard in it (or closes it if that is what is open).
+pub fn keyboard_open_category(hit: Hit, id: u64) {
+    let already = with(|f| f.keyboard && f.levels.first().is_some_and(|l| l.view == View::Category(id)));
+    if already == Some(true) {
+        close();
+        return;
+    }
+    show(View::Category(id), hit);
+    take_keyboard();
+    with(|f| f.keys_used = true);
+}
+
 /// Gives the open flyouts the keyboard, focusing the first app or tile.
 fn take_keyboard() {
     let Some(b) = base() else { return };
