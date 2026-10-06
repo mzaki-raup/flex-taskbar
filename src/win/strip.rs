@@ -54,9 +54,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SendMessageW,
     SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
     TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WINDOW_STYLE, WM_APP,
-    WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
-    WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_GETOBJECT, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -145,10 +145,20 @@ fn with<R>(f: impl FnOnce(&mut Strip) -> R) -> Option<R> {
 }
 
 /// The appearance settings and the colours they resolve to right now.
+/// The look to draw with: the settings, adapted to Windows' high-contrast
+/// theme and *Animation effects* setting.
 pub fn current_look() -> (Appearance, Colors) {
-    let look = app::with(|s| s.cfg.settings.appearance.clamped());
-    let colors = look.colors(theme::is_dark_cached());
-    (look, colors)
+    let mut look = app::with(|s| s.cfg.settings.appearance.clamped());
+    if !theme::animations_on() {
+        look = look.without_motion();
+    }
+    match theme::high_contrast() {
+        Some(sc) => (look.for_high_contrast(), Colors::high_contrast(&sc)),
+        None => {
+            let colors = look.colors(theme::is_dark_cached());
+            (look, colors)
+        }
+    }
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -702,6 +712,84 @@ pub fn pointer_over(hit: Hit) -> bool {
         let _ = GetCursorPos(&mut pt);
     }
     pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom
+}
+
+// ---------------------------------------------------------------- screen readers
+
+/// The bar's buttons in the order screen readers walk them.
+fn accessible_hits(s: &Strip) -> Vec<Hit> {
+    let mut v = vec![Hit::Left(LEFT_ALL)];
+    v.extend((0..s.layout.items.len()).map(Hit::Item));
+    v.extend([Hit::Right(RIGHT_LINK), Hit::Right(RIGHT_SETTINGS)]);
+    v
+}
+
+/// The bar as screen readers see it: a toolbar of buttons.
+pub fn accessible() -> super::access::Tree {
+    use windows::Win32::UI::Accessibility::{
+        ROLE_SYSTEM_BUTTONMENU, ROLE_SYSTEM_PUSHBUTTON, ROLE_SYSTEM_TOOLBAR, STATE_SYSTEM_HASPOPUP,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{STATE_SYSTEM_EXPANDED, STATE_SYSTEM_HOTTRACKED};
+    let children = STRIP
+        .with(|cell| {
+            // Asked while the bar is being changed: nothing to say this moment.
+            let b = cell.try_borrow().ok()?;
+            let s = b.as_ref()?;
+            let children = accessible_hits(s)
+                .into_iter()
+                .filter_map(|hit| {
+                    let rc = slot_rect(s, slot_of(s, hit)?);
+                    let (name, popup, description) = match hit {
+                        Hit::Left(_) => ("All apps".to_string(), true, String::new()),
+                        Hit::Item(i) => match s.items.get(i)? {
+                            Item::Category(_) => (s.names[i].clone(), true, "Category".to_string()),
+                            Item::App(id) => {
+                                let folder = app::folder_of(id).is_some();
+                                let running = super::running::is_running(id);
+                                let what = if folder {
+                                    "Folder"
+                                } else if running {
+                                    "Running"
+                                } else {
+                                    ""
+                                };
+                                (s.names[i].clone(), folder, what.to_string())
+                            }
+                        },
+                        Hit::Right(RIGHT_LINK) => {
+                            ("Link: add an app, file, website or web app".into(), false, String::new())
+                        }
+                        Hit::Right(_) => ("Settings".into(), false, String::new()),
+                    };
+                    let mut state = 0;
+                    if popup {
+                        state |= STATE_SYSTEM_HASPOPUP;
+                    }
+                    if s.open == Some(hit) {
+                        state |= STATE_SYSTEM_EXPANDED;
+                    }
+                    if s.hover == Some(hit) {
+                        state |= STATE_SYSTEM_HOTTRACKED;
+                    }
+                    Some(super::access::Element {
+                        name,
+                        role: if popup { ROLE_SYSTEM_BUTTONMENU } else { ROLE_SYSTEM_PUSHBUTTON },
+                        state,
+                        rect: RECT {
+                            left: s.win.left + rc.left,
+                            top: s.win.top + rc.top,
+                            right: s.win.left + rc.right,
+                            bottom: s.win.top + rc.bottom,
+                        },
+                        action: "Open",
+                        description,
+                    })
+                })
+                .collect();
+            Some(children)
+        })
+        .unwrap_or_default();
+    super::access::Tree { name: "FlexTaskbar".into(), role: ROLE_SYSTEM_TOOLBAR, children }
 }
 
 // ---------------------------------------------------------------- docking
@@ -1464,6 +1552,15 @@ fn mouse_xy(lparam: LPARAM) -> (i32, i32) {
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_GETOBJECT if let Some(r) = super::access::get_object(hwnd, super::access::Source::Bar, wparam, lparam) => r,
+        super::access::WM_APP_ACC_PRESS => {
+            // A screen reader pressed a button: as if clicked.
+            let hit = STRIP.with(|s| s.borrow().as_ref().and_then(|s| accessible_hits(s).get(wparam.0).copied()));
+            if let Some(hit) = hit {
+                click(hit);
+            }
+            LRESULT(0)
+        }
         WM_LBUTTONDOWN => {
             let (x, y) = mouse_xy(lparam);
             match hit_at(x, y) {

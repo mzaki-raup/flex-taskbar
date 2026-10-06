@@ -68,9 +68,11 @@ pub fn is_dark_cached() -> bool {
     })
 }
 
-/// The system theme changed.
+/// The system theme, contrast or animation setting changed.
 pub fn forget_cached() {
     DARK.with(|d| d.set(None));
+    HIGH_CONTRAST.with(|c| c.set(None));
+    ANIMATIONS.with(|c| c.set(None));
 }
 
 /// Makes popup menus follow the theme setting. Call once at startup and again
@@ -119,6 +121,87 @@ pub fn style_window(hwnd: HWND, dark: bool, rounded: bool) {
     }
 }
 
+thread_local! {
+    /// [`high_contrast`] and [`animations_on`], read once until [`forget_cached`].
+    static HIGH_CONTRAST: std::cell::Cell<Option<Option<crate::appearance::SystemColors>>> =
+        const { std::cell::Cell::new(None) };
+    static ANIMATIONS: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Windows' high-contrast colours while a high-contrast theme is on.
+pub fn high_contrast() -> Option<crate::appearance::SystemColors> {
+    HIGH_CONTRAST.with(|c| {
+        if let Some(v) = c.get() {
+            return v;
+        }
+        let v = read_high_contrast();
+        c.set(Some(v));
+        v
+    })
+}
+
+fn read_high_contrast() -> Option<crate::appearance::SystemColors> {
+    use windows::Win32::Graphics::Gdi::{
+        COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW, COLOR_WINDOWTEXT, GetSysColor,
+    };
+    use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let mut hc = HIGHCONTRASTW { cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32, ..Default::default() };
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            hc.cbSize,
+            Some(&mut hc as *mut _ as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    if ok.is_err() || hc.dwFlags & HCF_HIGHCONTRASTON != HCF_HIGHCONTRASTON {
+        return None;
+    }
+    let sys = |i| {
+        let c = unsafe { GetSysColor(i) };
+        crate::appearance::Rgba::rgb((c & 0xFF) as u8, ((c >> 8) & 0xFF) as u8, ((c >> 16) & 0xFF) as u8)
+    };
+    Some(crate::appearance::SystemColors {
+        window: sys(COLOR_WINDOW),
+        text: sys(COLOR_WINDOWTEXT),
+        highlight: sys(COLOR_HIGHLIGHT),
+        highlight_text: sys(COLOR_HIGHLIGHTTEXT),
+        gray_text: sys(COLOR_GRAYTEXT),
+    })
+}
+
+/// Windows' *Animation effects* setting (Accessibility › Visual effects).
+pub fn animations_on() -> bool {
+    ANIMATIONS.with(|c| {
+        if let Some(v) = c.get() {
+            return v;
+        }
+        let v = read_animations();
+        c.set(Some(v));
+        v
+    })
+}
+
+fn read_animations() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let mut on = windows::core::BOOL(1);
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut on as *mut _ as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    // Unknown (an older Windows, or Wine): animate, as before.
+    ok.is_err() || on.as_bool()
+}
+
 pub struct Palette {
     pub window: COLORREF,
     pub field: COLORREF,
@@ -126,7 +209,18 @@ pub struct Palette {
     pub subtle: COLORREF,
 }
 
+/// Whether FlexTaskbar's own windows (search, settings) are dark: the
+/// theme setting, except under a high-contrast theme, whose colours win.
+pub fn windows_dark() -> bool {
+    high_contrast().is_none() && app_dark()
+}
+
+/// The search window's colours: light, dark, or the high-contrast theme's.
 pub fn palette(dark: bool) -> Palette {
+    if let Some(sc) = high_contrast() {
+        let c = |c: crate::appearance::Rgba| rgb(c.r, c.g, c.b);
+        return Palette { window: c(sc.window), field: c(sc.window), text: c(sc.text), subtle: c(sc.gray_text) };
+    }
     if dark {
         Palette {
             window: rgb(32, 32, 32),

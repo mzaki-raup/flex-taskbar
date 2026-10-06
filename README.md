@@ -646,6 +646,41 @@ handy for binding to other tools such as AutoHotkey or a mouse utility.
 | `--reset` | Start with default settings. The current `config.json` is kept as `config.json.reset-<time>`. Only works when FlexTaskbar isn't already running. |
 | `--no-supervisor` | Run without crash/hang recovery (for debugging) |
 
+## Accessibility
+
+- **Screen readers.** The bar and the flyouts are drawn by FlexTaskbar
+  itself, so they describe themselves through Microsoft Active
+  Accessibility, which UI Automation (Narrator, NVDA, JAWS) reads through
+  Windows' MSAA proxy.
+  - The bar is a toolbar of buttons: *All apps*, each category, pinned
+    app and folder, *Link* and *Settings*. Buttons that open a flyout say
+    so ("has popup", and "expanded" while it is open). Pinned apps say
+    "Running" when they have a window open.
+  - A flyout is a pane of its tiles or rows, with the category's name.
+    Subcategories and folders open further; labels and headings are
+    text. A row's kind ("Store app"…) and "running" are its description.
+  - Each element reports where it is on screen, and pressing one from a
+    screen reader does what a click does.
+  - When the keyboard moves through a flyout (see *Keyboard control*), the
+    newly focused tile or row is announced.
+  - A screen reader's question is answered from the bar's or flyout's state
+    at that moment; nothing is kept in between.
+- **Visible keyboard focus.** The tile or row with the keyboard focus gets
+  a ring in the accent colour (or the high-contrast highlight).
+- **High contrast.** While a Windows high-contrast theme is on, the bar,
+  flyouts, search window and settings windows use its colours:
+  - its window colour behind, its text colour for text and borders, and
+    its highlight for hover, open buttons and marks;
+  - the bar opaque with a border, flyouts without shadows, and the
+    built-in category mark instead of a picture.
+  
+  Your own look comes back when it is turned off.
+- **Less motion.** With Windows' *Animation effects* turned off
+  (Settings › Accessibility › Visual effects), nothing moves: no hover
+  animation, and flyouts open and close without animating.
+
+Both settings are followed live when you change them in Windows.
+
 ## Settings not shown in the window
 
 These can be edited in `data\config.json` while FlexTaskbar is not running:
@@ -739,7 +774,7 @@ Run *Diagnostics…* on your PC for real Windows numbers.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 110 unit tests cover:
+The 112 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -767,6 +802,9 @@ The 110 unit tests cover:
   new again), filling them at any depth while leaving hand-made ones
   alone, the rule's format in `config.json`, and that a smart category
   can't be filled by hand or hold subcategories
+- high contrast and less motion: the high-contrast colours (window, text,
+  highlight, grey text; light or dark), the look made opaque, bordered,
+  shadowless and without a picture mark, and animations turned off
 - several bars: one bar to begin with (and older configs reading as one),
   new empty bars and copies (unique names), switching back and forth with
   each keeping its pins, order and hidden categories, the next bar
@@ -884,6 +922,20 @@ The 110 unit tests cover:
     focus by itself, so the tests set it with `xdotool`; Windows gives
     them the focus when they take the foreground.
   - the *Bar* and *Next bar* hotkey rows on the Manage window's *Hotkeys* card
+  - screen readers, with a small MSAA test client (`AccessibleObjectFromWindow`):
+    - the bar read as a toolbar named FlexTaskbar with its 14 buttons in
+      order: names, roles (a button with a popup for categories, folders
+      and *All*), "Category", "Folder" and "Running" descriptions, and
+      screen positions;
+    - a hit test at a button's centre naming that button, and pressing
+      *Development* opening its flyout;
+    - the flyout read as a pane named Development with its tiles;
+    - focus events while arrowing through *All* (7z, then Clock, then
+      Command Prompt).
+  - *Animation effects* turned off in Windows: no hover animation. Wine
+    keeps the old value in a running program, so the live switch is only
+    seen on the next start there; on Windows the change message re-reads
+    it.
   - several bars: *New empty bar…* (named in the prompt, starting with only
     the categories), *Hide from this bar* on a category, Ctrl+Alt+N going
     back and forth with each bar keeping its own buttons, *Show on this
@@ -979,6 +1031,10 @@ The 110 unit tests cover:
 - dragging files onto the strip or the Manage window
 - running apps with Windows' own window notifications, and matching Store
   apps and Chrome/Edge web apps by AppUserModelID
+- high contrast: Wine can't turn a high-contrast theme on, so only the
+  colours worked out for it (in the unit tests) are checked
+- a real screen reader (Narrator, NVDA) reading the bar and flyouts; a
+  test client checked what they would be told (see above)
 - the strip next to the real Windows taskbar: reserving screen space beside
   it on each edge, *Next to the Windows taskbar* following a taskbar on the
   top or side, and hiding for full-screen apps. Wine has no Windows taskbar,
@@ -1036,6 +1092,7 @@ src/win/watch.rs     automatic rescan when apps are installed
 src/win/backupwin.rs Back up settings… and Restore…
 src/win/prompt.rs    asking for one line of text (a look's name)
 src/win/dragimage.rs the icon following the pointer while dragging an app out
+src/win/access.rs    screen readers: the bar and flyouts as MSAA objects
 src/win/diagnostics.rs  Diagnostics…: memory, CPU, objects, draw times
 src/win/running.rs   following open windows (shell notifications), switching
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks

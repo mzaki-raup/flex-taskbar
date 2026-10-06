@@ -1,5 +1,6 @@
 //! Everything Windows-specific: process model, UI, shell integration.
 
+mod access;
 mod app;
 mod appdialog;
 mod appearancewin;

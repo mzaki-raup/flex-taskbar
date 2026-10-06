@@ -352,9 +352,117 @@ impl Appearance {
     }
 }
 
+/// Windows' own colours while a high-contrast theme is on (`GetSysColor`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SystemColors {
+    pub window: Rgba,
+    pub text: Rgba,
+    pub highlight: Rgba,
+    pub highlight_text: Rgba,
+    pub gray_text: Rgba,
+}
+
+impl Colors {
+    /// Everything in the high-contrast theme's colours, opaque: its window
+    /// colour behind, its text colour for text and borders, its highlight
+    /// for hover, open buttons and marks.
+    pub fn high_contrast(sc: &SystemColors) -> Colors {
+        let opaque = |c: Rgba| c.with_alpha(255);
+        let (window, text) = (opaque(sc.window), opaque(sc.text));
+        Colors {
+            dark: window.luminance() < 0.5,
+            background: window,
+            border: text,
+            flyout_border: text,
+            text,
+            subtle: opaque(sc.gray_text),
+            // See-through over the window colour, so text stays readable on it.
+            hover: sc.highlight.with_alpha(0x55),
+            pressed: sc.highlight.with_alpha(0x99),
+            accent: opaque(sc.highlight),
+            on_accent: opaque(sc.highlight_text),
+        }
+    }
+}
+
+impl Appearance {
+    /// What a high-contrast theme needs: an opaque bar with borders, no
+    /// shadows, and the built-in marks (a picture may not stand out).
+    pub fn for_high_contrast(&self) -> Appearance {
+        Appearance {
+            opacity: 100,
+            border_width: self.border_width.max(1),
+            flyout_border_width: self.flyout_border_width.max(1),
+            flyout_shadow: FlyoutShadow::Off,
+            indicator: if self.indicator == Indicator::Image { Indicator::Badge } else { self.indicator },
+            ..self.clone()
+        }
+    }
+
+    /// Windows' *Animation effects* are off: nothing moves.
+    pub fn without_motion(&self) -> Appearance {
+        Appearance {
+            hover_animation: HoverAnim::Off,
+            flyout_animation: FlyoutAnim::Off,
+            flyout_close_animation: false,
+            ..self.clone()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn high_contrast() {
+        // High Contrast Black.
+        let sc = SystemColors {
+            window: Rgba::rgb(0, 0, 0),
+            text: Rgba::rgb(255, 255, 255),
+            highlight: Rgba::rgb(0x1A, 0xEB, 0xFF),
+            highlight_text: Rgba::rgb(0, 0, 0),
+            gray_text: Rgba::rgb(0x3F, 0xF2, 0x3F),
+        };
+        let c = Colors::high_contrast(&sc);
+        assert!(c.dark);
+        assert_eq!((c.background, c.text, c.border, c.flyout_border), (sc.window, sc.text, sc.text, sc.text));
+        assert_eq!((c.accent, c.on_accent, c.subtle), (sc.highlight, sc.highlight_text, sc.gray_text));
+        assert_eq!((c.hover.a, c.pressed.a), (0x55, 0x99));
+        // Whatever the look, the bar is opaque, bordered and without shadows.
+        let look = Appearance {
+            opacity: 40,
+            border_width: 0,
+            flyout_border_width: 0,
+            flyout_shadow: FlyoutShadow::Soft,
+            indicator: Indicator::Image,
+            indicator_image: Some("x.png".into()),
+            ..Default::default()
+        }
+        .for_high_contrast();
+        assert_eq!((look.opacity, look.border_width, look.flyout_border_width), (100, 1, 1));
+        assert_eq!((look.flyout_shadow, look.indicator), (FlyoutShadow::Off, Indicator::Badge));
+        let thick = Appearance { border_width: 3, indicator: Indicator::Dot, ..Default::default() }.for_high_contrast();
+        assert_eq!((thick.border_width, thick.indicator), (3, Indicator::Dot));
+        // White: light.
+        let white = SystemColors { window: Rgba::rgb(255, 255, 255), text: Rgba::rgb(0, 0, 0), ..sc };
+        assert!(!Colors::high_contrast(&white).dark);
+    }
+
+    #[test]
+    fn reduced_motion() {
+        let look = Appearance {
+            hover_animation: HoverAnim::Magnify,
+            flyout_animation: FlyoutAnim::Genie,
+            flyout_close_animation: true,
+            ..Default::default()
+        }
+        .without_motion();
+        assert_eq!(
+            (look.hover_animation, look.flyout_animation, look.flyout_close_animation),
+            (HoverAnim::Off, FlyoutAnim::Off, false)
+        );
+    }
 
     #[test]
     fn defaults_match_the_original_bar() {

@@ -11,11 +11,13 @@ and described in the README.
 
 Done: dark settings windows, keyboard control of the flyouts, running-app
 indicators, auto-hide, settings backup and restore, closing animations, a
-hotkey per category, saved looks (theme presets), pinned folders and the
-Diagnostics report.
+hotkey per category, saved looks (theme presets), pinned folders, the
+Diagnostics report, dragging apps out of flyouts, smart categories, several
+bars and accessibility. Every 🟢 and 🟡 item is done.
 
-Suggested next: **Checks on real Windows** (🔴), now that *Diagnostics…*
-can collect real numbers there, then pick from the unticked items below.
+Suggested next: **Checks on real Windows** (🔴). *Diagnostics…* can now
+collect real numbers there, and Narrator and high contrast need checking
+on a real PC. After that, the remaining 🔴 items below.
 
 ## Everyday use
 
@@ -91,10 +93,12 @@ can collect real numbers there, then pick from the unticked items below.
   has numbers measured under Wine. Numbers from real Windows are still to
   come (see *Checks on real Windows*).
 - [ ] **Checks on real Windows** · 🔴
-  What Wine couldn't verify (see the README): high-DPI scaling, Store and web-app icons, dragging files in, the bar beside the
-  real taskbar, *Start with Windows*. A UI-automation smoke test in CI
-  would keep them working.
-- [ ] **Accessibility** · 🟡
+  What Wine couldn't verify (see the README): high-DPI scaling, Store and
+  web-app icons, dragging files in, the bar beside the real taskbar, *Start
+  with Windows*, Narrator reading the bar and flyouts, and high contrast. A
+  UI-automation smoke test in CI would keep them working (the bar and
+  flyouts now answer UI Automation, which makes one easier to write).
+- [x] **Accessibility** · 🟡
   Screen-reader names and roles for the bar and flyout buttons (UI
   Automation), visible keyboard focus, and a high-contrast theme that
   follows Windows' contrast setting.

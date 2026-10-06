@@ -28,6 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR, w};
 
 /// The page's colours, light or dark.
+#[derive(Clone, Copy)]
 struct Colours {
     page: Rgba,
     card: Rgba,
@@ -63,14 +64,39 @@ const DARK: Colours = Colours {
     subtle: Rgba::rgb(0xA8, 0xA8, 0xA8),
 };
 
-/// The colours for the current theme setting.
-fn colours() -> &'static Colours {
-    if super::theme::app_dark() { &DARK } else { &LIGHT }
+/// The colours for the current theme setting, or Windows' own while a
+/// high-contrast theme is on.
+fn colours() -> Colours {
+    if let Some(sc) = super::theme::high_contrast() {
+        return Colours {
+            page: sc.window,
+            card: sc.window,
+            card_border: sc.text,
+            footer: sc.window,
+            footer_line: sc.text,
+            field: sc.window,
+            text: sc.text,
+            subtle: sc.gray_text,
+        };
+    }
+    if dark() { DARK } else { LIGHT }
 }
 
-/// Whether the settings windows are dark right now.
+/// Whether the settings windows are dark right now (never in high
+/// contrast: Windows draws the controls in its contrast colours then).
 pub fn dark() -> bool {
-    super::theme::app_dark()
+    super::theme::windows_dark()
+}
+
+/// The brush for background `i` (page, card, command bar, field).
+fn brush(i: usize) -> HBRUSH {
+    if super::theme::high_contrast().is_some() {
+        // Every background is the window colour; Windows owns this brush.
+        return unsafe {
+            HBRUSH(windows::Win32::Graphics::Gdi::GetSysColorBrush(windows::Win32::Graphics::Gdi::COLOR_WINDOW).0)
+        };
+    }
+    BRUSHES.with(|b| b[dark() as usize][i])
 }
 
 /// A group of controls on a card.
@@ -289,7 +315,7 @@ pub fn color(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         let hdc = HDC(wparam.0 as *mut _);
         SetBkColor(hdc, colorref(colour));
         SetTextColor(hdc, colorref(if grey { k.subtle } else { k.text }));
-        LRESULT(BRUSHES.with(|b| b[dark() as usize][bg]).0 as isize)
+        LRESULT(brush(bg).0 as isize)
     }
 }
 
@@ -301,7 +327,7 @@ pub fn field_color(wparam: WPARAM) -> LRESULT {
         let hdc = HDC(wparam.0 as *mut _);
         SetBkColor(hdc, colorref(k.field));
         SetTextColor(hdc, colorref(k.text));
-        LRESULT(BRUSHES.with(|b| b[dark() as usize][3]).0 as isize)
+        LRESULT(brush(3).0 as isize)
     }
 }
 
@@ -329,7 +355,7 @@ fn theme_control(h: HWND, dark: bool) {
     let n = unsafe { GetClassNameW(h, &mut buf) } as usize;
     let class = String::from_utf16_lossy(&buf[..n]).to_ascii_lowercase();
     let style = unsafe { GetWindowLongW(h, GWL_STYLE) } as u32 & 0xF;
-    let k = if dark { &DARK } else { &LIGHT };
+    let k = colours();
     // The visual-styles class names Windows uses for its own dark windows
     // (Explorer, the file dialogs). Unknown names are harmless.
     let theme = |name: Option<&str>| {

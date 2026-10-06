@@ -38,9 +38,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_NO, InsertMenuW, KillTimer, LoadCursorW, MA_NOACTIVATE, MF_BYPOSITION,
     MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, PostMessageW, RegisterClassW, SM_CXDRAG, SM_CYDRAG,
     SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CHAR, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL, WM_RBUTTONUP,
-    WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CHAR, WM_GETOBJECT,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL,
+    WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -1057,6 +1057,117 @@ fn render(idx: usize) {
         });
         present(idx);
         super::diagnostics::flyout_drawn(started);
+        announce_focus(idx);
+    }
+}
+
+// ---------------------------------------------------------------- screen readers
+
+thread_local! {
+    /// The keyboard focus screen readers were last told about.
+    static ANNOUNCED: std::cell::Cell<Option<(isize, usize)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Tells screen readers when the keyboard focus has moved in level `idx`.
+fn announce_focus(idx: usize) {
+    let focus = with(|f| {
+        let l = f.levels.get(idx)?;
+        let i = l.focus.filter(|_| f.keyboard && f.key_level == idx)?;
+        Some((l.hwnd, i))
+    })
+    .flatten();
+    let Some((hwnd, i)) = focus else { return };
+    if ANNOUNCED.with(|a| a.replace(Some((hwnd.0 as isize, i)))) != Some((hwnd.0 as isize, i)) {
+        super::access::focus_moved(hwnd, i);
+    }
+}
+
+/// A flyout as screen readers see it: its tiles, rows and labels.
+pub fn accessible(hwnd: HWND) -> super::access::Tree {
+    use windows::Win32::UI::Accessibility::{
+        ROLE_SYSTEM_BUTTONMENU, ROLE_SYSTEM_PANE, ROLE_SYSTEM_PUSHBUTTON, ROLE_SYSTEM_STATICTEXT, STATE_SYSTEM_HASPOPUP,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        STATE_SYSTEM_EXPANDED, STATE_SYSTEM_FOCUSED, STATE_SYSTEM_HOTTRACKED, STATE_SYSTEM_READONLY,
+    };
+    // In UI::Controls under a combo-box type; the value is the MSAA one.
+    const STATE_SYSTEM_FOCUSABLE: u32 = 0x0010_0000;
+    let empty = || super::access::Tree { name: "Flyout".into(), role: ROLE_SYSTEM_PANE, children: Vec::new() };
+    // Asked while the flyouts are being changed: nothing to say this moment.
+    let Some(view) = FLYOUT.with(|cell| {
+        let b = cell.try_borrow().ok()?;
+        let f = b.as_ref()?;
+        f.levels.iter().find(|l| l.hwnd == hwnd).map(|l| l.view.clone())
+    }) else {
+        return empty();
+    };
+    let name = match &view {
+        View::Category(id) => app::with(|s| crate::tree::find(&s.cfg.categories, *id).map(|c| c.name.clone()))
+            .unwrap_or_else(|| "Category".into()),
+        View::All { .. } => "All apps".into(),
+        View::Folder(path) => {
+            path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
+        }
+    };
+    let children = FLYOUT.with(|cell| {
+        let b = cell.try_borrow().ok()?;
+        let f = b.as_ref()?;
+        let idx = f.levels.iter().position(|l| l.hwnd == hwnd)?;
+        let l = &f.levels[idx];
+        let open_child = f.levels.get(idx + 1).and_then(|c| c.source);
+        let focused = l.focus.filter(|_| f.keyboard && f.key_level == idx);
+        let children = l
+            .elems
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let (role, action, popup) = match &p.elem {
+                    Elem::Sub(_) | Elem::Folder(_) => (ROLE_SYSTEM_BUTTONMENU, "Open", true),
+                    Elem::SortButton | Elem::ShowButton => (ROLE_SYSTEM_BUTTONMENU, "Open", true),
+                    Elem::Tile(_) | Elem::Row(_) | Elem::File(_) => (ROLE_SYSTEM_PUSHBUTTON, "Open", false),
+                    Elem::Label | Elem::Heading => (ROLE_SYSTEM_STATICTEXT, "", false),
+                };
+                let mut state = if interactive(&p.elem) { STATE_SYSTEM_FOCUSABLE } else { STATE_SYSTEM_READONLY };
+                if popup {
+                    state |= STATE_SYSTEM_HASPOPUP;
+                }
+                if open_child == Some(i) {
+                    state |= STATE_SYSTEM_EXPANDED;
+                }
+                if focused == Some(i) {
+                    state |= STATE_SYSTEM_FOCUSED;
+                }
+                if l.hover == Some(i) {
+                    state |= STATE_SYSTEM_HOTTRACKED;
+                }
+                let running = matches!(&p.elem, Elem::Tile(id) | Elem::Row(id) if super::running::is_running(id));
+                let description = match (p.note, running) {
+                    ("", false) => String::new(),
+                    ("", true) => "Running".into(),
+                    (note, false) => note.into(),
+                    (note, true) => format!("{note}, running"),
+                };
+                let r = p.rect;
+                super::access::Element {
+                    name: p.text.clone(),
+                    role,
+                    state,
+                    rect: RECT {
+                        left: l.win.left + r.left,
+                        top: l.win.top + r.top,
+                        right: l.win.left + r.right,
+                        bottom: l.win.top + r.bottom,
+                    },
+                    action,
+                    description,
+                }
+            })
+            .collect();
+        Some(children)
+    });
+    match children {
+        Some(children) => super::access::Tree { name, role: ROLE_SYSTEM_PANE, children },
+        None => empty(),
     }
 }
 
@@ -2032,6 +2143,16 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
     let level = level_of(hwnd);
     match (msg, level) {
         (WM_MOUSEACTIVATE, _) => LRESULT(MA_NOACTIVATE as isize),
+        (WM_GETOBJECT, _)
+            if let Some(r) = super::access::get_object(hwnd, super::access::Source::Flyout, wparam, lparam) =>
+        {
+            r
+        }
+        (super::access::WM_APP_ACC_PRESS, Some(idx)) => {
+            // A screen reader pressed it: as if clicked.
+            activate(idx, wparam.0);
+            LRESULT(0)
+        }
         // The shadow lets the pointer through to what's under it (the bar,
         // or the flyout below), so it never gets in the way.
         (WM_NCHITTEST, Some(idx)) if !over_flyout(idx, lparam) => LRESULT(HTTRANSPARENT as isize),

@@ -34,8 +34,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, HICON, IMAGE_ICON,
     IsDialogMessageW, KillTimer, LR_DEFAULTCOLOR, LoadImageW, MSG, PostQuitMessage, RegisterClassW,
     RegisterWindowMessageW, SM_CXSMICON, SW_SHOWNORMAL, SetTimer, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_DESTROY,
-    WM_ENDSESSION, WM_HOTKEY, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
-    WS_OVERLAPPED,
+    WM_ENDSESSION, WM_HOTKEY, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_SYSCOLORCHANGE, WM_TIMER, WNDCLASSW,
+    WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
 use windows::core::{PCWSTR, w};
 
@@ -396,13 +396,22 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             } else {
                 String::new()
             };
+            // High contrast turned on or off, or Animation effects changed.
+            const SPI_SETHIGHCONTRAST: usize = 0x0043;
+            const SPI_SETCLIENTAREAANIMATION: usize = 0x1043;
             if area == "ImmersiveColorSet" {
                 theme::forget_cached();
                 theme::allow_dark_menus();
                 searchwin::theme_changed();
                 strip::theme_changed();
                 super::panel::theme_changed();
+            } else if wparam.0 == SPI_SETHIGHCONTRAST || wparam.0 == SPI_SETCLIENTAREAANIMATION {
+                accessibility_changed();
             }
+            LRESULT(0)
+        }
+        WM_SYSCOLORCHANGE => {
+            accessibility_changed();
             LRESULT(0)
         }
         WM_QUERYENDSESSION => LRESULT(1),
@@ -485,6 +494,15 @@ pub fn perform(action: menu::Action) {
         }
         menu::Action::Exit => exit(),
     }
+}
+
+/// Windows' contrast theme, system colours or animation setting changed:
+/// everything drawn by FlexTaskbar follows.
+fn accessibility_changed() {
+    theme::forget_cached();
+    searchwin::theme_changed();
+    strip::apply_appearance();
+    super::panel::theme_changed();
 }
 
 // ---------------------------------------------------------------- bars
