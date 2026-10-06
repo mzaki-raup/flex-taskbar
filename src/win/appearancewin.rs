@@ -6,7 +6,9 @@ use super::app;
 use super::canvas;
 use super::ui::{self, scale, wide};
 use super::{panel, searchwin, strip, theme};
-use crate::appearance::{Appearance, DockWidth, FlyoutAnim, FlyoutShadow, HoverAnim, Indicator, Rgba, ThemeMode};
+use crate::appearance::{
+    Appearance, DockWidth, FlyoutAnim, FlyoutShadow, HoverAnim, Indicator, Rgba, RunningMark, ThemeMode,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
@@ -29,6 +31,7 @@ const ANIMATION: u16 = 14;
 const INDICATOR: u16 = 15;
 const FLYOUT_ANIMATION: u16 = 16;
 const FLYOUT_SHADOW: u16 = 17;
+const RUNNING_MARK: u16 = 18;
 // The indicator picture's button, and its Remove button (+100).
 const INDICATOR_IMAGE: u16 = 24;
 // The All button's picture, and its "Use text" button (+100).
@@ -124,7 +127,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 30] = [
+const ROWS: [Row; 31] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -162,6 +165,7 @@ const ROWS: [Row; 30] = [
     Row::Slider(MARGIN),
     Row::Slider(BAR_HEIGHT),
     Row::Combo(ANIMATION, "Hover animation", &["Off", "Magnify (like the macOS Dock)", "Lift", "Bounce", "Pulse"]),
+    Row::Combo(RUNNING_MARK, "Running apps", &["No mark", "Dot (like macOS)", "Line (like Windows 11)"]),
     Row::Picture(ALL_ICON, "All button picture", "Use text"),
     Row::Heading("Category indicator"),
     Row::Combo(
@@ -425,6 +429,7 @@ fn load() {
     sel(INDICATOR, a.indicator as usize);
     sel(FLYOUT_ANIMATION, a.flyout_animation as usize);
     sel(FLYOUT_SHADOW, a.flyout_shadow as usize);
+    sel(RUNNING_MARK, a.running_mark as usize);
     ui::set_text(ctl(ALL_ICON), a.all_icon.as_deref().map(|_| "Change…").unwrap_or("Choose…"));
     unsafe {
         let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
@@ -660,6 +665,11 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     change(|a, _| a.all_icon = None);
                     forget_picture(old);
                     load();
+                }
+                (RUNNING_MARK, CBN_SELCHANGE) => {
+                    let i = combo(id);
+                    let mark = [RunningMark::Off, RunningMark::Dot, RunningMark::Line][i.min(2)];
+                    change(|a, _| a.running_mark = mark);
                 }
                 (FLYOUT_SHADOW, CBN_SELCHANGE) => {
                     let i = combo(id);

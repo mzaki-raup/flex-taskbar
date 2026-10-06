@@ -918,6 +918,13 @@ fn render() {
                 // The "opens a flyout" mark (see `indicator`).
                 super::indicator::draw(cv, &s.look, c, s.edge, x, y, size);
             }
+            if let Item::App(id) = &s.items[i]
+                && super::running::is_running(id)
+            {
+                let (x, y, w, h) = cell(&rc);
+                let cell_rc = RECT { left: x as i32, top: y as i32, right: (x + w) as i32, bottom: (y + h) as i32 };
+                super::indicator::running(cv, &s.look, c, s.edge, cell_rc, d);
+            }
         };
         for (pos, slot) in s.layout.items.iter().enumerate() {
             let i = order[pos];
@@ -1241,6 +1248,9 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             };
             anim_pointer(hwnd, Some(pos), entered);
             if start_leave {
+                // The pointer came onto the bar: make sure the running marks
+                // are current (in case a window notification was missed).
+                super::running::window_event(app::main_hwnd());
                 let mut tme = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
                     dwFlags: TME_LEAVE,

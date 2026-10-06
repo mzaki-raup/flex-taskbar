@@ -83,6 +83,9 @@ pub struct Settings {
     pub hover_delay_ms: u32,
     /// Rescan the app list by itself when apps are installed or removed.
     pub auto_rescan: bool,
+    /// Clicking an app that has a window open switches to it (Shift+click
+    /// starts another copy).
+    pub switch_to_running: bool,
     /// Also list programs from package managers' folders (winget portable,
     /// Scoop, Chocolatey, npm, pip, pipx, Cargo, .NET tools, Go).
     pub package_apps: bool,
@@ -107,6 +110,7 @@ impl Default for Settings {
             strip_edge: StripEdge::Taskbar,
             hover_delay_ms: 100,
             auto_rescan: true,
+            switch_to_running: true,
             package_apps: true,
             all_apps: crate::allview::AllAppsView::default(),
             appearance: crate::appearance::Appearance::default(),

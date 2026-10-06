@@ -21,12 +21,12 @@ and described in the README.
 
 ## Everyday use
 
-- [ ] **Running-app indicators** · 🟡
+- [x] **Running-app indicators** · 🟡
   A dot under bar and flyout icons for apps that are open. Clicking a
   running app switches to its window instead of starting another copy
-  (Shift+click starts a new one). Needs an efficient window-list watcher
-  (`SetWinEventHook`, not polling), and matching windows to apps by
-  executable path and AppUserModelID.
+  (Shift+click starts a new one). Follows windows through the shell's
+  window notifications (no polling) and matches them to apps by
+  AppUserModelID or program path.
 - [ ] **Auto-hide bar** · 🟡
   The bar slides out of view and comes back when the pointer reaches the
   screen edge, with a delay setting and the flyout animation styles. The

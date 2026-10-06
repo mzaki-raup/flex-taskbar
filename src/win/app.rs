@@ -177,6 +177,7 @@ pub fn run(args: &Args) -> i32 {
     request_all_icons();
     start_scan();
     super::watch::start(main, WM_APP_APPS_CHANGED);
+    super::running::start(main);
 
     // Tell the user about anything that happened on the way up.
     let mut notes = Vec::new();
@@ -271,6 +272,10 @@ fn taskbar_created_msg() -> u32 {
 }
 
 unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if msg != 0 && msg == super::running::shell_message() {
+        super::running::window_event(hwnd);
+        return LRESULT(0);
+    }
     match msg {
         WM_APP_COMMAND => {
             if let Some(cmd) = Command::from_usize(wparam.0) {
@@ -331,6 +336,10 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                     SetTimer(Some(hwnd), TIMER_RESCAN, crate::pkgsources::SETTLE_MS, None);
                 }
             }
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == super::running::TIMER_REFRESH || wparam.0 == super::running::TIMER_LAUNCHED => {
+            super::running::timer(hwnd, wparam.0);
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_RESCAN => {
@@ -478,6 +487,8 @@ pub fn save() {
 /// Rebuilds the catalog after custom apps changed.
 pub fn rebuild_catalog() {
     with(|s| s.catalog = Catalog::build(&s.shell_apps, &s.cfg.custom_apps));
+    // Apps came or went: which of them are running may have changed.
+    super::running::refresh();
 }
 
 // ---------------------------------------------------------------- launching
@@ -495,6 +506,12 @@ fn is_console_program(path: &str) -> bool {
 }
 
 pub fn launch_app(id: &str) {
+    // Already open: switch to it instead (Shift+click starts another copy).
+    if super::running::switch_to(id) {
+        with(|s| s.cfg.record_recent(id));
+        save();
+        return;
+    }
     let target = with(|s| {
         let entry = s.catalog.get(id)?;
         let target = match &entry.source {
@@ -533,6 +550,7 @@ pub fn launch_app(id: &str) {
         return;
     };
     save();
+    super::running::launched(main_hwnd());
     let main_raw = main_hwnd().0 as isize;
     launch::spawn(target, move |msg| unsafe {
         let ptr = Box::into_raw(Box::new(msg));

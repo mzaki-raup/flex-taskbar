@@ -10,16 +10,17 @@
 
 use crate::appkind::{self, AppKind};
 use crate::config::CustomApp;
-use crate::pkgsources;
+use crate::{pkgsources, running};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use windows::Win32::Storage::EnhancedStorage::PKEY_Link_TargetParsingPath;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
-    BHID_EnumItems, FOLDERID_AppsFolder, IEnumShellItems, IShellItem, KF_FLAG_DEFAULT, SHGetKnownFolderItem, SIGDN,
-    SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
+    BHID_EnumItems, FOLDERID_AppsFolder, IEnumShellItems, IShellItem, IShellItem2, KF_FLAG_DEFAULT,
+    SHGetKnownFolderItem, SHGetKnownFolderPath, SIGDN, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
 };
-use windows::core::Result;
+use windows::core::{Interface, Result};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShellApp {
@@ -30,6 +31,10 @@ pub struct ShellApp {
     /// True for the Start Menu fallback: `parsing_name` is then a file path.
     #[serde(default)]
     pub file: bool,
+    /// The program it starts, when the shell knows (a shortcut's target, or
+    /// a desktop program's path): recognises its windows as running.
+    #[serde(default)]
+    pub target: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +55,8 @@ pub struct AppEntry {
     pub source: Source,
     /// Desktop program, Store app, Chrome/Edge web app or custom.
     pub kind: AppKind,
+    /// What its windows are recognised by (see `running::app_keys`).
+    pub keys: Vec<String>,
 }
 
 #[derive(Default)]
@@ -76,6 +83,11 @@ impl Catalog {
                 } else {
                     Source::Shell(s.parsing_name.clone())
                 },
+                keys: if s.file {
+                    running::app_keys(None, Some(&s.parsing_name))
+                } else {
+                    running::app_keys(Some(&s.parsing_name), s.target.as_deref())
+                },
             });
         }
         for c in custom {
@@ -85,6 +97,7 @@ impl Catalog {
                 file_hint: file_hint(&c.target),
                 kind: appkind::classify_custom(&c.target, &c.args),
                 source: Source::Custom,
+                keys: running::app_keys(None, Some(&super::launch::expand(c.target.trim()))),
             });
         }
         apps.sort_by_cached_key(|a| a.name.to_lowercase());
@@ -146,7 +159,7 @@ fn add_package_apps(apps: &mut Vec<ShellApp>) {
                     return None;
                 }
                 let name = pkgsources::display_name(&file);
-                Some(ShellApp { parsing_name: e.path().display().to_string(), name, file: true })
+                Some(ShellApp { parsing_name: e.path().display().to_string(), name, file: true, target: None })
             })
             .collect();
         found.sort_by(|a, b| a.name.cmp(&b.name));
@@ -174,7 +187,8 @@ fn scan_apps_folder() -> Result<Vec<ShellApp>> {
                     continue;
                 };
                 if !name.is_empty() && !parsing_name.is_empty() {
-                    out.push(ShellApp { parsing_name, name, file: false });
+                    let target = link_target(item).or_else(|| known_folder_path(&parsing_name));
+                    out.push(ShellApp { parsing_name, name, file: false, target });
                 }
             }
             if hr.is_err() || (fetched as usize) < batch.len() {
@@ -215,10 +229,36 @@ fn scan_start_menu() -> Vec<ShellApp> {
             if name.is_empty() || name.to_lowercase().starts_with("uninstall") {
                 continue;
             }
-            out.push(ShellApp { parsing_name: path.display().to_string(), name, file: true });
+            out.push(ShellApp { parsing_name: path.display().to_string(), name, file: true, target: None });
         }
     }
     out
+}
+
+/// A shortcut's target program, as the Apps folder reports it.
+fn link_target(item: &IShellItem) -> Option<String> {
+    unsafe {
+        let item2: IShellItem2 = item.cast().ok()?;
+        let p = item2.GetString(&PKEY_Link_TargetParsingPath).ok()?;
+        let s = p.to_string().ok();
+        CoTaskMemFree(Some(p.0 as *const _));
+        s.filter(|s| !s.is_empty())
+    }
+}
+
+/// A desktop program's path from a parsing name like
+/// `{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\notepad.exe` (a known folder,
+/// then the rest of the path).
+fn known_folder_path(parsing_name: &str) -> Option<String> {
+    let rest = parsing_name.strip_prefix('{')?;
+    let (guid, tail) = rest.split_once("}\\")?;
+    let guid = windows::core::GUID::try_from(guid).ok()?;
+    unsafe {
+        let p = SHGetKnownFolderPath(&guid, KF_FLAG_DEFAULT, None).ok()?;
+        let base = p.to_string().ok();
+        CoTaskMemFree(Some(p.0 as *const _));
+        Some(format!("{}\\{tail}", base?))
+    }
 }
 
 fn display_name(item: &IShellItem, kind: SIGDN) -> Option<String> {

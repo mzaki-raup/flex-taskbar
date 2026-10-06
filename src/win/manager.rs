@@ -90,6 +90,7 @@ const AUTO_RESCAN: u16 = 71;
 const PACKAGE_APPS: u16 = 72;
 const HK_BAR: u16 = 73;
 const LBL_HK_BAR: u16 = 74;
+const SWITCH_RUNNING: u16 = 75;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -305,6 +306,7 @@ fn create() {
             ("Reserve its space (maximized windows stop at it)", STRIP_RESERVE),
             ("Rescan when apps are installed or removed", AUTO_RESCAN),
             ("Include package managers' apps (winget, npm…)", PACKAGE_APPS),
+            ("Clicking a running app switches to it", SWITCH_RUNNING),
         ] {
             controls.insert(
                 id,
@@ -463,6 +465,7 @@ fn layout() {
     place(AUTOSTART, ix[0], line(0), inner_w, bh);
     place(STRIP_SHOW, ix[0], line(1), inner_w, bh);
     place(STRIP_RESERVE, ix[0], line(2), inner_w, bh);
+    place(SWITCH_RUNNING, ix[0], line(3), inner_w, bh);
     place(AUTO_RESCAN, ix[1], line(0), inner_w, bh);
     place(PACKAGE_APPS, ix[1], line(1), inner_w, bh);
     row(&[RESCAN, IMPORT], ix[1], line(2), inner_w);
@@ -1218,11 +1221,17 @@ fn load_settings() {
         SendMessageW(ctl(HK_BAR), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(bar))), Some(LPARAM(0)));
         let check = if autostart::is_enabled() { BST_CHECKED } else { BST_UNCHECKED };
         SendMessageW(ctl(AUTOSTART), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
-        let (show, reserve, auto, packages) = app::with(|s| {
+        let (show, reserve, auto, packages, switch) = app::with(|s| {
             let st = &s.cfg.settings;
-            (st.show_strip, st.reserve_space, st.auto_rescan, st.package_apps)
+            (st.show_strip, st.reserve_space, st.auto_rescan, st.package_apps, st.switch_to_running)
         });
-        for (id, on) in [(STRIP_SHOW, show), (STRIP_RESERVE, reserve), (AUTO_RESCAN, auto), (PACKAGE_APPS, packages)] {
+        for (id, on) in [
+            (STRIP_SHOW, show),
+            (STRIP_RESERVE, reserve),
+            (AUTO_RESCAN, auto),
+            (PACKAGE_APPS, packages),
+            (SWITCH_RUNNING, switch),
+        ] {
             let check = if on { BST_CHECKED } else { BST_UNCHECKED };
             SendMessageW(ctl(id), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
         }
@@ -1442,6 +1451,11 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 ALL_ICON => app_icon(hwnd, ALL, ALL_ICON),
                 ALL_PIN => pin_selected(hwnd),
                 STRIP_SHOW => app::set_strip(Some(is_checked(STRIP_SHOW))),
+                SWITCH_RUNNING => {
+                    let on = is_checked(SWITCH_RUNNING);
+                    app::with(|s| s.cfg.settings.switch_to_running = on);
+                    app::save();
+                }
                 AUTO_RESCAN => {
                     let on = is_checked(AUTO_RESCAN);
                     app::with(|s| s.cfg.settings.auto_rescan = on);

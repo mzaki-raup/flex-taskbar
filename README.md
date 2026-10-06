@@ -233,6 +233,25 @@ original FlexTaskbar:
 - **Pinned apps** launch with a click. You can pin an app from the Manage
   window (*Pin to strip*), from the *All* list, with *Link*, or by dragging
   `.exe`/`.lnk` files onto the bar.
+- **Running apps.** An app with a window open gets a mark: a short line under
+  its icon on the bar (*Line*, like Windows 11) or a dot (*Dot*, like macOS),
+  under its tile in a flyout, and on the left of its row in *All*. Change or
+  turn it off with *Running apps* on the Appearance window's *Bar* card.
+  Clicking a running app **switches to it** instead of starting another
+  copy: it comes to the front (restored if minimised); if it is already in
+  front, its only window is minimised, or with several the next one comes
+  forward, like the Windows taskbar. **Shift+click** starts another copy.
+  Turn switching off with *Clicking a running app switches to it* on the
+  Manage window's *Startup and bar* card.
+
+  Windows are matched to apps by their AppUserModelID (Store apps, Chrome and
+  Edge web apps) or by the program they run, which the app list reads from
+  each Start Menu shortcut. A web app's window counts only for that web app,
+  not for the browser. Windows tells FlexTaskbar when windows open and close
+  (it registers for the same notifications the taskbar gets), so the marks
+  follow without any polling.
+
+  ![Notepad open: a line under its bar icon (like Windows 11), or a dot (like macOS)](screenshots/running-marks.png)
 - **Rearrange by dragging.** Press on a category or app icon and drag it along
   the bar; the others make room, and it stays where you let go. Categories
   and apps can be mixed in any order. Let go away from the bar to cancel.
@@ -287,6 +306,7 @@ Every change shows on the bar straight away:
 | Gap from screen edge | 0–24 | 0 (docked flush) |
 | Bar thickness | 32–96 (its height, or its width on a side edge) | 48 |
 | Hover animation | Off, Magnify (like the macOS Dock), Lift, Bounce, Pulse | Magnify |
+| Running apps | No mark, Dot (like macOS), Line (like Windows 11) | Line |
 | All button picture | Any PNG, JPEG, BMP, GIF, ICO or SVG instead of the word; copied into `data\icons\`; *Use text* goes back | The word "All" |
 | **Category flyouts** | | |
 | App tiles per row | 1–12 (top and bottom bars; on a side bar a flyout is one column) | 4 |
@@ -526,7 +546,11 @@ The launcher is built to cost almost nothing while idle:
 - It waits on Windows messages and never polls. The bar's only timers are the
   short hover delay, started when the pointer enters a category icon, the
   flyout's close delay, and the animations' frame timers, which run only
-  while an icon is moving or a flyout is opening. The
+  while an icon is moving or a flyout is opening. Running apps are followed
+  through Windows' window notifications: the windows are listed again once,
+  150 ms after a burst of them (and when the pointer comes onto the bar),
+  with each process's program and each window's AppUserModelID looked up
+  once and kept while it's open. Drawing a running mark is a set lookup. The
   supervisor wakes every 5 seconds to check that the launcher is still
   responding.
 - The app scan and icon loading happen on background threads. Icons come from
@@ -556,7 +580,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 77 unit tests cover:
+The 81 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -571,6 +595,12 @@ The 77 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- running apps: which windows count (visible, not cloaked, titled, not a
+  tool or owned window unless it asks to be shown), matching by
+  AppUserModelID or program path (a web app not making its browser look
+  open, an app started by bare name matching by file name, a full path only
+  matching that program), and what a click does (start, switch, minimise
+  the only window in front, cycle through several, Shift for another copy)
 - keyboard control of the flyouts: which tile or row each arrow key moves
   to (in a grid, a short last row and a list under buttons), stopping at
   the edges, type-to-jump (name and word starts, the same letter moving on,
@@ -626,6 +656,14 @@ The 77 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - running apps: Notepad started from the bar getting the Line mark (and
+    the Dot), its row in *All* getting one, a click minimising it when in
+    front and the next one bringing it back, Shift+click starting a second
+    copy, and the mark going after it closes. Wine doesn't send the window
+    notifications, so there the marks update when an app is started from
+    the bar or the pointer comes onto the bar; and a window that closed
+    without notice is checked for before switching to it, so the click
+    starts the app instead.
   - keyboard control: the focus ring on opening *All* by a click and by
     `--bar`, arrow keys, typing "note" and "you" (jumping to Notepad and
     YouTube), End, Tab to the first category, Enter opening a
@@ -703,6 +741,8 @@ The 77 unit tests cover:
 - hang detection
 - tray behaviour with the real Windows taskbar
 - dragging files onto the strip or the Manage window
+- running apps with Windows' own window notifications, and matching Store
+  apps and Chrome/Edge web apps by AppUserModelID
 - the strip next to the real Windows taskbar: reserving screen space beside
   it on each edge, *Next to the Windows taskbar* following a taskbar on the
   top or side, and hiding for full-screen apps. Wine has no Windows taskbar,
@@ -747,8 +787,10 @@ src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/pkgsources.rs    package managers' folders and console programs   (tested)
+src/running.rs       which windows count, matching them to apps, clicks (tested)
 src/allview.rs       sorting and filtering the All list               (tested)
 src/win/watch.rs     automatic rescan when apps are installed
+src/win/running.rs   following open windows (shell notifications), switching
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
 src/win/indicator.rs the mark on category icons (styles, own picture)
@@ -792,6 +834,10 @@ analytics or cloud services.
   isn't a plain file name (with `\`, `/`, `..` or a drive) is ignored, so a
   hand-edited or shared config can't make FlexTaskbar read or delete a file
   outside that folder.
+- **Running apps.** Other programs are only looked at, never changed:
+  their windows are listed and their processes opened for reading their
+  program path (the limited "query information" right). A window is
+  brought to the front or minimised only when you click its app.
 - **Settings** are plain JSON in the data folder, saved atomically with a
   backup; a corrupt file is restored from the backup rather than trusted.
 - Nothing runs elevated unless you tick *Run as administrator* on a custom

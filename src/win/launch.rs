@@ -123,7 +123,7 @@ unsafe fn execute(sei: &mut SHELLEXECUTEINFOW, what: &str) -> Result<(), String>
     }
 }
 
-fn expand(s: &str) -> String {
+pub(super) fn expand(s: &str) -> String {
     if !s.contains('%') {
         return s.to_string();
     }

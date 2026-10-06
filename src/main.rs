@@ -9,6 +9,7 @@ mod flyanim;
 mod flykeys;
 mod migrate;
 mod pkgsources;
+mod running;
 mod search;
 mod shadow;
 mod striplayout;

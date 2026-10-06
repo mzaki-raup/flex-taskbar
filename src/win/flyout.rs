@@ -739,7 +739,7 @@ fn render(idx: usize) {
                     fill,
                 );
             }
-            if f.keyboard && f.key_level == idx && l.focus == Some(i) {
+            if f.keyboard && f.keys_used && f.key_level == idx && l.focus == Some(i) {
                 // The keyboard focus: a ring in the accent colour.
                 let (x, y, w, h) = (rc.left as f32, rc.top as f32, ui::rect_w(&rc) as f32, ui::rect_h(&rc) as f32);
                 cv.stroke_round_rect(x, y, w, h, r4, s(2) as f32, c.accent);
@@ -762,12 +762,23 @@ fn render(idx: usize) {
                         // where this subcategory's flyout opens.
                         super::indicator::draw(&mut cv, &f.look, &c, strip::edge(), x, y, size);
                     }
+                    if let Elem::Tile(id) = &p.elem
+                        && super::running::is_running(id)
+                    {
+                        // Just under the icon.
+                        let under = RECT { left: x, top: y, right: x + size, bottom: y + size + s(5) };
+                        super::indicator::running(&mut cv, &f.look, &c, Edge::Bottom, under, d);
+                    }
                     // Two lines reserved for the name, as in the original.
                     let trc =
                         RECT { left: rc.left + s(4), top: y + size + s(4), right: rc.right - s(4), bottom: rc.bottom };
                     cv.text(&p.text, trc, f.small, c.text, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
                 }
-                Elem::Row(_) => {
+                Elem::Row(id) => {
+                    if super::running::is_running(id) {
+                        // On the row's left edge.
+                        super::indicator::running(&mut cv, &f.look, &c, Edge::Left, rc, d);
+                    }
                     let size = s(20);
                     let x = rc.left + s(8);
                     let y = rc.top + (ui::rect_h(&rc) - size) / 2;

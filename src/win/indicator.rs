@@ -6,7 +6,7 @@
 use super::canvas::{self, Canvas};
 use super::icons::Source as IconSource;
 use super::paths;
-use crate::appearance::{Appearance, Colors, Indicator};
+use crate::appearance::{Appearance, Colors, Indicator, RunningMark};
 use crate::striplayout::Edge;
 use resvg::tiny_skia::Pixmap;
 use std::cell::RefCell;
@@ -83,6 +83,39 @@ pub fn draw(cv: &mut Canvas, look: &Appearance, c: &Colors, edge: Edge, x: i32, 
                 let (ix, iy) = ((cx - px as f32 / 2.0) as i32, (cy - px as f32 / 2.0) as i32);
                 with_image(file, px, |img| cv.image(img, ix, iy, px, 1.0));
             }
+        }
+    }
+}
+
+/// The mark under an app that has a window open, drawn inside `cell` on the
+/// side of `edge` (the screen edge for the bar; pass `Edge::Bottom` for a
+/// tile, whose mark sits under it).
+pub fn running(
+    cv: &mut Canvas,
+    look: &Appearance,
+    c: &Colors,
+    edge: Edge,
+    cell: windows::Win32::Foundation::RECT,
+    dpi: u32,
+) {
+    let s = |v: f32| v * dpi as f32 / 96.0;
+    let (l, t, r, b) = (cell.left as f32, cell.top as f32, cell.right as f32, cell.bottom as f32);
+    let (cx, cy) = ((l + r) / 2.0, (t + b) / 2.0);
+    let inset = s(3.0);
+    // Where the mark sits, and whether it runs along x.
+    let (mx, my, along_x) = match edge {
+        Edge::Bottom => (cx, b - inset, true),
+        Edge::Top => (cx, t + inset, true),
+        Edge::Left => (l + inset, cy, false),
+        Edge::Right => (r - inset, cy, false),
+    };
+    match look.running_mark {
+        RunningMark::Off => {}
+        RunningMark::Dot => cv.circle(mx, my, s(2.2), c.subtle),
+        RunningMark::Line => {
+            let (long, thick) = (s(10.0), s(3.0));
+            let (w, h) = if along_x { (long, thick) } else { (thick, long) };
+            cv.fill_round_rect(mx - w / 2.0, my - h / 2.0, w, h, thick / 2.0, c.subtle);
         }
     }
 }

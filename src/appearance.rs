@@ -56,6 +56,17 @@ pub enum FlyoutAnim {
     Genie,
 }
 
+/// The mark under apps that have a window open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunningMark {
+    Off,
+    /// A small dot, like the macOS Dock.
+    Dot,
+    /// A short line, like the Windows 11 taskbar.
+    Line,
+}
+
 /// The shadow under every flyout (see `shadow`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -193,6 +204,8 @@ pub struct Appearance {
     pub flyout_animation: FlyoutAnim,
     /// How long that takes, in milliseconds.
     pub flyout_animation_ms: u32,
+    /// The mark under running apps.
+    pub running_mark: RunningMark,
     /// The shadow under the flyouts.
     pub flyout_shadow: FlyoutShadow,
     /// Its strength in percent (100 = as designed).
@@ -225,6 +238,7 @@ impl Default for Appearance {
             flyout_border: None,
             flyout_animation: FlyoutAnim::Fade,
             flyout_animation_ms: 180,
+            running_mark: RunningMark::Line,
             flyout_shadow: FlyoutShadow::Soft,
             flyout_shadow_strength: 100,
             all_icon: None,
