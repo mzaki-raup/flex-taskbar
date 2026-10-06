@@ -26,6 +26,16 @@ pub enum Action {
     ToggleStrip,
     OpenDataFolder,
     Diagnostics,
+    /// Bars (see `bars`): switch to one, make one (a copy of this one or
+    /// empty), rename or delete this one, put a hidden category back.
+    SwitchBar(String),
+    NextBar,
+    NewBar {
+        copy: bool,
+    },
+    RenameBar,
+    DeleteBar,
+    ShowCategory(u64),
     Exit,
 }
 
@@ -80,6 +90,49 @@ impl Builder {
             let _ = InsertMenuItemW(menu, pos, true, &mii);
         }
         self.strings.push(w);
+    }
+
+    /// The *Bar* submenu: every bar (the one in use ticked), then making,
+    /// renaming and deleting them, and the categories this one leaves out.
+    fn bars(&mut self, s: &app::State) -> HMENU {
+        let sub = Builder::popup();
+        let cur = crate::bars::current(&s.cfg);
+        let names = crate::bars::names(&s.cfg);
+        for name in &names {
+            let state = if *name == cur { MFS_CHECKED } else { MENU_ITEM_STATE(0) };
+            let id = self.command(Action::SwitchBar(name.clone()));
+            self.item(sub, &escape_amp(name), id, None, None, state);
+        }
+        self.separator(sub);
+        if names.len() > 1 {
+            let label = match s.cfg.settings.next_bar_hotkey {
+                Some(hk) => format!("Next bar\t{}", hk.describe()),
+                None => "Next bar".to_string(),
+            };
+            let id = self.command(Action::NextBar);
+            self.item(sub, &label, id, None, None, MENU_ITEM_STATE(0));
+        }
+        let id = self.command(Action::NewBar { copy: false });
+        self.item(sub, "New empty bar…", id, None, None, MENU_ITEM_STATE(0));
+        let id = self.command(Action::NewBar { copy: true });
+        self.item(sub, "New bar copying this one…", id, None, None, MENU_ITEM_STATE(0));
+        let id = self.command(Action::RenameBar);
+        self.item(sub, "Rename this bar…", id, None, None, MENU_ITEM_STATE(0));
+        let id = self.command(Action::DeleteBar);
+        let state = if names.len() > 1 { MENU_ITEM_STATE(0) } else { MFS_DISABLED };
+        self.item(sub, "Delete this bar", id, None, None, state);
+        let hidden: Vec<&Category> =
+            s.cfg.categories.iter().filter(|c| s.cfg.hidden_categories.contains(&c.id)).collect();
+        if !hidden.is_empty() {
+            self.separator(sub);
+            let show = Builder::popup();
+            for c in hidden {
+                let id = self.command(Action::ShowCategory(c.id));
+                self.item(show, &escape_amp(&c.name), id, None, category_icon(s, c), MENU_ITEM_STATE(0));
+            }
+            self.item(sub, "Show on this bar", 0, Some(show), None, MENU_ITEM_STATE(0));
+        }
+        sub
     }
 
     fn separator(&mut self, menu: HMENU) {
@@ -237,6 +290,9 @@ pub fn build_main() -> Built {
         b.item(root, "Manage categories…", id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::Arrange);
         b.item(root, "Arrange the bar…", id, None, None, MENU_ITEM_STATE(0));
+        let bars = b.bars(s);
+        let label = format!("Bar: {}", escape_amp(&crate::bars::current(&s.cfg)));
+        b.item(root, &label, 0, Some(bars), None, MENU_ITEM_STATE(0));
         let id = b.command(Action::Appearance);
         b.item(root, "Appearance…", id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::Rescan);

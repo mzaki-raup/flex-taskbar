@@ -320,9 +320,28 @@ original FlexTaskbar:
   left*, *Move right*, *Move to end* and *Unpin*. Changes show on the bar
   straight away. (This order is the bar's own; the menus keep the order of
   the category tree.)
-- **Right-click** an icon to move it left or right, unpin it, arrange the bar,
-  manage categories or change the appearance; right-click anywhere else for the
-  full menu.
+- **Right-click** an icon to move it left or right, unpin it (an app) or hide
+  it from this bar (a category), arrange the bar, manage categories or change
+  the appearance; right-click anywhere else for the full menu.
+- **Several bars** ("Work", "Gaming"…). Each has its own pinned apps and
+  order, and can leave out some top-level categories. Use the *Bar* submenu
+  in the full menu (tray icon, or right-click an empty part of the bar):
+  - Pick a bar to switch to it (the one in use is ticked). **Ctrl+Alt+N**
+    (changeable: *Next bar* on the Manage window's *Hotkeys* card) goes to
+    the next one.
+  - *New empty bar…* starts with just the categories. *New bar copying
+    this one…* starts as a copy of the bar in use.
+  - *Rename this bar…* and *Delete this bar*. The last bar can't be
+    deleted. Deleting one only forgets its pins and order; the apps and
+    categories stay.
+  - To leave a category off a bar, right-click it there and choose *Hide
+    from this bar*. *Show on this bar* in the *Bar* submenu puts it back.
+    A hidden category stays in the menus, in search and on the other bars.
+
+  Pinning, unpinning, dragging and *Arrange the bar* all change the bar in
+  use. The bar starts as *Main*.
+
+  ![The Bar submenu: the bars Main and Gaming (ticked), Next bar, New empty bar…, New bar copying this one…, Rename, Delete, and Show on this bar with Development](screenshots/bars.png)
 - **Screen space.** By default the bar reserves its space like the taskbar
   does, so maximized windows stop above it. You can turn that off in the Manage
   window, and then the bar floats on top instead.
@@ -420,6 +439,7 @@ using them.
 | **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
 | **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
 | **Ctrl+Alt+B** (changeable) | The bar's *All* list, ready for the keyboard (see below) |
+| **Ctrl+Alt+N** (changeable) | The next bar, if you have made several (see *Several bars*) |
 | **A category's own hotkey** (none until you set one) | That category's flyout, ready for the keyboard; for a subcategory (no button on the bar), its menu at the pointer |
 
 Search matches the app name, its file name, and the names of the categories it
@@ -719,7 +739,7 @@ Run *Diagnostics…* on your PC for real Windows numbers.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 106 unit tests cover:
+The 110 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -747,6 +767,11 @@ The 106 unit tests cover:
   new again), filling them at any depth while leaving hand-made ones
   alone, the rule's format in `config.json`, and that a smart category
   can't be filled by hand or hold subcategories
+- several bars: one bar to begin with (and older configs reading as one),
+  new empty bars and copies (unique names), switching back and forth with
+  each keeping its pins, order and hidden categories, the next bar
+  wrapping round, renaming, deleting (never the last), hiding and showing
+  a category, and a deleted app leaving every bar
 - saved looks: unique names ("(2)", "(3)", blank names), saving replacing
   a look of the same name, the pictures a look shows, renaming one, and a
   picture counting as in use while any saved look shows it
@@ -858,7 +883,12 @@ The 106 unit tests cover:
     if no key was used. Wine doesn't give these windows the X keyboard
     focus by itself, so the tests set it with `xdotool`; Windows gives
     them the focus when they take the foreground.
-  - the *Bar* hotkey row on the Manage window's *Hotkeys* card
+  - the *Bar* and *Next bar* hotkey rows on the Manage window's *Hotkeys* card
+  - several bars: *New empty bar…* (named in the prompt, starting with only
+    the categories), *Hide from this bar* on a category, Ctrl+Alt+N going
+    back and forth with each bar keeping its own buttons, *Show on this
+    bar* putting the category back, *Rename this bar…*, and *Delete this
+    bar* (after asking) going back to *Main* with its pins as they were
   - global hotkeys, with keys sent to the X server: Ctrl+Alt+B opening
     *All*; a category hotkey set on the *Categories* card (saved, Ctrl+Alt+1
     opening *Development* with the keyboard focus on its first tile), and a
@@ -993,6 +1023,7 @@ src/backup.rs        settings backups: writing and checking the zip   (tested)
 src/looks.rs         saved looks: names, their pictures                (tested)
 src/folders.rs       pinned folders: what their flyouts list           (tested)
 src/smart.rs         smart categories: their rules, new and used apps  (tested)
+src/bars.rs          several bars: switching, making, hiding categories (tested)
 src/perf.rs          Diagnostics: drawing-time statistics, wording     (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)

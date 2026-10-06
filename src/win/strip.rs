@@ -1330,6 +1330,7 @@ fn context_menu(hit: Option<Hit>) {
     const LOOK: usize = 5;
     const HIDE: usize = 6;
     const ARRANGE: usize = 7;
+    const HIDE_CATEGORY: usize = 8;
     let key = key_of(&item);
     let (can_left, can_right) = app::with(|s| {
         let keys = s.cfg.bar_keys();
@@ -1348,8 +1349,10 @@ fn context_menu(hit: Option<Hit>) {
         let (back, forward) = if edge().vertical() { ("Move up", "Move down") } else { ("Move left", "Move right") };
         add(LEFT, back, can_left);
         add(RIGHT, forward, can_right);
-        if matches!(item, Item::App(_)) {
-            add(UNPIN, "Unpin from strip", true);
+        match item {
+            Item::App(_) => add(UNPIN, "Unpin from strip", true),
+            // Only off this bar: it stays in the menus and on other bars.
+            Item::Category(_) => add(HIDE_CATEGORY, "Hide from this bar", true),
         }
         let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
         pos += 1;
@@ -1404,6 +1407,13 @@ fn context_menu(hit: Option<Hit>) {
         LOOK => super::appearancewin::show(),
         ARRANGE => super::arrangewin::show(),
         HIDE => app::perform(menu::Action::ToggleStrip),
+        HIDE_CATEGORY => {
+            if let Item::Category(id) = item
+                && app::with(|s| crate::bars::show_category(&mut s.cfg, id, false))
+            {
+                app::save();
+            }
+        }
         _ => {}
     }
 }

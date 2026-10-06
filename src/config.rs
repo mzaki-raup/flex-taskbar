@@ -65,6 +65,8 @@ pub struct Settings {
     pub menu_hotkey: Option<Hotkey>,
     /// Opens the bar's *All* list with the keyboard in it.
     pub bar_hotkey: Option<Hotkey>,
+    /// Switches to the next bar (see `bars`).
+    pub next_bar_hotkey: Option<Hotkey>,
     pub max_recents: usize,
     pub show_recents_in_menu: bool,
     /// "All apps" in the menu is split into A–Z submenus above this many apps.
@@ -103,6 +105,7 @@ impl Default for Settings {
             search_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x20 }),
             menu_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x4D }), // M
             bar_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x42 }),  // B
+            next_bar_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x4E }), // N
             max_recents: 10,
             show_recents_in_menu: true,
             group_all_apps_above: 40,
@@ -207,6 +210,12 @@ pub struct Config {
     /// the app id for a pinned app. Buttons missing from it follow, root
     /// categories first; keys that no longer exist are ignored.
     pub bar_order: Vec<String>,
+    /// Root categories left off the bar in use.
+    pub hidden_categories: Vec<u64>,
+    /// Every bar, by name (see `bars`); the one in use is `bar`, and its
+    /// buttons are the fields above.
+    pub bars: Vec<crate::bars::Bar>,
+    pub bar: String,
     /// When each app was first seen, for *Recently installed* (Unix
     /// seconds; 0 for apps that were there before anything was noted).
     pub first_seen: BTreeMap<String, u64>,
@@ -226,6 +235,9 @@ impl Default for Config {
             recents: Vec::new(),
             pinned: Vec::new(),
             bar_order: Vec::new(),
+            hidden_categories: Vec::new(),
+            bars: Vec::new(),
+            bar: String::new(),
             first_seen: BTreeMap::new(),
             launches: BTreeMap::new(),
             next_id: 1,
@@ -291,7 +303,12 @@ impl Config {
 
     /// The strip's buttons, left to right, as keys (see [`Config::bar_order`]).
     pub fn bar_keys(&self) -> Vec<String> {
-        let roots: Vec<String> = self.categories.iter().map(|c| format!("cat:{}", c.id)).collect();
+        let roots: Vec<String> = self
+            .categories
+            .iter()
+            .filter(|c| !self.hidden_categories.contains(&c.id))
+            .map(|c| format!("cat:{}", c.id))
+            .collect();
         let exists = |k: &String| roots.contains(k) || self.pinned.contains(k);
         let mut out: Vec<String> = Vec::with_capacity(roots.len() + self.pinned.len());
         for k in self.bar_order.iter().chain(&roots).chain(&self.pinned) {

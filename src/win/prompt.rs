@@ -8,11 +8,11 @@ use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, GetSysColorBrush, HBRUSH};
 use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus};
 use windows::Win32::UI::WindowsAndMessaging::{
     BS_DEFPUSHBUTTON, BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL,
-    GetMessageW, GetWindowRect, IDCANCEL, IDOK, IsDialogMessageW, MSG, PostQuitMessage, RegisterClassW, SW_SHOW,
-    SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_EX_DLGMODALFRAME,
-    WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    GetMessageW, GetWindowRect, IDCANCEL, IDOK, IsDialogMessageW, IsWindowVisible, MSG, PostQuitMessage,
+    RegisterClassW, SW_SHOW, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD,
+    WS_CLIPCHILDREN, WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::PCWSTR;
 
@@ -120,8 +120,14 @@ pub fn ask(owner: HWND, title: &str, label: &str, initial: &str) -> Option<Strin
         let mut outer = RECT { left: 0, top: 0, right, bottom: footer + pm.footer };
         let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(&mut outer, style, false, WS_EX_DLGMODALFRAME, dpi);
         let (ww, wh) = (ui::rect_w(&outer), ui::rect_h(&outer));
+        // Over its owner, or (for the hidden main window: the tray menu) the
+        // screen with the pointer on it.
         let mut orc = RECT::default();
-        let _ = GetWindowRect(owner, &mut orc);
+        if IsWindowVisible(owner).as_bool() {
+            let _ = GetWindowRect(owner, &mut orc);
+        } else {
+            orc = ui::work_area_at_cursor();
+        }
         let left = orc.left + (ui::rect_w(&orc) - ww) / 2;
         let top = orc.top + (ui::rect_h(&orc) - wh) / 3;
         let _ = SetWindowPos(hwnd, None, left, top, ww, wh, SWP_NOZORDER);

@@ -6,6 +6,7 @@ mod appearance;
 mod appkind;
 mod autohide;
 mod backup;
+mod bars;
 mod config;
 mod flyanim;
 mod flykeys;

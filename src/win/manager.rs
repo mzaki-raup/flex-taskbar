@@ -97,6 +97,8 @@ const LBL_CAT_HOTKEY: u16 = 78;
 const CAT_HOTKEY: u16 = 79;
 const CAT_HOTKEY_SET: u16 = 80;
 const CAT_SMART: u16 = 81;
+const LBL_HK_NEXT: u16 = 82;
+const HK_NEXT: u16 = 83;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -330,6 +332,11 @@ fn create() {
         controls.insert(LBL_HK_SEARCH, label("Search", LBL_HK_SEARCH));
         controls.insert(LBL_HK_MENU, label("Menu", LBL_HK_MENU));
         controls.insert(LBL_HK_BAR, label("Bar", LBL_HK_BAR));
+        controls.insert(LBL_HK_NEXT, label("Next bar", LBL_HK_NEXT));
+        controls.insert(
+            HK_NEXT,
+            ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), HK_NEXT),
+        );
         controls.insert(LBL_CAT_HOTKEY, label("Hotkey", LBL_CAT_HOTKEY));
         controls.insert(
             CAT_HOTKEY,
@@ -427,7 +434,7 @@ fn layout() {
     // Inside a card.
     let (inner_w, ix) = (col_w - 2 * pm.pad, cols.map(|x| x + pm.pad));
     let footer = rc.bottom - pm.footer;
-    let options_h = pm.card_title + 4 * pitch + s(6);
+    let options_h = pm.card_title + 5 * pitch + s(6);
     let options_top = footer - pm.margin - options_h;
     let top = pm.header;
     let pane_bottom = options_top - pm.gap;
@@ -498,8 +505,10 @@ fn layout() {
     place(HK_MENU, ix[2] + lw, line(1) + s(2), inner_w - lw, s(24));
     place(LBL_HK_BAR, ix[2], line(2) + s(5), lw, lh);
     place(HK_BAR, ix[2] + lw, line(2) + s(2), inner_w - lw, s(24));
-    place(HK_APPLY, ix[2], line(3), s(120), bh);
-    place(LBL_HINT, ix[2] + s(128), line(3) + s(5), inner_w - s(128), lh);
+    place(LBL_HK_NEXT, ix[2], line(3) + s(5), lw, lh);
+    place(HK_NEXT, ix[2] + lw, line(3) + s(2), inner_w - lw, s(24));
+    place(HK_APPLY, ix[2], line(4), s(120), bh);
+    place(LBL_HINT, ix[2] + s(128), line(4) + s(5), inner_w - s(128), lh);
 
     // Command bar: where the data lives, and the other windows.
     let by = footer + (pm.footer - bh) / 2;
@@ -1150,7 +1159,7 @@ fn delete_custom_app(owner: HWND) {
             s.cfg.custom_apps.retain(|c| c.id != *id);
             tree::remove_app_everywhere(&mut s.cfg.categories, id);
             s.cfg.recents.retain(|r| r != id);
-            s.cfg.unpin(id);
+            crate::bars::forget_app(&mut s.cfg, id);
             if let Some(f) = s.cfg.app_icons.remove(id) {
                 paths::remove_icon(&f);
             }
@@ -1410,7 +1419,7 @@ fn set_category_hotkey(owner: HWND) {
         }
         let taken = app::with(|s| {
             let st = &s.cfg.settings;
-            let mut used = [st.search_hotkey, st.menu_hotkey, st.bar_hotkey].contains(&Some(hk));
+            let mut used = [st.search_hotkey, st.menu_hotkey, st.bar_hotkey, st.next_bar_hotkey].contains(&Some(hk));
             tree::walk(&s.cfg.categories, &mut |c, _| used |= c.id != id && c.hotkey == Some(hk));
             used
         });
@@ -1484,12 +1493,15 @@ fn hotkey_from_control(id: u16) -> Option<Hotkey> {
 }
 
 fn load_settings() {
-    let (search, menu, bar) =
-        app::with(|s| (s.cfg.settings.search_hotkey, s.cfg.settings.menu_hotkey, s.cfg.settings.bar_hotkey));
+    let (search, menu, bar, next) = app::with(|s| {
+        let st = &s.cfg.settings;
+        (st.search_hotkey, st.menu_hotkey, st.bar_hotkey, st.next_bar_hotkey)
+    });
     unsafe {
         SendMessageW(ctl(HK_SEARCH), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(search))), Some(LPARAM(0)));
         SendMessageW(ctl(HK_MENU), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(menu))), Some(LPARAM(0)));
         SendMessageW(ctl(HK_BAR), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(bar))), Some(LPARAM(0)));
+        SendMessageW(ctl(HK_NEXT), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(next))), Some(LPARAM(0)));
         let check = if autostart::is_enabled() { BST_CHECKED } else { BST_UNCHECKED };
         SendMessageW(ctl(AUTOSTART), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
         let (show, reserve, auto, packages, switch) = app::with(|s| {
@@ -1538,13 +1550,14 @@ fn apply_hotkeys(owner: HWND) {
     let search = hotkey_from_control(HK_SEARCH);
     let menu = hotkey_from_control(HK_MENU);
     let bar = hotkey_from_control(HK_BAR);
-    for hk in [search, menu, bar].into_iter().flatten() {
+    let next = hotkey_from_control(HK_NEXT);
+    for hk in [search, menu, bar, next].into_iter().flatten() {
         if let Some(problem) = hotkey_problem(hk) {
             ui::warn(Some(owner), &problem);
             return;
         }
     }
-    let set: Vec<_> = [search, menu, bar].into_iter().flatten().collect();
+    let set: Vec<_> = [search, menu, bar, next].into_iter().flatten().collect();
     let clash = app::with(|s| {
         let mut clash = None;
         tree::walk(&s.cfg.categories, &mut |c, _| {
@@ -1558,15 +1571,16 @@ fn apply_hotkeys(owner: HWND) {
         ui::warn(Some(owner), &format!("One of these hotkeys is already the hotkey of “{name}”."));
         return;
     }
-    let set: Vec<_> = [search, menu, bar].into_iter().flatten().collect();
+    let set: Vec<_> = [search, menu, bar, next].into_iter().flatten().collect();
     if (1..set.len()).any(|i| set[..i].contains(&set[i])) {
-        ui::warn(Some(owner), "The search, menu and bar hotkeys must all be different.");
+        ui::warn(Some(owner), "The search, menu, bar and next-bar hotkeys must all be different.");
         return;
     }
     app::with(|s| {
         s.cfg.settings.search_hotkey = search;
         s.cfg.settings.menu_hotkey = menu;
         s.cfg.settings.bar_hotkey = bar;
+        s.cfg.settings.next_bar_hotkey = next;
     });
     app::save();
     let problems = app::register_hotkeys();

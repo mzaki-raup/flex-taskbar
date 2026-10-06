@@ -55,6 +55,7 @@ const NIN_KEYSELECT: u32 = NIN_SELECT | 0x1;
 const HOTKEY_SEARCH: i32 = 1;
 const HOTKEY_MENU: i32 = 2;
 const HOTKEY_BAR: i32 = 3;
+const HOTKEY_NEXT_BAR: i32 = 4;
 /// Category hotkeys are numbered from here.
 const HOTKEY_CATEGORY: i32 = 100;
 
@@ -323,6 +324,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 HOTKEY_SEARCH => searchwin::toggle(),
                 HOTKEY_MENU => show_menu(),
                 HOTKEY_BAR => super::flyout::keyboard_open(),
+                HOTKEY_NEXT_BAR => next_bar(),
                 n if n >= HOTKEY_CATEGORY => {
                     let cat = CATEGORY_HOTKEYS.with(|c| c.borrow().iter().find(|(h, _)| *h == n).map(|(_, c)| *c));
                     if let Some(cat) = cat {
@@ -471,7 +473,66 @@ pub fn perform(action: menu::Action) {
         menu::Action::ToggleStrip => set_strip(None),
         menu::Action::OpenDataFolder => open_data_folder(),
         menu::Action::Diagnostics => super::diagnostics::show(),
+        menu::Action::SwitchBar(name) => switch_bar(&name),
+        menu::Action::NextBar => next_bar(),
+        menu::Action::NewBar { copy } => new_bar(copy),
+        menu::Action::RenameBar => rename_bar(),
+        menu::Action::DeleteBar => delete_bar(),
+        menu::Action::ShowCategory(id) => {
+            if with(|s| crate::bars::show_category(&mut s.cfg, id, true)) {
+                save();
+            }
+        }
         menu::Action::Exit => exit(),
+    }
+}
+
+// ---------------------------------------------------------------- bars
+
+/// Puts the bar called `name` in place of the one in use.
+pub fn switch_bar(name: &str) {
+    super::flyout::close();
+    if with(|s| crate::bars::switch(&mut s.cfg, name)) {
+        save();
+    }
+}
+
+/// The next bar (the *Next bar* hotkey).
+fn next_bar() {
+    if let Some(name) = with(|s| crate::bars::next(&s.cfg)) {
+        switch_bar(&name);
+    }
+}
+
+fn new_bar(copy: bool) {
+    let label = if copy { "Name of the copy" } else { "Name of the new bar" };
+    let Some(name) = super::prompt::ask(main_hwnd(), "New bar", label, if copy { "" } else { "New bar" }) else {
+        return;
+    };
+    super::flyout::close();
+    with(|s| crate::bars::add(&mut s.cfg, &name, copy));
+    save();
+}
+
+fn rename_bar() {
+    let cur = with(|s| crate::bars::current(&s.cfg));
+    let Some(name) = super::prompt::ask(main_hwnd(), "Rename bar", "Name of this bar", &cur) else { return };
+    if with(|s| crate::bars::rename(&mut s.cfg, &name)).is_some() {
+        save();
+    }
+}
+
+fn delete_bar() {
+    let cur = with(|s| crate::bars::current(&s.cfg));
+    let text = format!(
+        "Delete the bar “{cur}”?\n\nIts pinned apps and order are forgotten; the apps and categories themselves stay."
+    );
+    if !ui::confirm(None, &text) {
+        return;
+    }
+    super::flyout::close();
+    if with(|s| crate::bars::delete_current(&mut s.cfg)).is_some() {
+        save();
     }
 }
 
@@ -829,12 +890,17 @@ pub fn reload_icon(key: &str) {
 /// (Re)registers the hotkeys. Returns a message per hotkey that another
 /// program already owns.
 pub fn register_hotkeys() -> Vec<String> {
-    let (main, search, menu, bar) = with(|s| {
+    let (main, search, menu, bar, next) = with(|s| {
         let st = &s.cfg.settings;
-        (s.main, st.search_hotkey, st.menu_hotkey, st.bar_hotkey)
+        (s.main, st.search_hotkey, st.menu_hotkey, st.bar_hotkey, st.next_bar_hotkey)
     });
     let mut problems = Vec::new();
-    for (id, hk, what) in [(HOTKEY_SEARCH, search, "search"), (HOTKEY_MENU, menu, "menu"), (HOTKEY_BAR, bar, "bar")] {
+    for (id, hk, what) in [
+        (HOTKEY_SEARCH, search, "search"),
+        (HOTKEY_MENU, menu, "menu"),
+        (HOTKEY_BAR, bar, "bar"),
+        (HOTKEY_NEXT_BAR, next, "next bar"),
+    ] {
         unsafe {
             let _ = UnregisterHotKey(Some(main), id);
         }

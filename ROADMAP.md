@@ -55,7 +55,7 @@ can collect real numbers there, then pick from the unticked items below.
   Filled automatically ("Recently installed", "Most used", "Package
   manager tools"), or by simple rules (kind is…, path contains…). Kept
   separate from hand-made categories so nothing is moved by surprise.
-- [ ] **Bar profiles** · 🟡
+- [x] **Bar profiles** · 🟡
   Several bars ("Work", "Gaming") with their own pinned apps and order,
   switched from the tray menu or a hotkey.
 - [x] **A hotkey per category** · 🟢
