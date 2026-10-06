@@ -51,7 +51,7 @@ can collect real numbers there, then pick from the unticked items below.
   stacks), folders first then by name; sub-folders open further flyouts.
 - [x] **Drag from a flyout or the All list** · 🟡
   Drag an app onto the bar to pin it, or onto a category to file it there.
-- [ ] **Smart categories** · 🟡
+- [x] **Smart categories** · 🟡
   Filled automatically ("Recently installed", "Most used", "Package
   manager tools"), or by simple rules (kind is…, path contains…). Kept
   separate from hand-made categories so nothing is moved by surprise.

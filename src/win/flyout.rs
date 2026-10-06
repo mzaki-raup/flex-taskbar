@@ -1846,7 +1846,8 @@ fn sub_at(pt: POINT) -> Option<(usize, usize, u64)> {
     let (idx, x, y) = hit;
     let i = elem_at(idx, x, y)?;
     match elem(idx, i)? {
-        Elem::Sub(id) => Some((idx, i, id)),
+        // A smart subcategory fills itself: nothing can be dropped in it.
+        Elem::Sub(id) if !app::is_smart(id) => Some((idx, i, id)),
         _ => None,
     }
 }

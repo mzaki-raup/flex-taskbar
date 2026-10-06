@@ -103,7 +103,8 @@ pub fn indent_fits(cats: &[Category], id: u64, limit: usize) -> bool {
 }
 
 /// Adds `cat` as the last child of `parent` (or as a root category). Returns false
-/// if the parent doesn't exist.
+/// if the parent doesn't exist, or is a smart category (they hold no
+/// subcategories).
 pub fn add(cats: &mut Vec<Category>, parent: Option<u64>, cat: Category) -> bool {
     match parent {
         None => {
@@ -111,11 +112,11 @@ pub fn add(cats: &mut Vec<Category>, parent: Option<u64>, cat: Category) -> bool
             true
         }
         Some(pid) => match find_mut(cats, pid) {
-            Some(p) => {
+            Some(p) if p.smart.is_none() => {
                 p.children.push(cat);
                 true
             }
-            None => false,
+            _ => false,
         },
     }
 }
@@ -148,6 +149,9 @@ pub fn indent(cats: &mut Vec<Category>, id: u64) -> bool {
         return false;
     }
     let list = list_at_mut(cats, parent);
+    if list[last - 1].smart.is_some() {
+        return false;
+    }
     let cat = list.remove(last);
     list[last - 1].children.push(cat);
     true
@@ -167,9 +171,14 @@ pub fn outdent(cats: &mut Vec<Category>, id: u64) -> bool {
     true
 }
 
+/// A category that can be filled by hand (it exists and isn't smart).
+fn hand_made(cats: &mut [Category], id: u64) -> Option<&mut Category> {
+    find_mut(cats, id).filter(|c| c.smart.is_none())
+}
+
 /// Moves an app one place up or down inside a category.
 pub fn move_app(cats: &mut [Category], cat_id: u64, app_id: &str, delta: isize) -> bool {
-    let Some(cat) = find_mut(cats, cat_id) else { return false };
+    let Some(cat) = hand_made(cats, cat_id) else { return false };
     let Some(pos) = cat.apps.iter().position(|a| a == app_id) else { return false };
     let target = pos as isize + delta;
     if target < 0 || target as usize >= cat.apps.len() {
@@ -181,7 +190,7 @@ pub fn move_app(cats: &mut [Category], cat_id: u64, app_id: &str, delta: isize) 
 
 /// Appends the app to the category unless it's already there.
 pub fn add_app(cats: &mut [Category], cat_id: u64, app_id: &str) -> bool {
-    let Some(cat) = find_mut(cats, cat_id) else { return false };
+    let Some(cat) = hand_made(cats, cat_id) else { return false };
     if cat.apps.iter().any(|a| a == app_id) {
         return false;
     }
@@ -190,7 +199,7 @@ pub fn add_app(cats: &mut [Category], cat_id: u64, app_id: &str) -> bool {
 }
 
 pub fn remove_app(cats: &mut [Category], cat_id: u64, app_id: &str) -> bool {
-    let Some(cat) = find_mut(cats, cat_id) else { return false };
+    let Some(cat) = hand_made(cats, cat_id) else { return false };
     let before = cat.apps.len();
     cat.apps.retain(|a| a != app_id);
     cat.apps.len() != before
@@ -271,6 +280,31 @@ mod tests {
         let removed = remove(&mut t, 2).unwrap();
         assert_eq!(removed.children[0].children[0].name, "Plugins");
         assert_eq!(names(&t), vec!["Dev", "-Tools", "Games"]);
+    }
+
+    #[test]
+    fn smart_categories_are_not_filled_by_hand() {
+        let mut t = sample();
+        let smart = crate::smart::Smart::MostUsed { count: 5 };
+        t[1] = Category {
+            id: 5,
+            name: "Most used".into(),
+            apps: vec!["a".into(), "b".into()],
+            smart: Some(smart),
+            ..Default::default()
+        };
+        assert!(!add_app(&mut t, 5, "c"));
+        assert!(!remove_app(&mut t, 5, "a"));
+        assert!(!move_app(&mut t, 5, "a", 1));
+        assert_eq!(t[1].apps, ["a", "b"]);
+        // No subcategories in it, by adding or by indenting.
+        assert!(!add(&mut t, Some(5), cat(6, "x", vec![])));
+        t.push(cat(7, "After", vec![]));
+        assert!(!indent(&mut t, 7));
+        // A hand-made one still can.
+        assert!(add_app(&mut t, 4, "c"));
+        assert!(indent(&mut t, 5)); // the smart one itself may go inside another
+        assert_eq!(parent_of(&t, 5), Some(1));
     }
 
     #[test]

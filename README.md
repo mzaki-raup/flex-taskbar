@@ -94,6 +94,35 @@ The Manage window shows the limit above the category tree and won't add or
 indent a category past it. Categories already deeper (from an import, or after
 switching to a smaller screen) keep working; their flyouts just overlap.
 
+**Smart categories** fill themselves. Make one with *Smart…* under the
+category tree in the Manage window, then *New smart category*:
+- **Recently installed:** apps that turned up in the last 14 days, newest
+  first. You can pick 7, 14, 30 or 90 days.
+- **Most used:** the 10 apps you launch (or switch to) most often. You can
+  pick 5, 10, 15 or 20.
+- **Package manager tools, Web apps, Store apps,** or **apps whose name
+  contains** some words (the name or the file, ignoring case).
+
+With a smart category selected, *Smart…* changes what fills it. *Apps of a
+kind* ticks one or more kinds. *Whose name contains…* sets the words; it
+combines with the kinds, and an empty answer clears them. *Stop filling it
+by itself* turns it into an ordinary category that keeps the apps it has.
+
+How it behaves:
+- The list updates when the app list changes (a rescan, a custom app added
+  or removed) and after every launch. A smart category holds at most 48 apps.
+- It can't be filled by hand: adding, removing and reordering its apps are
+  turned off, and nothing can be dropped on it. So nothing you filed
+  yourself ever moves. A smart category has no subcategories, but it can
+  sit inside an ordinary one, and it can have an icon and a hotkey like
+  any category.
+- New apps are noted the first time the list contains them. Apps already
+  there when FlexTaskbar first looked don't count as recently installed.
+  Neither does a batch of more than 10 apps appearing at once (such as
+  turning on package managers' apps), since that isn't new installs.
+
+![The Manage window: a smart category "Package manager tools" that fills itself, its Smart… menu open on Apps of a kind](screenshots/smart-categories.png)
+
 **The bar** is docked against an edge of the primary monitor, laid out like the
 original FlexTaskbar:
 - **Any edge.** By default it sits next to the Windows taskbar, on the same
@@ -690,7 +719,7 @@ Run *Diagnostics…* on your PC for real Windows numbers.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 100 unit tests cover:
+The 106 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -710,6 +739,14 @@ The 100 unit tests cover:
 - pinned folders: hidden and system files left out, folders first, then
   by name ignoring case, the cap with the number left over, and shortcut
   names shown without `.lnk`/`.url`
+- smart categories: recently installed (newest first, the day limit, apps
+  that were always there left out), most used (most launches first, ties
+  by name, never-launched left out), kinds and words (in the name or the
+  file, ignoring case), the 48-app cap, noting new apps (the first list
+  and big batches as always there, apps gone forgotten so a reinstall is
+  new again), filling them at any depth while leaving hand-made ones
+  alone, the rule's format in `config.json`, and that a smart category
+  can't be filled by hand or hold subcategories
 - saved looks: unique names ("(2)", "(3)", blank names), saving replacing
   a look of the same name, the pictures a look shows, renaming one, and a
   picture counting as in use while any saved look shows it
@@ -862,6 +899,13 @@ The 100 unit tests cover:
   - dragging a pinned app and a category to new places, and the *Arrange the
     bar* window (buttons and dragging rows), all updating the bar live
   - *Pin to strip*
+  - smart categories: *Package manager tools* filled with the five
+    package-manager tools; *Most used* following launches from the bar
+    (Notepad twice, then Minesweeper); switching a rule to a kind, then
+    to "pad" in the name (Notepad, scratchpad, WordPad); *Recently
+    installed* picking up a custom app as soon as it was added; *Stop
+    filling it by itself* keeping its apps; and adding, removing and
+    reordering turned off while one is selected
   - dragging apps out of flyouts: a tile pinned between two bar buttons,
     an *All* row filed in a bar category, a tile filed in a subcategory
     tile of the same flyout, an app already in that subcategory left as it
@@ -948,6 +992,7 @@ src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
 src/backup.rs        settings backups: writing and checking the zip   (tested)
 src/looks.rs         saved looks: names, their pictures                (tested)
 src/folders.rs       pinned folders: what their flyouts list           (tested)
+src/smart.rs         smart categories: their rules, new and used apps  (tested)
 src/perf.rs          Diagnostics: drawing-time statistics, wording     (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
@@ -990,7 +1035,9 @@ order, are in [ROADMAP.md](ROADMAP.md).
 ## Privacy
 
 Everything stays on your machine. There are no network requests, telemetry,
-analytics or cloud services.
+analytics or cloud services. For *Most used* and *Recently installed*,
+`config.json` keeps a launch count per app and the time each app was first
+seen. Only apps still installed are kept, and nothing else is recorded.
 
 ## Security
 

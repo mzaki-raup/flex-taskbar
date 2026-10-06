@@ -17,6 +17,7 @@ mod pkgsources;
 mod running;
 mod search;
 mod shadow;
+mod smart;
 mod striplayout;
 mod tree;
 

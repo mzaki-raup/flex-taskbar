@@ -884,7 +884,13 @@ fn incoming_at(s: &Strip, pt: POINT) -> Option<striplayout::DropOn> {
         return None;
     }
     let is_category = |i: usize| matches!(s.items.get(i), Some(Item::Category(_)));
-    Some(striplayout::drop_on(&s.layout.items, is_category, along))
+    match striplayout::drop_on(&s.layout.items, is_category, along) {
+        // A smart category fills itself: nothing can be dropped in it.
+        striplayout::DropOn::Into(i) if matches!(s.items.get(i), Some(Item::Category(id)) if app::is_smart(*id)) => {
+            None
+        }
+        on => Some(on),
+    }
 }
 
 /// An app is being dragged out of a flyout, the pointer now at `pt` (`None`

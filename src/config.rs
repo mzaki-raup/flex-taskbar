@@ -171,6 +171,9 @@ pub struct Category {
     pub children: Vec<Category>,
     /// Opens this category from anywhere.
     pub hotkey: Option<Hotkey>,
+    /// A smart category: `apps` is filled from this rule, not by hand.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart: Option<crate::smart::Smart>,
 }
 
 /// An app the user added by hand (an exe, a shortcut, a URL, a `shell:` target,
@@ -204,6 +207,11 @@ pub struct Config {
     /// the app id for a pinned app. Buttons missing from it follow, root
     /// categories first; keys that no longer exist are ignored.
     pub bar_order: Vec<String>,
+    /// When each app was first seen, for *Recently installed* (Unix
+    /// seconds; 0 for apps that were there before anything was noted).
+    pub first_seen: BTreeMap<String, u64>,
+    /// How often each app was launched (or switched to), for *Most used*.
+    pub launches: BTreeMap<String, u32>,
     pub next_id: u64,
 }
 
@@ -218,6 +226,8 @@ impl Default for Config {
             recents: Vec::new(),
             pinned: Vec::new(),
             bar_order: Vec::new(),
+            first_seen: BTreeMap::new(),
+            launches: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -243,6 +253,8 @@ impl Config {
         self.recents.retain(|r| r != app_id);
         self.recents.insert(0, app_id.to_string());
         self.recents.truncate(self.settings.max_recents.max(1));
+        let n = self.launches.entry(app_id.to_string()).or_insert(0);
+        *n = n.saturating_add(1);
     }
 
     /// Pins an app to the strip (at the end). Returns false if already pinned.

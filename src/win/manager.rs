@@ -96,6 +96,7 @@ const RESTORE: u16 = 77;
 const LBL_CAT_HOTKEY: u16 = 78;
 const CAT_HOTKEY: u16 = 79;
 const CAT_HOTKEY_SET: u16 = 80;
+const CAT_SMART: u16 = 81;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -237,6 +238,7 @@ fn create() {
             ("← Out", CAT_OUT),
             ("In →", CAT_IN),
             ("Icon…", CAT_ICON),
+            ("Smart…", CAT_SMART),
         ] {
             controls.insert(id, button(text, id));
         }
@@ -461,7 +463,7 @@ fn layout() {
     place(CAT_HOTKEY_SET, ix[0] + inner_w - s(80), hk_y, s(80), bh);
     let tree_bottom = hk_y + bh;
     row(&[CAT_NEW, CAT_SUB, CAT_RENAME, CAT_DELETE, CAT_ICON], ix[0], tree_bottom + gap, inner_w);
-    row(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN], ix[0], last_row, inner_w);
+    row(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN, CAT_SMART], ix[0], last_row, inner_w);
 
     // Apps in the category.
     place(LBL_APPS, ix[1], sub_y, inner_w, s(16));
@@ -649,6 +651,14 @@ fn too_deep(owner: HWND) {
 }
 
 fn new_category(parent: Option<u64>) {
+    if let Some(p) = parent
+        && app::with(|s| tree::find(&s.cfg.categories, p).is_some_and(|c| c.smart.is_some()))
+    {
+        if let Some(h) = hwnd() {
+            ui::info(Some(h), "A smart category fills itself with apps, so it can't hold subcategories.");
+        }
+        return;
+    }
     if let Some(p) = parent {
         let limit = super::strip::max_levels();
         if !app::with(|s| tree::sub_fits(&s.cfg.categories, p, limit)) {
@@ -674,6 +684,164 @@ fn new_category(parent: Option<u64>) {
     }
     rebuild_tree(Some(id));
     edit_label(id);
+}
+
+// ---------------------------------------------------------------- smart categories
+
+/// *Smart…*: make a new smart category, or change what fills the selected one.
+fn smart_menu(owner: HWND) {
+    use crate::allview::KindGroup;
+    use crate::smart::Smart;
+    use windows::Win32::UI::WindowsAndMessaging::{AppendMenuW, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR};
+    const NEW: usize = 1;
+    const NAMED: usize = 50;
+    const DAYS: usize = 100;
+    const COUNT: usize = 200;
+    const KIND: usize = 300;
+    const CONTAINS: usize = 400;
+    const STOP: usize = 401;
+    const DAY_CHOICES: [u32; 4] = [7, 14, 30, 90];
+    const COUNT_CHOICES: [usize; 4] = [5, 10, 15, 20];
+    let presets = Smart::presets();
+    let selected = selected_category();
+    let current = app::with(|s| {
+        selected.and_then(|id| tree::find(&s.cfg.categories, id)).and_then(|c| Some((c.name.clone(), c.smart.clone()?)))
+    });
+    let chosen = unsafe {
+        let menu = CreatePopupMenu().unwrap_or_default();
+        let add = |m: HMENU, flags, id: usize, text: &str| {
+            let t = wide(&ui::escape_amp(text));
+            let _ = AppendMenuW(m, flags, id, PCWSTR(t.as_ptr()));
+        };
+        let sub = |m: HMENU, text: &str| {
+            let s = CreatePopupMenu().unwrap_or_default();
+            let t = wide(text);
+            let _ = AppendMenuW(m, MF_POPUP, s.0 as usize, PCWSTR(t.as_ptr()));
+            s
+        };
+        let new = sub(menu, "New smart category");
+        for (i, (name, _)) in presets.iter().enumerate() {
+            add(new, MF_STRING, NEW + i, name);
+        }
+        add(new, MF_STRING, NAMED, "Apps whose name contains…");
+        if let Some((name, rule)) = &current {
+            add(menu, MF_SEPARATOR, 0, "");
+            add(menu, MF_STRING | MF_GRAYED, 0, &format!("“{name}” fills itself with:"));
+            let check = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
+            let recent = sub(menu, "Recently installed apps");
+            for (i, d) in DAY_CHOICES.iter().enumerate() {
+                let on = matches!(rule, Smart::RecentlyInstalled { days } if days == d);
+                add(recent, check(on), DAYS + i, &format!("From the last {d} days"));
+            }
+            let used = sub(menu, "Most used apps");
+            for (i, n) in COUNT_CHOICES.iter().enumerate() {
+                let on = matches!(rule, Smart::MostUsed { count } if count == n);
+                add(used, check(on), COUNT + i, &format!("The {n} most used"));
+            }
+            let kinds = sub(menu, "Apps of a kind");
+            for (i, k) in KindGroup::ALL.iter().enumerate() {
+                let on = matches!(rule, Smart::Matching { kinds, .. } if kinds.contains(k));
+                add(kinds, check(on), KIND + i, k.title());
+            }
+            let words = match rule {
+                Smart::Matching { contains, .. } if !contains.trim().is_empty() => {
+                    format!("Whose name contains “{}”…", contains.trim())
+                }
+                _ => "Whose name contains…".to_string(),
+            };
+            add(menu, MF_STRING, CONTAINS, &words);
+            add(menu, MF_SEPARATOR, 0, "");
+            add(menu, MF_STRING, STOP, "Stop filling it by itself (keep its apps)");
+        }
+        let mut rc = RECT::default();
+        let _ = GetWindowRect(ctl(CAT_SMART), &mut rc);
+        let id = TrackPopupMenuEx(menu, TPM_RETURNCMD.0, rc.left, rc.bottom, owner, None).0 as usize;
+        let _ = DestroyMenu(menu); // and its submenus with it
+        id
+    };
+    let ask_words = |initial: &str| {
+        super::prompt::ask(owner, "Smart category", "Apps whose name or file contains", initial)
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    };
+    let change = |f: &dyn Fn(&mut Option<Smart>)| {
+        let Some(id) = selected else { return };
+        app::with(|s| {
+            if let Some(c) = tree::find_mut(&mut s.cfg.categories, id) {
+                f(&mut c.smart);
+            }
+        });
+        app::refill_smart(false);
+        app::save();
+        rebuild_tree(Some(id));
+    };
+    match chosen {
+        i if (NEW..NEW + presets.len()).contains(&i) => {
+            let (name, rule) = presets[i - NEW].clone();
+            new_smart_category(name, rule);
+        }
+        NAMED => {
+            if let Some(words) = ask_words("") {
+                let rule = Smart::Matching { kinds: Vec::new(), contains: words.clone() };
+                new_smart_category(&format!("“{words}” apps"), rule);
+            }
+        }
+        i if (DAYS..DAYS + DAY_CHOICES.len()).contains(&i) => {
+            change(&|r| *r = Some(Smart::RecentlyInstalled { days: DAY_CHOICES[i - DAYS] }))
+        }
+        i if (COUNT..COUNT + COUNT_CHOICES.len()).contains(&i) => {
+            change(&|r| *r = Some(Smart::MostUsed { count: COUNT_CHOICES[i - COUNT] }))
+        }
+        i if (KIND..KIND + KindGroup::ALL.len()).contains(&i) => {
+            let k = KindGroup::ALL[i - KIND];
+            change(&|r| {
+                // Ticking a kind keeps the words; switching from another rule starts from it alone.
+                let (mut kinds, contains) = match r.take() {
+                    Some(Smart::Matching { kinds, contains }) => (kinds, contains),
+                    _ => (Vec::new(), String::new()),
+                };
+                if let Some(p) = kinds.iter().position(|x| *x == k) {
+                    kinds.remove(p);
+                } else {
+                    kinds.push(k);
+                }
+                *r = Some(Smart::Matching { kinds, contains });
+            })
+        }
+        CONTAINS => {
+            let initial = match current.as_ref().map(|(_, r)| r) {
+                Some(Smart::Matching { contains, .. }) => contains.clone(),
+                _ => String::new(),
+            };
+            // An empty answer clears the words (cancel leaves them).
+            if let Some(answer) =
+                super::prompt::ask(owner, "Smart category", "Apps whose name or file contains", &initial)
+            {
+                let words = answer.trim().to_string();
+                change(&|r| {
+                    let kinds = match r.take() {
+                        Some(Smart::Matching { kinds, .. }) => kinds,
+                        _ => Vec::new(),
+                    };
+                    *r = Some(Smart::Matching { kinds, contains: words.clone() });
+                })
+            }
+        }
+        STOP => change(&|r| *r = None),
+        _ => {}
+    }
+}
+
+/// Adds a smart category at the root (on the bar), filled straight away.
+fn new_smart_category(name: &str, rule: crate::smart::Smart) {
+    let id = app::with(|s| {
+        let id = s.cfg.alloc_id();
+        s.cfg.categories.push(Category { id, name: name.to_string(), smart: Some(rule), ..Default::default() });
+        id
+    });
+    app::refill_smart(false);
+    app::save();
+    rebuild_tree(Some(id));
 }
 
 fn edit_label(id: u64) {
@@ -783,9 +951,20 @@ fn refresh_category_apps() {
             m.cat_rows = rows.into_iter().map(|(id, _)| id).collect();
         }
     });
-    let label =
-        app::with(|s| cat.and_then(|id| tree::find(&s.cfg.categories, id)).map(|c| format!("Apps in “{}”", c.name)));
+    let (label, smart) = app::with(|s| {
+        match cat.and_then(|id| tree::find(&s.cfg.categories, id)) {
+            // A smart category says what fills it; its list can't be edited.
+            Some(Category { smart: Some(rule), .. }) => (Some(rule.describe()), true),
+            Some(c) => (Some(format!("Apps in “{}”", c.name)), false),
+            None => (None, false),
+        }
+    });
     ui::set_text(ctl(LBL_APPS), &label.unwrap_or_else(|| "Select a category".into()));
+    for id in [APP_REMOVE, APP_UP, APP_DOWN, ALL_ADD] {
+        unsafe {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctl(id), !smart);
+        }
+    }
 }
 
 fn refresh_all() {
@@ -850,6 +1029,17 @@ fn add_selected_to_category(owner: HWND) {
         ui::info(Some(owner), "Select (or create) a category on the left first.");
         return;
     };
+    if let Some(name) =
+        app::with(|s| tree::find(&s.cfg.categories, cat).filter(|c| c.smart.is_some()).map(|c| c.name.clone()))
+    {
+        ui::info(
+            Some(owner),
+            &format!(
+                "“{name}” is a smart category: it fills itself. Pick another category, or change what fills it with Smart…."
+            ),
+        );
+        return;
+    }
     let ids = selected_rows(ALL);
     if ids.is_empty() {
         ui::info(Some(owner), "Select one or more apps in the All apps list first (Ctrl+click selects several).");
@@ -1531,6 +1721,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     }
                 }
                 CAT_ICON => category_icon(hwnd),
+                CAT_SMART => smart_menu(hwnd),
                 APP_REMOVE => remove_selected_from_category(),
                 APP_UP => move_selected_app(-1),
                 APP_DOWN => move_selected_app(1),

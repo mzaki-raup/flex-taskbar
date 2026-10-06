@@ -194,6 +194,8 @@ pub fn run(args: &Args) -> i32 {
         // Write the recovered settings back right away, so the next start is clean.
         save();
     }
+    // Smart categories as of the last app list (the scan below updates them).
+    refill_smart(false);
     theme::set_mode(with(|s| s.cfg.settings.appearance.theme));
     theme::allow_dark_for_window(main);
     add_tray_icon(main);
@@ -518,14 +520,52 @@ pub fn save() {
     super::arrangewin::bar_changed();
 }
 
-/// Rebuilds the catalog after custom apps changed.
 /// The folder a pinned app opens as a flyout, if it is one.
 pub fn folder_of(id: &str) -> Option<std::path::PathBuf> {
     with(|s| s.catalog.get(id).and_then(|a| a.folder.clone()))
 }
 
+/// Fills the smart categories from their rules (see `smart`). With
+/// `new_list`, the app list itself changed: first notes the apps it hasn't
+/// seen before, and forgets the ones gone. Returns whether the settings
+/// changed (the caller saves).
+pub fn refill_smart(new_list: bool) -> bool {
+    with(|s| {
+        let cfg = &mut s.cfg;
+        let ids: Vec<&str> = s.catalog.apps.iter().map(|a| a.id.as_str()).collect();
+        let now = crate::config::unix_time();
+        let mut changed = false;
+        if new_list {
+            changed |= crate::smart::note_seen(&mut cfg.first_seen, &ids, now);
+            changed |= crate::smart::forget_launches(&mut cfg.launches, &ids);
+        }
+        let facts: Vec<crate::smart::Facts> = s
+            .catalog
+            .apps
+            .iter()
+            .map(|a| crate::smart::Facts {
+                id: &a.id,
+                name: &a.name,
+                file: &a.file_hint,
+                kind: crate::allview::KindGroup::of(a.kind),
+            })
+            .collect();
+        let history = crate::smart::History { first_seen: &cfg.first_seen, launches: &cfg.launches };
+        changed | crate::smart::refill(&mut cfg.categories, &facts, &history, now)
+    })
+}
+
+/// Whether category `id` is a smart one (it fills itself).
+pub fn is_smart(id: u64) -> bool {
+    with(|s| crate::tree::find(&s.cfg.categories, id).is_some_and(|c| c.smart.is_some()))
+}
+
+/// Rebuilds the catalog after custom apps changed.
 pub fn rebuild_catalog() {
     with(|s| s.catalog = Catalog::build(&s.shell_apps, &s.cfg.custom_apps));
+    if refill_smart(true) {
+        save();
+    }
     // Apps came or went: which of them are running may have changed.
     super::running::refresh();
 }
@@ -548,6 +588,7 @@ pub fn launch_app(id: &str) {
     // Already open: switch to it instead (Shift+click starts another copy).
     if super::running::switch_to(id) {
         with(|s| s.cfg.record_recent(id));
+        refill_smart(false);
         save();
         return;
     }
@@ -588,6 +629,7 @@ pub fn launch_app(id: &str) {
         ui::warn(None, "That app is no longer installed. Use Rescan apps, or remove it from the category.");
         return;
     };
+    refill_smart(false);
     save();
     super::running::launched(main_hwnd());
     let main_raw = main_hwnd().0 as isize;
@@ -657,6 +699,9 @@ fn finish_scan(result: Result<Vec<ShellApp>, String>) {
                 s.shell_apps = apps;
                 s.catalog = Catalog::build(&s.shell_apps, &s.cfg.custom_apps);
             });
+            if refill_smart(true) {
+                save();
+            }
             request_all_icons();
         }
         Err(e) => {
