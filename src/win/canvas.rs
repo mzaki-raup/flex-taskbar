@@ -239,6 +239,12 @@ impl Canvas {
 
 /// Puts `pix` on screen as the layered window `hwnd`, at (`x`, `y`).
 pub fn present_pixmap(pix: &Pixmap, hwnd: HWND, x: i32, y: i32) {
+    present_pixmap_alpha(pix, hwnd, x, y, 255);
+}
+
+/// [`present_pixmap`], with the whole window `alpha` opaque (Windows
+/// blends it, so fading costs nothing to draw).
+pub fn present_pixmap_alpha(pix: &Pixmap, hwnd: HWND, x: i32, y: i32, alpha: u8) {
     let (w, h) = (pix.width() as i32, pix.height() as i32);
     unsafe {
         let screen = GetDC(None);
@@ -261,7 +267,7 @@ pub fn present_pixmap(pix: &Pixmap, hwnd: HWND, x: i32, y: i32) {
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
-            SourceConstantAlpha: 255,
+            SourceConstantAlpha: alpha,
             AlphaFormat: AC_SRC_ALPHA as u8,
         };
         let _ = UpdateLayeredWindow(

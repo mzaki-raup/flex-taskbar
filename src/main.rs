@@ -4,6 +4,7 @@ mod allview;
 mod anim;
 mod appearance;
 mod appkind;
+mod autohide;
 mod config;
 mod flyanim;
 mod flykeys;

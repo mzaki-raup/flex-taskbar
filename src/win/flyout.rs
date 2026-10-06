@@ -245,6 +245,8 @@ fn take_keyboard() {
 }
 
 fn show(view: View, anchor: Hit) {
+    // An auto-hidden bar comes back with its flyout (the bar hotkey).
+    strip::reveal();
     if !is_open() {
         let (look, colors) = strip::current_look();
         let dpi = strip::dpi();

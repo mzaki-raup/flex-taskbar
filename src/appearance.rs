@@ -56,6 +56,19 @@ pub enum FlyoutAnim {
     Genie,
 }
 
+/// Hiding the bar until the pointer reaches the screen edge (see
+/// `autohide`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoHide {
+    /// Always shown.
+    Off,
+    /// Slides out of view past the screen edge.
+    Slide,
+    /// Fades out.
+    Fade,
+}
+
 /// The mark under apps that have a window open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -206,6 +219,10 @@ pub struct Appearance {
     pub flyout_animation_ms: u32,
     /// The mark under running apps.
     pub running_mark: RunningMark,
+    /// Hide the bar until the pointer reaches the screen edge.
+    pub auto_hide: AutoHide,
+    /// How long after the pointer leaves the bar it hides, in milliseconds.
+    pub auto_hide_delay_ms: u32,
     /// The shadow under the flyouts.
     pub flyout_shadow: FlyoutShadow,
     /// Its strength in percent (100 = as designed).
@@ -239,6 +256,8 @@ impl Default for Appearance {
             flyout_animation: FlyoutAnim::Fade,
             flyout_animation_ms: 180,
             running_mark: RunningMark::Line,
+            auto_hide: AutoHide::Off,
+            auto_hide_delay_ms: 600,
             flyout_shadow: FlyoutShadow::Soft,
             flyout_shadow_strength: 100,
             all_icon: None,
@@ -318,6 +337,7 @@ impl Appearance {
             indicator_size: self.indicator_size.clamp(25, 80),
             flyout_animation_ms: self.flyout_animation_ms.clamp(60, 600),
             flyout_shadow_strength: self.flyout_shadow_strength.clamp(10, 100),
+            auto_hide_delay_ms: self.auto_hide_delay_ms.min(3000),
             // A picture that was never chosen falls back to the badge.
             indicator: if self.indicator == Indicator::Image && self.indicator_image.is_none() {
                 Indicator::Badge

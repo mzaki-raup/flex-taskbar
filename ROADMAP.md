@@ -27,10 +27,10 @@ and described in the README.
   (Shift+click starts a new one). Follows windows through the shell's
   window notifications (no polling) and matches them to apps by
   AppUserModelID or program path.
-- [ ] **Auto-hide bar** · 🟡
-  The bar slides out of view and comes back when the pointer reaches the
-  screen edge, with a delay setting and the flyout animation styles. The
-  reserved screen space must be released while it is hidden.
+- [x] **Auto-hide bar** · 🟡
+  The bar slides or fades out of view and comes back when the pointer
+  reaches the screen edge, with a delay setting; it reserves no screen
+  space while auto-hiding.
 - [x] **Keyboard control of the flyouts** · 🟡
   Arrow keys move between tiles and rows, Enter launches or opens a
   subcategory, Esc goes back, Tab moves between the bar's flyouts, and

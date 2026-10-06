@@ -7,7 +7,7 @@ use super::canvas;
 use super::ui::{self, scale, wide};
 use super::{panel, searchwin, strip, theme};
 use crate::appearance::{
-    Appearance, DockWidth, FlyoutAnim, FlyoutShadow, HoverAnim, Indicator, Rgba, RunningMark, ThemeMode,
+    Appearance, AutoHide, DockWidth, FlyoutAnim, FlyoutShadow, HoverAnim, Indicator, Rgba, RunningMark, ThemeMode,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,6 +32,7 @@ const INDICATOR: u16 = 15;
 const FLYOUT_ANIMATION: u16 = 16;
 const FLYOUT_SHADOW: u16 = 17;
 const RUNNING_MARK: u16 = 18;
+const AUTO_HIDE: u16 = 19;
 // The indicator picture's button, and its Remove button (+100).
 const INDICATOR_IMAGE: u16 = 24;
 // The All button's picture, and its "Use text" button (+100).
@@ -55,6 +56,7 @@ const FLYOUT_BORDER_WIDTH: u16 = 38;
 const INDICATOR_SIZE: u16 = 39;
 const FLYOUT_ANIMATION_MS: u16 = 40;
 const SHADOW_STRENGTH: u16 = 41;
+const AUTO_HIDE_DELAY: u16 = 42;
 const VALUE_OFFSET: u16 = 200;
 const RESET: u16 = 50;
 const CLOSE: u16 = 51;
@@ -92,7 +94,7 @@ fn hwnd() -> Option<HWND> {
 }
 
 /// (id, label, min, max) of every slider.
-const SLIDERS: [(u16, &str, u32, u32); 12] = [
+const SLIDERS: [(u16, &str, u32, u32); 13] = [
     (OPACITY, "Background opacity (%)", 10, 100),
     (BORDER_WIDTH, "Border width", 0, 6),
     (RADIUS, "Corner radius", 0, 24),
@@ -105,6 +107,7 @@ const SLIDERS: [(u16, &str, u32, u32); 12] = [
     (INDICATOR_SIZE, "Size (% of the icon)", 25, 80),
     (FLYOUT_ANIMATION_MS, "Animation length (ms)", 60, 600),
     (SHADOW_STRENGTH, "Shadow strength (%)", 10, 100),
+    (AUTO_HIDE_DELAY, "Hide after (ms)", 0, 3000),
 ];
 
 const COLOURS: [(u16, &str); 4] = [
@@ -127,7 +130,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 31] = [
+const ROWS: [Row; 33] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -159,6 +162,8 @@ const ROWS: [Row; 31] = [
         &["Next to the Windows taskbar", "Bottom", "Top", "Left", "Right"],
     ),
     Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
+    Row::Combo(AUTO_HIDE, "Auto-hide", &["Never", "Slide away", "Fade away"]),
+    Row::Slider(AUTO_HIDE_DELAY),
     Row::Colour(BORDER),
     Row::Slider(BORDER_WIDTH),
     Row::Slider(RADIUS),
@@ -263,7 +268,7 @@ fn create() {
         // Each section is a card: a label on the left of each row, the control
         // on the right. Two columns of cards, and a command bar at the bottom.
         let pm = panel::metrics(dpi);
-        let (label_w, row_h, ctl_h, ctl_w) = (s(170), s(32), s(26), s(250));
+        let (label_w, row_h, ctl_h, ctl_w) = (s(170), s(30), s(26), s(250));
         let card_w = pm.pad + label_w + ctl_w + pm.pad;
         let top = pm.header;
         let place = |h: HWND, x: i32, w: i32, height: i32, y: i32| {
@@ -430,6 +435,7 @@ fn load() {
     sel(FLYOUT_ANIMATION, a.flyout_animation as usize);
     sel(FLYOUT_SHADOW, a.flyout_shadow as usize);
     sel(RUNNING_MARK, a.running_mark as usize);
+    sel(AUTO_HIDE, a.auto_hide as usize);
     ui::set_text(ctl(ALL_ICON), a.all_icon.as_deref().map(|_| "Change…").unwrap_or("Choose…"));
     unsafe {
         let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
@@ -458,6 +464,7 @@ fn load() {
         (INDICATOR_SIZE, a.indicator_size),
         (FLYOUT_ANIMATION_MS, a.flyout_animation_ms),
         (SHADOW_STRENGTH, a.flyout_shadow_strength),
+        (AUTO_HIDE_DELAY, a.auto_hide_delay_ms),
     ] {
         unsafe {
             SendMessageW(ctl(id), TBM_SETPOS, Some(WPARAM(1)), Some(LPARAM(value as isize)));
@@ -666,6 +673,11 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     forget_picture(old);
                     load();
                 }
+                (AUTO_HIDE, CBN_SELCHANGE) => {
+                    let i = combo(id);
+                    let mode = [AutoHide::Off, AutoHide::Slide, AutoHide::Fade][i.min(2)];
+                    change(|a, _| a.auto_hide = mode);
+                }
                 (RUNNING_MARK, CBN_SELCHANGE) => {
                     let i = combo(id);
                     let mark = [RunningMark::Off, RunningMark::Dot, RunningMark::Line][i.min(2)];
@@ -764,6 +776,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     FLYOUT_BORDER_WIDTH => a.flyout_border_width = v,
                     FLYOUT_ANIMATION_MS => a.flyout_animation_ms = v,
                     SHADOW_STRENGTH => a.flyout_shadow_strength = v,
+                    AUTO_HIDE_DELAY => a.auto_hide_delay_ms = v,
                     _ => a.flyout_columns = v,
                 });
             }

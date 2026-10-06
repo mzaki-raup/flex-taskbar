@@ -25,7 +25,8 @@ use super::menu;
 use super::theme;
 use super::ui::{self, scale, wide};
 use crate::anim;
-use crate::appearance::{Appearance, Colors, DockWidth, HoverAnim};
+use crate::appearance::{Appearance, AutoHide, Colors, DockWidth, HoverAnim};
+use crate::autohide;
 use crate::config::CustomApp;
 use crate::striplayout::{self, BarLayout, Edge, Hit, Metrics, Slot};
 use resvg::tiny_skia::Pixmap;
@@ -64,6 +65,9 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_HOVER: usize = 1;
 /// Animation frames (about 60 a second), only while something moves.
 const TIMER_ANIM: usize = 2;
+/// Auto-hide: the delay after the pointer leaves, and the slide/fade frames.
+const TIMER_HIDE_DELAY: usize = 3;
+const TIMER_HIDE_ANIM: usize = 4;
 
 const LEFT_ALL: usize = 0;
 const RIGHT_LINK: usize = 0;
@@ -114,6 +118,15 @@ struct Strip {
     anim_last: std::time::Instant,
     /// The frame timer is running (re-arming it would delay the next frame).
     anim_running: bool,
+    /// The last drawing, moved or faded while auto-hiding without redrawing.
+    frame: Option<Pixmap>,
+    /// Auto-hide: how hidden the bar is (0 shown, 1 hidden), where it is
+    /// heading, and the time of the last frame.
+    hide: f32,
+    hide_target: f32,
+    hide_last: std::time::Instant,
+    /// The bar's context menu is open (don't hide under it).
+    menu_up: bool,
 }
 
 thread_local! {
@@ -160,10 +173,16 @@ pub fn apply_appearance() {
         if s.look.icon_size != look.icon_size {
             s.icons.clear();
         }
+        if look.auto_hide == AutoHide::Off {
+            // Turned off: back in view at once.
+            s.hide = 0.0;
+            s.hide_target = 0.0;
+        }
         s.look = look;
         s.colors = colors;
     });
     reposition();
+    schedule_hide();
 }
 
 fn create() {
@@ -232,6 +251,11 @@ fn create() {
             anim_enter: None,
             anim_last: std::time::Instant::now(),
             anim_running: false,
+            frame: None,
+            hide: 0.0,
+            hide_target: 0.0,
+            hide_last: std::time::Instant::now(),
+            menu_up: false,
         })
     });
     unsafe {
@@ -244,6 +268,98 @@ fn create() {
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }
+    schedule_hide();
+}
+
+// ---------------------------------------------------------------- auto-hide
+
+fn auto_hide_on() -> bool {
+    with(|s| s.look.auto_hide != AutoHide::Off).unwrap_or(false)
+}
+
+/// The pointer left the bar (or a flyout or menu closed): hide after the
+/// delay, if auto-hide is on.
+fn schedule_hide() {
+    let Some((h, delay)) =
+        with(|s| (s.look.auto_hide != AutoHide::Off).then_some((s.hwnd, s.look.auto_hide_delay_ms))).flatten()
+    else {
+        return;
+    };
+    unsafe {
+        SetTimer(Some(h), TIMER_HIDE_DELAY, delay.clamp(1, 3000), None);
+    }
+}
+
+/// Brings an auto-hidden bar back (the pointer reached it, or a flyout is
+/// opening from the keyboard).
+pub fn reveal() {
+    let Some(h) = hwnd() else { return };
+    unsafe {
+        let _ = KillTimer(Some(h), TIMER_HIDE_DELAY);
+    }
+    if with(|s| std::mem::replace(&mut s.hide_target, 0.0) != 0.0 || s.hide > 0.0).unwrap_or(false) {
+        start_hide_anim(h);
+    }
+}
+
+fn start_hide_anim(h: HWND) {
+    with(|s| s.hide_last = std::time::Instant::now());
+    unsafe {
+        SetTimer(Some(h), TIMER_HIDE_ANIM, 10, None);
+    }
+}
+
+/// The hide delay ran out: hide unless the bar is still in use.
+fn hide_now(h: HWND) {
+    unsafe {
+        let _ = KillTimer(Some(h), TIMER_HIDE_DELAY);
+    }
+    let busy = with(|s| s.menu_up || s.drag.is_some() || s.moving || s.press.is_some()).unwrap_or(true);
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    let over = with(|s| {
+        let r = s.win;
+        pt.x >= r.left && pt.x < r.right && pt.y >= r.top && pt.y < r.bottom
+    })
+    .unwrap_or(false);
+    if busy || over || flyout::is_open() {
+        schedule_hide();
+        return;
+    }
+    with(|s| s.hide_target = 1.0);
+    start_hide_anim(h);
+}
+
+/// A frame of hiding or showing.
+fn hide_frame(h: HWND) {
+    let done = with(|s| {
+        let dt = s.hide_last.elapsed().as_secs_f32() * 1000.0;
+        s.hide_last = std::time::Instant::now();
+        s.hide = autohide::step(s.hide, s.hide_target, dt);
+        s.hide == s.hide_target
+    })
+    .unwrap_or(true);
+    present_frame();
+    if done {
+        unsafe {
+            let _ = KillTimer(Some(h), TIMER_HIDE_ANIM);
+        }
+    }
+}
+
+/// Shows the last drawing where auto-hide has the bar right now.
+fn present_frame() {
+    STRIP.with(|cell| {
+        let b = cell.borrow();
+        let Some(s) = b.as_ref() else { return };
+        let Some(pix) = &s.frame else { return };
+        let across = if s.edge.vertical() { ui::rect_w(&s.win) } else { ui::rect_h(&s.win) };
+        let reveal = scale(autohide::REVEAL_DIP, s.dpi);
+        let ((dx, dy), alpha) = autohide::placement(s.look.auto_hide, s.hide, s.edge, across, reveal);
+        canvas::present_pixmap_alpha(pix, s.hwnd, s.win.left + dx, s.win.top + dy, alpha);
+    });
 }
 
 /// Removes the strip, releasing its reserved screen space.
@@ -545,6 +661,10 @@ pub fn set_open(hit: Option<Hit>) {
     if with(|s| std::mem::replace(&mut s.open, hit) != hit).unwrap_or(false) {
         render();
     }
+    if hit.is_none() {
+        // The flyouts closed: an auto-hiding bar may go now.
+        schedule_hide();
+    }
 }
 
 /// Whether the pointer is over a given button.
@@ -626,6 +746,8 @@ fn reposition() {
     let mut abd = appbar_data(h);
     let edge = setting.resolve(taskbar_edge(h));
 
+    // An auto-hiding bar doesn't keep screen space: windows go under it.
+    let reserve = reserve && !auto_hide_on();
     let was_reserved = with(|s| std::mem::replace(&mut s.reserved, reserve)).unwrap_or(false);
     let rect = if reserve {
         abd.uEdge = abe(edge);
@@ -646,7 +768,9 @@ fn reposition() {
             }
         }
         let (_, work) = if was_reserved { primary_monitor() } else { (monitor, work) };
-        band(work, edge, thickness)
+        // Auto-hiding: at the screen's own edge (over the Windows taskbar
+        // while shown), so hiding leaves just a line at the very edge.
+        band(if auto_hide_on() { monitor } else { work }, edge, thickness)
     };
     let dpi_changed = with(|s| {
         s.edge = edge;
@@ -802,11 +926,11 @@ fn anim_pointer(hwnd: HWND, pos: Option<i32>, entered: Option<usize>) {
 // ---------------------------------------------------------------- drawing
 
 fn render() {
-    STRIP.with(|cell| {
+    let drawn = STRIP.with(|cell| {
         let b = cell.borrow();
-        let Some(s) = b.as_ref() else { return };
+        let s = b.as_ref()?;
         let (w, h) = (ui::rect_w(&s.win), ui::rect_h(&s.win));
-        let Some(mut cv) = Canvas::new(w, h) else { return };
+        let mut cv = Canvas::new(w, h)?;
         let d = s.dpi;
         let c = &s.colors;
         let vertical = s.edge.vertical();
@@ -970,8 +1094,12 @@ fn render() {
         let (gx, gy) = centre(&slot_rect(s, gear));
         cv.gear(gx, gy, scale(8, d) as f32, c.text);
 
-        cv.present(s.hwnd, s.win.left, s.win.top);
+        Some(cv.pix)
     });
+    if let Some(pix) = drawn {
+        with(|s| s.frame = Some(pix));
+        present_frame();
+    }
 }
 
 // ---------------------------------------------------------------- actions
@@ -1089,9 +1217,21 @@ fn context_menu(hit: Option<Hit>) {
         let _ = GetCursorPos(&mut pt);
         let owner = app::main_hwnd();
         let _ = SetForegroundWindow(owner);
-        let id =
-            TrackPopupMenuEx(menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON | menu_align(edge())).0, pt.x, pt.y, owner, None).0
-                as usize;
+        let id = {
+            with(|s| s.menu_up = true);
+            let r = TrackPopupMenuEx(
+                menu,
+                (TPM_RETURNCMD | TPM_RIGHTBUTTON | menu_align(edge())).0,
+                pt.x,
+                pt.y,
+                owner,
+                None,
+            )
+            .0;
+            with(|s| s.menu_up = false);
+            schedule_hide();
+            r
+        } as usize;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         id
@@ -1184,6 +1324,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
+            // The pointer reached an auto-hidden bar (its line at the edge).
+            if with(|s| s.hide_target > 0.0 || s.hide > 0.0).unwrap_or(false) {
+                reveal();
+            }
             let (x, y) = mouse_xy(lparam);
             let threshold = unsafe { GetSystemMetrics(SM_CXDRAG) }.max(2);
             // Dragging the bar to another edge?
@@ -1295,6 +1439,15 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             render();
             flyout::pointer_left_anchor();
+            schedule_hide();
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == TIMER_HIDE_DELAY => {
+            hide_now(hwnd);
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == TIMER_HIDE_ANIM => {
+            hide_frame(hwnd);
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_ANIM => {

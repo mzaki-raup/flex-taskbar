@@ -268,6 +268,16 @@ original FlexTaskbar:
   window, and then the bar floats on top instead.
 - **Full-screen apps.** It hides while a full-screen app (a game or a video) is
   in front.
+- **Auto-hide.** *Auto-hide* on the Appearance window's *Bar* card hides the
+  bar when the pointer leaves it: *Slide away* slides it past the screen
+  edge, *Fade away* fades it out. A 2-pixel line stays at the edge; touch
+  it with the pointer and the bar comes back. *Hide after* sets the delay
+  (0–3000 ms, 600 by default). The bar stays while one of its flyouts or
+  its menu is open or an icon is being dragged, and comes back by itself
+  for the bar hotkey. An auto-hiding bar doesn't reserve screen space and
+  docks against the screen's own edge, so when shown it lies over the
+  Windows taskbar rather than above it. Each frame of the slide or fade
+  moves or fades the last drawing of the bar; nothing is redrawn.
 
 **Settings windows.** The Manage, Appearance, *Arrange the bar* and custom-app
 windows share one look, in the style of Windows 11 Settings: a page title
@@ -300,6 +310,8 @@ Every change shows on the bar straight away:
 | **Bar** | | |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
+| Auto-hide | Never, Slide away, Fade away | Never |
+| Hide after | 0–3000 ms | 600 ms |
 | Border colour | Any colour | A faint line in the text colour |
 | Border width | 0–6 | 1 |
 | Corner radius | 0–24 (0 = square, like the taskbar) | 0 |
@@ -580,7 +592,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 81 unit tests cover:
+The 84 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -595,6 +607,10 @@ The 81 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- auto-hide: the slide and fade stepping towards their target and never
+  past it, where the bar goes on each edge (leaving the 2-pixel line) and
+  how opaque it is part-way, and Fade waiting off screen at full opacity so
+  the line still catches the pointer
 - running apps: which windows count (visible, not cloaked, titled, not a
   tool or owned window unless it asks to be shown), matching by
   AppUserModelID or program path (a web app not making its browser look
@@ -656,6 +672,10 @@ The 81 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - auto-hide: Slide and Fade hiding after the delay, coming back when the
+    pointer touches the 2-pixel line at the bottom edge, `--bar` bringing
+    the hidden bar back with its *All* list and the bar hiding again after
+    Esc, and the two new rows on the Appearance window
   - running apps: Notepad started from the bar getting the Line mark (and
     the Dot), its row in *All* getting one, a click minimising it when in
     front and the next one bringing it back, Shift+click starting a second
@@ -782,6 +802,7 @@ src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon ca
 src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
+src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)
