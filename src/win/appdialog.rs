@@ -16,9 +16,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, BS_DEFPUSHBUTTON, BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL, GetMessageW, GetWindowRect, IDCANCEL, IDOK, IsDialogMessageW, MSG,
     PostQuitMessage, RegisterClassW, SW_SHOW, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos,
-    ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN,
-    WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
-    WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD,
+    WS_CLIPCHILDREN, WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, PWSTR};
 
@@ -201,6 +201,7 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
         let _ = SetWindowPos(hwnd, None, x, top, w, h, SWP_NOZORDER);
     }
 
+    panel::apply_theme(hwnd);
     DIALOG.with(|d| *d.borrow_mut() = Some(Dialog { controls, result: None, done: false }));
     let check = if initial.run_as_admin { BST_CHECKED } else { BST_UNCHECKED };
     unsafe {
@@ -312,6 +313,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_PAINT => panel::paint(hwnd),
         WM_ERASEBKGND => LRESULT(1),
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
+        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => panel::field_color(wparam),
         WM_CLOSE => {
             finish(false, hwnd);
             LRESULT(0)

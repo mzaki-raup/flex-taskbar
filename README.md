@@ -236,6 +236,11 @@ rounded corners and a title each (*Categories*, *All apps*, *Startup and
 bar*, *Hotkeys*, *General*, *Category flyouts*…), on a soft grey page, and a
 command bar along the bottom for the window's main buttons. The cards are
 drawn anti-aliased, only when Windows asks for the window to be painted.
+They follow the *Theme* setting like the bar does: **dark** (the default)
+or light, switching straight away when the theme changes, including the
+title bars, lists, text boxes and drop-downs.
+
+![The Manage window in the dark theme: dark cards on a darker page](screenshots/manage-dark.png)
 
 **Appearance.** Right-click the bar (or use the menu) and pick *Appearance…*.
 Every change shows on the bar straight away:
@@ -272,7 +277,8 @@ Every change shows on the bar straight away:
 | Shadow | Off, Soft (like Windows 11), Floating, Even all round, Sharp, Glow (accent colour) | Soft |
 | Shadow strength | 10–100 % | 100 % |
 
-The theme also applies to the menus and the search window. *Reset to defaults*
+The theme also applies to the menus, the search window and the settings
+windows. *Reset to defaults*
 brings back the original look.
 
 **Four ways to launch:**
@@ -612,6 +618,11 @@ The 73 unit tests cover:
   - a hand-edited config pointing the *All* picture at `..\victim.txt`:
     the picture ignored (the word shown), and *Use text* leaving the file
     alone
+  - the settings windows in the dark theme (cards, labels, check boxes,
+    sliders, lists, text boxes and drop-downs), and switching to Light and
+    back with both the Manage and Appearance windows open. Wine ignores
+    Windows' dark styles for push buttons and a tree's selected row, so
+    those stay light there; on Windows they follow the theme.
   - the new look of the Manage, Appearance, *Arrange the bar* and
     custom-app windows (page title, cards, command bar), with their labels,
     check boxes and sliders on the card colour
@@ -647,6 +658,8 @@ The 73 unit tests cover:
 - shell app icons
 - the global hotkeys
 - *Windows default* theme following a live light/dark switch
+- the dark style of push buttons and list selections in the settings
+  windows
 - translucency over the desktop (Wine has no compositor)
 - high-DPI scaling
 - *Start with Windows*

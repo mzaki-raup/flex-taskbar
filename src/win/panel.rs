@@ -18,15 +18,60 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateSolidBrush, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, EndPaint, HBRUSH, HDC, HFONT,
     InvalidateRect, MapWindowPoints, PAINTSTRUCT, SetBkColor, SetTextColor,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+use windows::Win32::Graphics::Gdi::{RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RedrawWindow};
+use windows::Win32::UI::Controls::{
+    LVM_SETBKCOLOR, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, SetWindowTheme, TVM_SETBKCOLOR, TVM_SETTEXTCOLOR,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumChildWindows, GWL_STYLE, GetClassNameW, GetClientRect, GetWindowLongW, GetWindowRect, SendMessageW,
+};
+use windows::core::{BOOL, PCWSTR, w};
 
-const PAGE: Rgba = Rgba::rgb(0xF3, 0xF3, 0xF3);
-const CARD: Rgba = Rgba::rgb(0xFF, 0xFF, 0xFF);
-const CARD_BORDER: Rgba = Rgba::rgb(0xE3, 0xE3, 0xE3);
-const FOOTER: Rgba = Rgba::rgb(0xEA, 0xEA, 0xEA);
-const FOOTER_LINE: Rgba = Rgba::rgb(0xDC, 0xDC, 0xDC);
-const TEXT: Rgba = Rgba::rgb(0x1A, 0x1A, 0x1A);
-const SUBTLE: Rgba = Rgba::rgb(0x5F, 0x5F, 0x5F);
+/// The page's colours, light or dark.
+struct Colours {
+    page: Rgba,
+    card: Rgba,
+    card_border: Rgba,
+    footer: Rgba,
+    footer_line: Rgba,
+    /// Text boxes and lists.
+    field: Rgba,
+    text: Rgba,
+    subtle: Rgba,
+}
+
+const LIGHT: Colours = Colours {
+    page: Rgba::rgb(0xF3, 0xF3, 0xF3),
+    card: Rgba::rgb(0xFF, 0xFF, 0xFF),
+    card_border: Rgba::rgb(0xE3, 0xE3, 0xE3),
+    footer: Rgba::rgb(0xEA, 0xEA, 0xEA),
+    footer_line: Rgba::rgb(0xDC, 0xDC, 0xDC),
+    field: Rgba::rgb(0xFF, 0xFF, 0xFF),
+    text: Rgba::rgb(0x1A, 0x1A, 0x1A),
+    subtle: Rgba::rgb(0x5F, 0x5F, 0x5F),
+};
+
+/// Like Windows 11 Settings in dark mode.
+const DARK: Colours = Colours {
+    page: Rgba::rgb(0x20, 0x20, 0x20),
+    card: Rgba::rgb(0x2B, 0x2B, 0x2B),
+    card_border: Rgba::rgb(0x3A, 0x3A, 0x3A),
+    footer: Rgba::rgb(0x1C, 0x1C, 0x1C),
+    footer_line: Rgba::rgb(0x33, 0x33, 0x33),
+    field: Rgba::rgb(0x1F, 0x1F, 0x1F),
+    text: Rgba::rgb(0xF0, 0xF0, 0xF0),
+    subtle: Rgba::rgb(0xA8, 0xA8, 0xA8),
+};
+
+/// The colours for the current theme setting.
+fn colours() -> &'static Colours {
+    if super::theme::app_dark() { &DARK } else { &LIGHT }
+}
+
+/// Whether the settings windows are dark right now.
+pub fn dark() -> bool {
+    super::theme::app_dark()
+}
 
 /// A group of controls on a card.
 pub struct Card {
@@ -100,8 +145,13 @@ thread_local! {
     static PAGES: RefCell<HashMap<isize, State>> = RefCell::new(HashMap::new());
     /// Fonts by DPI, made once (a handful at most).
     static FONTS: RefCell<HashMap<u32, Fonts>> = RefCell::new(HashMap::new());
-    static BRUSHES: [HBRUSH; 3] = unsafe {
-        [CreateSolidBrush(colorref(PAGE)), CreateSolidBrush(colorref(CARD)), CreateSolidBrush(colorref(FOOTER))]
+    /// Page, card, command bar and field brushes, light then dark; made
+    /// once.
+    static BRUSHES: [[HBRUSH; 4]; 2] = unsafe {
+        let make = |c: &Colours| {
+            [c.page, c.card, c.footer, c.field].map(|x| CreateSolidBrush(colorref(x)))
+        };
+        [make(&LIGHT), make(&DARK)]
     };
 }
 
@@ -170,7 +220,8 @@ fn draw(hwnd: HWND, cv: &mut Canvas, dpi: u32) {
     let s = |v: i32| super::ui::scale(v, dpi);
     let m = metrics(dpi);
     let (w, h) = (cv.width(), cv.height());
-    cv.fill_round_rect(0.0, 0.0, w as f32, h as f32, 0.0, PAGE);
+    let k = colours();
+    cv.fill_round_rect(0.0, 0.0, w as f32, h as f32, 0.0, k.page);
     PAGES.with(|p| {
         let p = p.borrow();
         let Some(st) = p.get(&(hwnd.0 as isize)) else { return };
@@ -181,26 +232,26 @@ fn draw(hwnd: HWND, cv: &mut Canvas, dpi: u32) {
                 cv.text(text, r, font, c, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
             };
             if !page.title.is_empty() {
-                line(cv, &page.title, m.margin, s(10), w - m.margin, s(30), f.title, TEXT);
+                line(cv, &page.title, m.margin, s(10), w - m.margin, s(30), f.title, k.text);
                 if !page.subtitle.is_empty() {
-                    line(cv, &page.subtitle, m.margin, s(38), w - m.margin, s(18), f.body, SUBTLE);
+                    line(cv, &page.subtitle, m.margin, s(38), w - m.margin, s(18), f.body, k.subtle);
                 }
             }
             let r = s(8) as f32;
             for c in &page.cards {
                 let (x, y) = (c.rect.left as f32, c.rect.top as f32);
                 let (cw, ch) = ((c.rect.right - c.rect.left) as f32, (c.rect.bottom - c.rect.top) as f32);
-                cv.fill_round_rect(x, y, cw, ch, r, CARD);
-                cv.stroke_round_rect(x, y, cw, ch, r, 1.0, CARD_BORDER);
+                cv.fill_round_rect(x, y, cw, ch, r, k.card);
+                cv.stroke_round_rect(x, y, cw, ch, r, 1.0, k.card_border);
                 let right = c.rect.right - m.pad;
-                line(cv, &c.title, c.rect.left + m.pad, c.rect.top + s(12), right, s(20), f.card, TEXT);
+                line(cv, &c.title, c.rect.left + m.pad, c.rect.top + s(12), right, s(20), f.card, k.text);
                 if !c.subtitle.is_empty() {
-                    line(cv, &c.subtitle, c.rect.left + m.pad, c.rect.top + s(33), right, s(16), f.body, SUBTLE);
+                    line(cv, &c.subtitle, c.rect.left + m.pad, c.rect.top + s(33), right, s(16), f.body, k.subtle);
                 }
             }
             if let Some(top) = page.footer {
-                cv.fill_round_rect(0.0, top as f32, w as f32, (h - top) as f32, 0.0, FOOTER);
-                cv.fill_round_rect(0.0, top as f32, w as f32, 1.0, 0.0, FOOTER_LINE);
+                cv.fill_round_rect(0.0, top as f32, w as f32, (h - top) as f32, 0.0, k.footer);
+                cv.fill_round_rect(0.0, top as f32, w as f32, 1.0, 0.0, k.footer_line);
             }
         });
     });
@@ -232,11 +283,98 @@ pub fn color(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             (0, grey)
         }
     });
-    let colour = [PAGE, CARD, FOOTER][bg];
+    let k = colours();
+    let colour = [k.page, k.card, k.footer][bg];
     unsafe {
         let hdc = HDC(wparam.0 as *mut _);
         SetBkColor(hdc, colorref(colour));
-        SetTextColor(hdc, colorref(if grey { SUBTLE } else { TEXT }));
-        LRESULT(BRUSHES.with(|b| b[bg]).0 as isize)
+        SetTextColor(hdc, colorref(if grey { k.subtle } else { k.text }));
+        LRESULT(BRUSHES.with(|b| b[dark() as usize][bg]).0 as isize)
+    }
+}
+
+/// `WM_CTLCOLOREDIT` / `WM_CTLCOLORLISTBOX`: text boxes and the lists of
+/// combo boxes, in the field colour.
+pub fn field_color(wparam: WPARAM) -> LRESULT {
+    let k = colours();
+    unsafe {
+        let hdc = HDC(wparam.0 as *mut _);
+        SetBkColor(hdc, colorref(k.field));
+        SetTextColor(hdc, colorref(k.text));
+        LRESULT(BRUSHES.with(|b| b[dark() as usize][3]).0 as isize)
+    }
+}
+
+/// Gives `hwnd` and its controls the current theme: the title bar, buttons,
+/// scroll bars, lists and trees. Call after the controls are made, and
+/// again when the theme changes (see [`theme_changed`]).
+pub fn apply_theme(hwnd: HWND) {
+    let dark = dark();
+    super::theme::style_window(hwnd, dark, false);
+    if dark {
+        super::theme::allow_dark_for_window(hwnd);
+    }
+    unsafe extern "system" fn each(child: HWND, lparam: LPARAM) -> BOOL {
+        theme_control(child, lparam.0 != 0);
+        BOOL(1)
+    }
+    unsafe {
+        let _ = EnumChildWindows(Some(hwnd), Some(each), LPARAM(dark as isize));
+        let _ = RedrawWindow(Some(hwnd), None, None, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+    }
+}
+
+fn theme_control(h: HWND, dark: bool) {
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(h, &mut buf) } as usize;
+    let class = String::from_utf16_lossy(&buf[..n]).to_ascii_lowercase();
+    let style = unsafe { GetWindowLongW(h, GWL_STYLE) } as u32 & 0xF;
+    let k = if dark { &DARK } else { &LIGHT };
+    // The visual-styles class names Windows uses for its own dark windows
+    // (Explorer, the file dialogs). Unknown names are harmless.
+    let theme = |name: Option<&str>| {
+        let w = name.map(super::ui::wide);
+        unsafe {
+            let _ = SetWindowTheme(h, w.as_ref().map(|w| PCWSTR(w.as_ptr())).unwrap_or(w!("")), PCWSTR::null());
+        }
+    };
+    match class.as_str() {
+        "button" => {
+            const BS_CHECKBOX_KINDS: [u32; 4] = [2, 3, 5, 6]; // check boxes and 3-state boxes
+            if BS_CHECKBOX_KINDS.contains(&style) {
+                // A themed check box ignores the text colour, so in dark mode
+                // it is drawn unthemed (its label then follows `color`).
+                if dark { theme(Some("")) } else { theme(Some("Explorer")) }
+            } else {
+                theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" }));
+            }
+        }
+        "combobox" | "edit" => theme(Some(if dark { "DarkMode_CFD" } else { "Explorer" })),
+        "syslistview32" => {
+            theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" }));
+            let (bg, fg) = (colorref(k.field).0 as isize, colorref(k.text).0 as isize);
+            unsafe {
+                SendMessageW(h, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg)));
+                SendMessageW(h, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg)));
+                SendMessageW(h, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(fg)));
+            }
+        }
+        "systreeview32" => {
+            theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" }));
+            let (bg, fg) = (colorref(k.field).0 as isize, colorref(k.text).0 as isize);
+            unsafe {
+                SendMessageW(h, TVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg)));
+                SendMessageW(h, TVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(fg)));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The theme setting changed: re-theme every open settings window.
+pub fn theme_changed() {
+    let open: Vec<isize> = PAGES.with(|p| p.borrow().keys().copied().collect());
+    for h in open {
+        apply_theme(HWND(h as *mut _));
     }
 }

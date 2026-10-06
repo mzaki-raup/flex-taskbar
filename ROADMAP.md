@@ -64,7 +64,7 @@ and described in the README.
 
 ## Look
 
-- [ ] **Dark mode for the settings windows** · 🟢
+- [x] **Dark mode for the settings windows** · 🟢
   The bar, flyouts, menus and search window follow the theme, but the
   Manage, Appearance, *Arrange the bar* and custom-app windows are always
   light. Give `panel` a dark palette and apply dark title bars and control

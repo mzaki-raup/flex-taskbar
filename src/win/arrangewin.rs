@@ -3,8 +3,8 @@
 //! change shows on the strip straight away.
 
 use super::app::{self, FOLDER_ICON};
+use super::panel;
 use super::ui::{self, scale, wide};
-use super::{panel, theme};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -20,9 +20,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, ReleaseCapture, 
 use windows::Win32::UI::WindowsAndMessaging::{
     BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW, DestroyWindow, IsIconic, RegisterClassW, SW_RESTORE, SW_SHOW,
     SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_CAPTURECHANGED, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_ERASEBKGND,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NOTIFY, WM_PAINT, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
-    WS_EX_CLIENTEDGE, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    WM_CAPTURECHANGED, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NOTIFY, WM_PAINT, WNDCLASSW, WS_CAPTION, WS_CHILD,
+    WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -217,7 +217,7 @@ fn create() {
             })
         });
         app::register_dialog(hwnd, true);
-        theme::style_window(hwnd, false, false);
+        panel::apply_theme(hwnd);
         fill();
 
         let client = RECT { left: 0, top: 0, right, bottom: footer + pm.footer };
@@ -445,6 +445,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_PAINT => panel::paint(hwnd),
         WM_ERASEBKGND => LRESULT(1),
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
+        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => panel::field_color(wparam),
         WM_CLOSE => {
             unsafe {
                 let _ = DestroyWindow(hwnd);

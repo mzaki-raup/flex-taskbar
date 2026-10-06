@@ -8,7 +8,7 @@ use super::appdialog;
 use super::icons::{self, ICON_EXTENSIONS};
 use super::paths;
 use super::ui::{self, scale, wide};
-use super::{autostart, panel, theme};
+use super::{autostart, panel};
 use crate::config::{Category, CustomApp, Hotkey, MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 use crate::{migrate, tree};
 use std::cell::{Cell, RefCell};
@@ -36,9 +36,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DestroyMenu, DestroyWindow, ES_AUTOHSCROLL, GetClientRect, GetWindowRect, HMENU, InsertMenuW,
     IsIconic, MF_BYPOSITION, MF_STRING, MINMAXINFO, RegisterClassW, SW_RESTORE, SW_SHOW, SWP_NOZORDER, SendMessageW,
     SetForegroundWindow, SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DROPFILES,
-    WM_ERASEBKGND, WM_GETMINMAXINFO, WM_NOTIFY, WM_PAINT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-    WS_EX_ACCEPTFILES, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DPICHANGED, WM_DROPFILES, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_NOTIFY, WM_PAINT, WM_SIZE, WNDCLASSW,
+    WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_EX_ACCEPTFILES, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
+    WS_VISIBLE,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -368,7 +369,7 @@ fn create() {
         });
         app::register_dialog(hwnd, true);
         DragAcceptFiles(hwnd, true);
-        theme::style_window(hwnd, false, false);
+        panel::apply_theme(hwnd);
 
         load_settings();
         rebuild_tree(None);
@@ -1374,6 +1375,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_PAINT => panel::paint(hwnd),
         WM_ERASEBKGND => LRESULT(1),
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
+        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => panel::field_color(wparam),
         WM_GETMINMAXINFO => {
             let mmi = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
             let dpi = ui::dpi_of(hwnd);

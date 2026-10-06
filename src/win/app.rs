@@ -354,6 +354,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 theme::allow_dark_menus();
                 searchwin::theme_changed();
                 strip::theme_changed();
+                super::panel::theme_changed();
             }
             LRESULT(0)
         }

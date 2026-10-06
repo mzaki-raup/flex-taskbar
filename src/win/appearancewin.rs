@@ -15,9 +15,9 @@ use windows::Win32::UI::Controls::Dialogs::{CC_FULLOPEN, CC_RGBINIT, CHOOSECOLOR
 use windows::Win32::UI::WindowsAndMessaging::{
     BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW, DestroyWindow, IsIconic, KillTimer, RegisterClassW, SW_RESTORE,
     SW_SHOW, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_ERASEBKGND, WM_HSCROLL,
-    WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_MINIMIZEBOX, WS_SYSMENU,
-    WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_ERASEBKGND, WM_HSCROLL, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW, WS_CAPTION, WS_CHILD,
+    WS_CLIPCHILDREN, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{PCWSTR, w};
 
@@ -383,7 +383,7 @@ fn create() {
         }
         WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, controls, font, custom: [COLORREF(0xFFFFFF); 16] }));
         app::register_dialog(hwnd, true);
-        theme::style_window(hwnd, false, false);
+        panel::apply_theme(hwnd);
         load();
 
         // Size the window around its client area and centre it.
@@ -494,6 +494,7 @@ fn change_settings(f: impl FnOnce(&mut crate::config::Settings)) {
     if theme_now != theme_before {
         theme::set_mode(theme_now);
         searchwin::theme_changed();
+        panel::theme_changed();
     }
     strip::apply_appearance();
     if let Some(h) = hwnd() {
@@ -767,6 +768,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         WM_PAINT => panel::paint(hwnd),
         WM_ERASEBKGND => LRESULT(1),
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
+        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => panel::field_color(wparam),
         WM_CLOSE => {
             unsafe {
                 let _ = DestroyWindow(hwnd);
