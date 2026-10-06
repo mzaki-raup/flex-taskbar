@@ -27,6 +27,8 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Config,
+    /// A saved look (`look.json`, in a `.flexlook` file).
+    Look,
     /// A picture for `icons\`, by its file name.
     Picture(String),
 }
@@ -37,6 +39,9 @@ pub enum Kind {
 pub fn kind_of(name: &str) -> Option<Kind> {
     if name == "config.json" {
         return Some(Kind::Config);
+    }
+    if name == "look.json" {
+        return Some(Kind::Look);
     }
     let file = name.strip_prefix("icons/")?;
     is_plain_file_name(file).then(|| Kind::Picture(file.to_string()))
@@ -130,6 +135,25 @@ const NOT_OURS: &str = "This isn't a FlexTaskbar backup, or it has been damaged 
 /// compressed), match its checksum, be a file a backup may hold
 /// ([`kind_of`]) and stay within the limits. Errors are readable messages.
 pub fn read_zip(b: &[u8]) -> Result<Vec<(Kind, Vec<u8>)>, String> {
+    let entries = read_entries(b)?;
+    if !entries.iter().any(|(k, _)| *k == Kind::Config) {
+        return Err("This backup has no settings in it (config.json is missing).".into());
+    }
+    Ok(entries)
+}
+
+/// Reads a saved look (a `.flexlook` file): `look.json` and its pictures,
+/// checked like a backup.
+pub fn read_look(b: &[u8]) -> Result<Vec<(Kind, Vec<u8>)>, String> {
+    let entries = read_entries(b).map_err(|e| e.replace("FlexTaskbar backup", "FlexTaskbar look"))?;
+    if entries.iter().any(|(k, _)| *k == Kind::Config) || !entries.iter().any(|(k, _)| *k == Kind::Look) {
+        return Err("This isn't a FlexTaskbar look file.".into());
+    }
+    Ok(entries)
+}
+
+/// Every entry, checked; `config.json` and `look.json` at most once each.
+fn read_entries(b: &[u8]) -> Result<Vec<(Kind, Vec<u8>)>, String> {
     let bad = || NOT_OURS.to_string();
     // The end record is in the last 64 KiB (it may be followed by a comment).
     let from = b.len().saturating_sub(22 + 0xFFFF);
@@ -142,7 +166,7 @@ pub fn read_zip(b: &[u8]) -> Result<Vec<(Kind, Vec<u8>)>, String> {
     let mut out = Vec::new();
     let mut total = 0usize;
     let mut at = cd_offset;
-    let mut config_seen = false;
+    let mut seen: Vec<Kind> = Vec::new();
     for _ in 0..count {
         if rd32(b, at) != Some(0x0201_4B50) {
             return Err(bad());
@@ -162,7 +186,7 @@ pub fn read_zip(b: &[u8]) -> Result<Vec<(Kind, Vec<u8>)>, String> {
         let Some(kind) = kind_of(name) else {
             return Err(format!("This backup holds a file FlexTaskbar doesn't use: {name}"));
         };
-        let limit = if kind == Kind::Config { MAX_CONFIG } else { MAX_PICTURE };
+        let limit = if matches!(kind, Kind::Picture(_)) { MAX_PICTURE } else { MAX_CONFIG };
         total = total.saturating_add(size);
         if size > limit || total > MAX_TOTAL {
             return Err(format!("A file in this backup is too large: {name}"));
@@ -177,16 +201,13 @@ pub fn read_zip(b: &[u8]) -> Result<Vec<(Kind, Vec<u8>)>, String> {
         if crc32(data) != crc {
             return Err(bad());
         }
-        if kind == Kind::Config {
-            if config_seen {
+        if !matches!(kind, Kind::Picture(_)) {
+            if seen.contains(&kind) {
                 return Err(bad());
             }
-            config_seen = true;
+            seen.push(kind.clone());
         }
         out.push((kind, data.to_vec()));
-    }
-    if !config_seen {
-        return Err("This backup has no settings in it (config.json is missing).".into());
     }
     Ok(out)
 }
@@ -245,6 +266,20 @@ mod tests {
         assert!(read_zip(&zip[..zip.len() / 2]).is_err());
         assert!(read_zip(b"hello").is_err());
         assert!(read_zip(&[]).is_err());
+    }
+
+    #[test]
+    fn look_files() {
+        let look = vec![
+            Entry { name: "look.json".into(), data: b"{}".to_vec() },
+            Entry { name: "icons/a.png".into(), data: vec![1, 2] },
+        ];
+        let back = read_look(&write_zip(&look)).unwrap();
+        assert_eq!(back[0], (Kind::Look, b"{}".to_vec()));
+        // A backup isn't a look, and a look isn't a backup.
+        assert!(read_look(&write_zip(&sample())).is_err());
+        assert!(read_zip(&write_zip(&look)).is_err());
+        assert!(read_look(b"nope").unwrap_err().contains("look"));
     }
 
     #[test]

@@ -16,6 +16,7 @@ mod manager;
 mod menu;
 mod panel;
 mod paths;
+mod prompt;
 mod running;
 mod searchwin;
 mod strip;

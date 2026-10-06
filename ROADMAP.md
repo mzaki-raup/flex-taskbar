@@ -81,7 +81,7 @@ Suggested next:
   Windows 11's blurred backdrop as an alternative to plain translucency.
   Layered windows can't use it directly, so this means a different window
   setup and careful testing on Windows 10 and 11.
-- [ ] **Theme presets** · 🟢
+- [x] **Theme presets** · 🟢
   Save the current look under a name, switch between saved looks, and
   import or export a look as a small file (pictures included).
 

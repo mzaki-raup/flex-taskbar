@@ -61,6 +61,7 @@ const AUTO_HIDE_DELAY: u16 = 42;
 const VALUE_OFFSET: u16 = 200;
 const RESET: u16 = 50;
 const CLOSE: u16 = 51;
+const LOOKS: u16 = 52;
 const LABEL_BASE: u16 = 500;
 
 const CB_ADDSTRING: u32 = 0x0143;
@@ -369,6 +370,9 @@ fn create() {
         let r = button("Reset to defaults", RESET);
         let _ = SetWindowPos(r, None, pm.margin, by, s(150), ctl_h + s(2), SWP_NOZORDER);
         controls.insert(RESET, r);
+        let l = button("Saved looks…", LOOKS);
+        let _ = SetWindowPos(l, None, pm.margin + s(158), by, s(150), ctl_h + s(2), SWP_NOZORDER);
+        controls.insert(LOOKS, l);
         let c = button("Close", CLOSE);
         let _ = SetWindowPos(c, None, right - pm.margin - s(110), by, s(110), ctl_h + s(2), SWP_NOZORDER);
         controls.insert(CLOSE, c);
@@ -584,10 +588,9 @@ fn choose_all_icon(owner: HWND) {
 /// and drops loaded copies.
 fn forget_picture(old: Option<String>) {
     if let Some(old) = old {
-        let in_use = app::with(|s| {
-            let a = &s.cfg.settings.appearance;
-            a.indicator_image.as_deref() == Some(old.as_str()) || a.all_icon.as_deref() == Some(old.as_str())
-        });
+        // The current look, or a saved one, may still show it.
+        let in_use =
+            app::with(|s| crate::looks::picture_in_use(&s.cfg.settings.looks, &s.cfg.settings.appearance, &old));
         if !in_use {
             super::paths::remove_icon(&old);
         }
@@ -613,6 +616,184 @@ fn import_picture(owner: HWND) -> Option<String> {
         return None;
     }
     Some(name)
+}
+
+// ---------------------------------------------------------------- saved looks
+
+const LOOK_FILTER: &str = "FlexTaskbar looks (*.flexlook)\0*.flexlook\0All files\0*.*\0\0";
+
+/// *Saved looks…*: apply, save, delete, export or import a look.
+fn looks_menu(owner: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetWindowRect, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING,
+        TPM_RETURNCMD, TrackPopupMenuEx,
+    };
+    const APPLY: usize = 1;
+    const DELETE: usize = 1000;
+    const SAVE: usize = 2000;
+    const EXPORT: usize = 2001;
+    const IMPORT: usize = 2002;
+    let names: Vec<String> = app::with(|s| s.cfg.settings.looks.iter().map(|l| l.name.clone()).collect());
+    let chosen = unsafe {
+        let menu = CreatePopupMenu().unwrap_or_default();
+        let delete = CreatePopupMenu().unwrap_or_default();
+        let add = |m, flags, id: usize, text: &str| {
+            let t = wide(&ui::escape_amp(text));
+            let _ = AppendMenuW(m, flags, id, PCWSTR(t.as_ptr()));
+        };
+        if names.is_empty() {
+            add(menu, MF_STRING | MF_GRAYED, 0, "No saved looks yet");
+        }
+        for (i, n) in names.iter().enumerate() {
+            add(menu, MF_STRING, APPLY + i, &format!("Use “{n}”"));
+            add(delete, MF_STRING, DELETE + i, n);
+        }
+        add(menu, MF_SEPARATOR, 0, "");
+        add(menu, MF_STRING, SAVE, "Save this look…");
+        if !names.is_empty() {
+            let t = wide("Delete");
+            let _ = AppendMenuW(menu, MF_POPUP, delete.0 as usize, PCWSTR(t.as_ptr()));
+        }
+        add(menu, MF_SEPARATOR, 0, "");
+        add(menu, MF_STRING, EXPORT, "Export this look…");
+        add(menu, MF_STRING, IMPORT, "Import a look…");
+        let mut r = windows::Win32::Foundation::RECT::default();
+        let _ = GetWindowRect(ctl(LOOKS), &mut r);
+        let id = TrackPopupMenuEx(menu, TPM_RETURNCMD.0, r.left, r.bottom, owner, None).0 as usize;
+        let _ = DestroyMenu(menu); // and the Delete submenu with it
+        if names.is_empty() {
+            let _ = DestroyMenu(delete);
+        }
+        id
+    };
+    match chosen {
+        SAVE => save_look(owner),
+        EXPORT => export_look(owner),
+        IMPORT => import_look(owner),
+        i if (DELETE..DELETE + names.len()).contains(&i) => {
+            let name = &names[i - DELETE];
+            if ui::confirm(Some(owner), &format!("Delete the saved look “{name}”?")) {
+                let gone = app::with(|s| {
+                    let looks = &mut s.cfg.settings.looks;
+                    let i = looks.iter().position(|l| &l.name == name)?;
+                    Some(looks.remove(i))
+                });
+                if let Some(gone) = gone {
+                    for p in crate::looks::pictures(&gone.appearance) {
+                        forget_picture(Some(p));
+                    }
+                }
+                save_now();
+            }
+        }
+        i if (APPLY..APPLY + names.len()).contains(&i) => {
+            let look = app::with(|s| s.cfg.settings.looks.get(i - APPLY).map(|l| l.appearance.clone()));
+            if let Some(look) = look {
+                change(|a, _| *a = look.clamped());
+                super::indicator::forget_images();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn save_look(owner: HWND) {
+    let existing: Vec<String> = app::with(|s| s.cfg.settings.looks.iter().map(|l| l.name.clone()).collect());
+    let suggested = crate::looks::unique_name(&existing.iter().map(String::as_str).collect::<Vec<_>>(), "My look");
+    let Some(name) = super::prompt::ask(owner, "Save this look", "Name for this look", &suggested) else { return };
+    let name = if name.trim().is_empty() { suggested } else { name.trim().chars().take(60).collect() };
+    let replaces = existing.iter().any(|e| e.eq_ignore_ascii_case(&name));
+    if replaces && !ui::confirm(Some(owner), &format!("Replace the saved look “{name}”?")) {
+        return;
+    }
+    app::with(|s| {
+        let current = s.cfg.settings.appearance.clone();
+        crate::looks::save(&mut s.cfg.settings.looks, &name, &current);
+    });
+    save_now();
+}
+
+/// The current look and its pictures as a `.flexlook` file.
+fn export_look(owner: HWND) {
+    use crate::backup::{Entry, write_zip};
+    let look = app::with(|s| crate::looks::Look {
+        name: "Exported look".into(),
+        appearance: s.cfg.settings.appearance.clone(),
+    });
+    let Ok(json) = serde_json::to_vec_pretty(&look) else { return };
+    let mut entries = vec![Entry { name: "look.json".into(), data: json }];
+    for p in crate::looks::pictures(&look.appearance) {
+        if let Some(path) = super::paths::get().icon_file(&p)
+            && let Ok(data) = std::fs::read(path)
+        {
+            entries.push(Entry { name: format!("icons/{p}"), data });
+        }
+    }
+    let Some(target) = super::backupwin::file_dialog(owner, true, "My look.flexlook", LOOK_FILTER, "flexlook") else {
+        return;
+    };
+    match super::backupwin::write_atomic(&target, &write_zip(&entries)) {
+        Ok(()) => ui::info(Some(owner), &format!("Exported this look to:\n{}", target.display())),
+        Err(e) => ui::error(Some(owner), &format!("The look couldn't be written: {e}")),
+    }
+}
+
+/// Reads a `.flexlook` file (checked like a backup), adds it to the saved
+/// looks and uses it.
+fn import_look(owner: HWND) {
+    use crate::backup::{Kind, MAX_TOTAL, read_look};
+    let Some(source) = super::backupwin::file_dialog(owner, false, "", LOOK_FILTER, "flexlook") else { return };
+    if std::fs::metadata(&source).map(|m| m.len() as usize > MAX_TOTAL).unwrap_or(true) {
+        ui::error(Some(owner), "That file is too large to be a FlexTaskbar look.");
+        return;
+    }
+    let entries = match std::fs::read(&source).map_err(|e| e.to_string()).and_then(|b| read_look(&b)) {
+        Ok(e) => e,
+        Err(e) => {
+            ui::error(Some(owner), &e);
+            return;
+        }
+    };
+    let json = entries.iter().find(|(k, _)| *k == Kind::Look).map(|(_, d)| d.as_slice()).unwrap_or_default();
+    let Ok(mut look) = serde_json::from_slice::<crate::looks::Look>(json) else {
+        ui::error(Some(owner), "The look in this file couldn't be read.");
+        return;
+    };
+    let paths = super::paths::get();
+    for (kind, data) in &entries {
+        let Kind::Picture(name) = kind else { continue };
+        let Some(path) = paths.icon_file(name) else { continue };
+        // The same name with different content already here: keep both.
+        let target = match std::fs::read(&path) {
+            Ok(existing) if existing == *data => continue,
+            Ok(_) => {
+                let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("png");
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let fresh = format!("{stamp:x}.{ext}");
+                crate::looks::rename_picture(&mut look.appearance, name, &fresh);
+                paths.icons.join(fresh)
+            }
+            Err(_) => path,
+        };
+        if let Err(e) = super::backupwin::write_atomic(&target, data) {
+            ui::error(Some(owner), &format!("A picture couldn't be written: {e}"));
+            return;
+        }
+    }
+    let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = app::with(|s| {
+        let existing: Vec<&str> = s.cfg.settings.looks.iter().map(|l| l.name.as_str()).collect();
+        crate::looks::unique_name(&existing, &stem)
+    });
+    let appearance = look.appearance.clamped();
+    app::with(|s| crate::looks::save(&mut s.cfg.settings.looks, &name, &appearance));
+    change(|a, _| *a = appearance.clone());
+    super::indicator::forget_images();
+    save_now();
+    ui::info(Some(owner), &format!("Imported “{name}” and switched to it. It is in Saved looks."));
 }
 
 fn save_now() {
@@ -756,6 +937,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                         *h = crate::config::Settings::default().strip_height;
                     });
                     forget_picture(all_icon);
+                    load();
+                }
+                (LOOKS, BN_CLICKED) => {
+                    looks_menu(hwnd);
                     load();
                 }
                 (CLOSE, BN_CLICKED) => unsafe {

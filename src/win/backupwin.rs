@@ -18,8 +18,14 @@ use windows::core::{PCWSTR, PWSTR};
 const FILTER: &str = "FlexTaskbar backups (*.zip)\0*.zip\0All files\0*.*\0\0";
 
 fn dialog(owner: HWND, save: bool, initial: &str) -> Option<PathBuf> {
-    let filter: Vec<u16> = FILTER.encode_utf16().collect();
-    let ext: Vec<u16> = "zip\0".encode_utf16().collect();
+    file_dialog(owner, save, initial, FILTER, "zip")
+}
+
+/// An Open or Save As dialog for one kind of file (`filter` in the
+/// dialog's double-NUL format, `ext` without the dot).
+pub(super) fn file_dialog(owner: HWND, save: bool, initial: &str, filter: &str, ext: &str) -> Option<PathBuf> {
+    let filter: Vec<u16> = filter.encode_utf16().collect();
+    let ext: Vec<u16> = format!("{ext}\0").encode_utf16().collect();
     let mut file = vec![0u16; 1024];
     for (i, c) in initial.encode_utf16().take(1000).enumerate() {
         file[i] = c;
@@ -46,7 +52,7 @@ fn today() -> String {
 
 /// Writes `data` to `path` through a temporary file, so a failure never
 /// leaves half a file behind.
-fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+pub(super) fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp-flex");
     std::fs::write(&tmp, data)?;
     std::fs::rename(&tmp, path).inspect_err(|_| {

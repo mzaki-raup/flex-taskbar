@@ -86,6 +86,8 @@ pub struct Settings {
     /// Clicking an app that has a window open switches to it (Shift+click
     /// starts another copy).
     pub switch_to_running: bool,
+    /// Saved looks to switch between (Appearance window, *Saved looks…*).
+    pub looks: Vec<crate::looks::Look>,
     /// Also list programs from package managers' folders (winget portable,
     /// Scoop, Chocolatey, npm, pip, pipx, Cargo, .NET tools, Go).
     pub package_apps: bool,
@@ -111,6 +113,7 @@ impl Default for Settings {
             hover_delay_ms: 100,
             auto_rescan: true,
             switch_to_running: true,
+            looks: Vec::new(),
             package_apps: true,
             all_apps: crate::allview::AllAppsView::default(),
             appearance: crate::appearance::Appearance::default(),

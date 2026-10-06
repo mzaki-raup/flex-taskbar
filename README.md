@@ -342,6 +342,22 @@ The theme also applies to the menus, the search window and the settings
 windows. *Reset to defaults*
 brings back the original look.
 
+**Saved looks.** *Saved looks…* in the Appearance window keeps whole looks
+to switch between:
+- *Save this look…* stores everything on the page under a name (saving
+  under a name that exists asks before replacing it);
+- *Use "…"* switches to a saved look in one click; *Delete* removes one;
+- *Export this look…* writes it, with its pictures (indicator and *All*
+  button), to a `.flexlook` file to share or keep; *Import a look…* adds
+  one and switches to it. Import is checked like a backup (see *Portable
+  data*): only `look.json` and plain picture names, sizes and checksums.
+  A picture that clashes with a different one of the same name is kept
+  under a new name, and an imported look whose name is taken gets
+  "(2)" added.
+
+Pictures a saved look shows are kept even when the current look stops
+using them.
+
 **Five ways to launch:**
 
 | How | What you get |
@@ -623,7 +639,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 89 unit tests cover:
+The 93 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -638,11 +654,14 @@ The 89 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- saved looks: unique names ("(2)", "(3)", blank names), saving replacing
+  a look of the same name, the pictures a look shows, renaming one, and a
+  picture counting as in use while any saved look shows it
 - settings backups: the zip round trip (including an empty file), the CRC
   check value, only `config.json` and plain picture names accepted (no `..`,
   sub-folders, drives or other files), damaged, cut-short and non-zip files
-  refused, a backup without settings or with them twice refused, and the
-  size limit
+  refused, a backup without settings or with them twice refused, the size
+  limit, and look files (a backup isn't a look and a look isn't a backup)
 - auto-hide: the slide and fade stepping towards their target and never
   past it, where the bar goes on each edge (leaving the 2-pixel line) and
   how opaque it is part-way, and Fade waiting off screen at full opacity so
@@ -710,6 +729,10 @@ The 89 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - saved looks: saving the dark look as "Night", switching to Light, *Use
+    "Night"* bringing it back (the window re-theming with it), *Export this
+    look…* writing a `.flexlook` that `zipfile` checks, and *Import a
+    look…* adding it as "night (2)" and switching to it
   - settings backups: *Back up settings…* writing a zip that Python's
     `zipfile` reads and checks without errors (settings and 17 pictures),
     switching to the Light theme, *Restore…* bringing Dark back after the
@@ -851,6 +874,7 @@ src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
 src/backup.rs        settings backups: writing and checking the zip   (tested)
+src/looks.rs         saved looks: names, their pictures                (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)
@@ -860,6 +884,7 @@ src/running.rs       which windows count, matching them to apps, clicks (tested)
 src/allview.rs       sorting and filtering the All list               (tested)
 src/win/watch.rs     automatic rescan when apps are installed
 src/win/backupwin.rs Back up settings… and Restore…
+src/win/prompt.rs    asking for one line of text (a look's name)
 src/win/running.rs   following open windows (shell notifications), switching
 src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts

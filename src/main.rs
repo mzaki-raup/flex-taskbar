@@ -9,6 +9,7 @@ mod backup;
 mod config;
 mod flyanim;
 mod flykeys;
+mod looks;
 mod migrate;
 mod pkgsources;
 mod running;
