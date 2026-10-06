@@ -19,9 +19,9 @@ use super::canvas::{self, Canvas};
 use super::strip;
 use super::ui::{self, scale, wide};
 use crate::appearance::{Appearance, Colors, FlyoutAnim, FlyoutShadow};
-use crate::flyanim;
 use crate::shadow;
 use crate::striplayout::{self, Edge, Hit};
+use crate::{flyanim, flykeys};
 use resvg::tiny_skia::{Pixmap, PixmapPaint, Transform};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -30,14 +30,14 @@ use windows::Win32::Graphics::Gdi::{
     DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ,
     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, HTTRANSPARENT,
     HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING,
     MF_UNCHECKED, PostMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer,
-    SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_LBUTTONUP, WM_MOUSEACTIVATE,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetWindowPos, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_ACTIVATE, WM_CHAR, WM_KEYDOWN,
+    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_NULL, WM_RBUTTONUP, WM_TIMER,
+    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -48,6 +48,8 @@ const TIMER_HOVER: usize = 2;
 /// Frames of the opening animation.
 const TIMER_ANIM: usize = 3;
 const ANIM_FRAME_MS: u32 = 10;
+/// The flyouts lost the activation while they had the keyboard.
+const TIMER_DEACTIVATED: usize = 4;
 const CLOSE_DELAY_MS: u32 = 300;
 /// After a menu from a flyout closes, the pointer is often outside the
 /// flyout (where the menu was): give it this long to come back.
@@ -128,6 +130,8 @@ struct Level {
     pad: (i32, i32, i32, i32),
     /// The shadow, drawn once per size and look.
     shadow: Option<(ShadowKey, Pixmap)>,
+    /// The element with the keyboard focus.
+    focus: Option<usize>,
 }
 
 /// What a cached shadow was drawn for.
@@ -152,6 +156,20 @@ struct Flyouts {
     small: HFONT,
     /// Icons by (cache key, pixel size).
     icons: HashMap<(String, i32), Option<Pixmap>>,
+    /// The flyouts have the keyboard (opened by a click on *All*, the bar
+    /// hotkey or Tab): arrows, Enter, Esc and typing work, and they close
+    /// when another window is activated rather than when the pointer leaves.
+    keyboard: bool,
+    /// The level the keys act on.
+    key_level: usize,
+    typeahead: flykeys::TypeAhead,
+    /// When the keyboard was taken: an activation lost right after (the
+    /// click that opened them settling) takes it back instead of closing.
+    took_keyboard: Option<std::time::Instant>,
+    /// A key has been used (or the bar hotkey opened them): from then on the
+    /// flyouts stay open while the pointer is elsewhere. Until then they close
+    /// when the pointer leaves, as for a mouse user.
+    keys_used: bool,
 }
 
 thread_local! {
@@ -193,7 +211,37 @@ pub fn toggle_all(anchor: Hit) {
         close();
     } else {
         show(View::All { first_row: 0 }, anchor);
+        // Clicked open: typing and the arrow keys go to the list.
+        take_keyboard();
     }
+}
+
+/// The bar hotkey: opens the *All* list with the keyboard in it, or closes
+/// the flyouts if they have it already.
+pub fn keyboard_open() {
+    if with(|f| f.keyboard) == Some(true) {
+        close();
+        return;
+    }
+    show(View::All { first_row: 0 }, strip::all_button());
+    take_keyboard();
+    with(|f| f.keys_used = true);
+}
+
+/// Gives the open flyouts the keyboard, focusing the first app or tile.
+fn take_keyboard() {
+    let Some(b) = base() else { return };
+    with(|f| {
+        f.keyboard = true;
+        f.key_level = 0;
+        f.took_keyboard = Some(std::time::Instant::now());
+    });
+    focus_first(0);
+    unsafe {
+        let _ = SetForegroundWindow(b);
+        let _ = SetFocus(Some(b));
+    }
+    render(0);
 }
 
 fn show(view: View, anchor: Hit) {
@@ -210,11 +258,23 @@ fn show(view: View, anchor: Hit) {
                 font: canvas::font(scale(13, dpi), false),
                 small: canvas::font(scale(11, dpi), false),
                 icons: HashMap::new(),
+                keyboard: false,
+                key_level: 0,
+                typeahead: flykeys::TypeAhead::default(),
+                took_keyboard: None,
+                keys_used: false,
             })
         });
     }
     truncate(0);
-    with(|f| f.anchor = anchor);
+    // Opened by the pointer: keyboard callers take the keyboard afterwards.
+    with(|f| {
+        f.anchor = anchor;
+        f.keyboard = false;
+        f.keys_used = false;
+        f.key_level = 0;
+        f.typeahead.clear();
+    });
     if !push_level(view, None) {
         close();
         return;
@@ -273,6 +333,7 @@ fn push_level(view: View, source: Option<usize>) -> bool {
             shown: false,
             anim: None,
             pad: (0, 0, 0, 0),
+            focus: None,
             shadow: None,
         })
     });
@@ -663,7 +724,7 @@ fn render(idx: usize) {
             let rc = p.rect;
             let fill = if open_child == Some(i) {
                 Some(c.pressed)
-            } else if l.hover == Some(i) && interactive(&p.elem) {
+            } else if (l.hover == Some(i) || (f.keyboard && l.focus == Some(i))) && interactive(&p.elem) {
                 Some(c.hover)
             } else {
                 None
@@ -677,6 +738,11 @@ fn render(idx: usize) {
                     r4,
                     fill,
                 );
+            }
+            if f.keyboard && f.key_level == idx && l.focus == Some(i) {
+                // The keyboard focus: a ring in the accent colour.
+                let (x, y, w, h) = (rc.left as f32, rc.top as f32, ui::rect_w(&rc) as f32, ui::rect_h(&rc) as f32);
+                cv.stroke_round_rect(x, y, w, h, r4, s(2) as f32, c.accent);
             }
             let icon = p.icon.as_deref();
             match &p.elem {
@@ -1060,6 +1126,13 @@ fn popup(items: &[(usize, String, bool)]) -> usize {
         r
     };
     MENU_UP.with(|m| m.set(false));
+    if with(|f| f.keyboard) == Some(true)
+        && let Some(b) = base()
+    {
+        unsafe {
+            let _ = SetForegroundWindow(b);
+        }
+    }
     MENU_CLOSED.with(|m| m.set(Some(std::time::Instant::now())));
     start_close_timer();
     chosen
@@ -1160,8 +1233,315 @@ fn row_menu(app_id: &str) {
     }
 }
 
+// ---------------------------------------------------------------- keyboard
+
+/// Whether an element can take the keyboard focus.
+fn focusable(e: &Elem) -> bool {
+    interactive(e)
+}
+
+/// Focuses the first app or tile of level `idx` (or the first button).
+fn focus_first(idx: usize) {
+    with(|f| {
+        let Some(l) = f.levels.get_mut(idx) else { return };
+        let first = l
+            .elems
+            .iter()
+            .position(|p| matches!(p.elem, Elem::Row(_) | Elem::Tile(_) | Elem::Sub(_)))
+            .or_else(|| l.elems.iter().position(|p| focusable(&p.elem)));
+        l.focus = first;
+        l.hover = first;
+    });
+}
+
+/// Focuses the element of level `idx` that `pick` chooses from the
+/// focusable ones (by element index).
+fn focus_where(idx: usize, pick: impl Fn(&[(usize, &Placed)]) -> Option<usize>) {
+    with(|f| {
+        let Some(l) = f.levels.get_mut(idx) else { return };
+        let cands: Vec<(usize, &Placed)> = l.elems.iter().enumerate().filter(|(_, p)| focusable(&p.elem)).collect();
+        if let Some(i) = pick(&cands) {
+            l.focus = Some(i);
+            l.hover = Some(i);
+        }
+    });
+}
+
+/// A key arrived: the flyouts are being used from the keyboard.
+fn mark_keys_used() -> bool {
+    with(|f| f.keys_used = true);
+    true
+}
+
+fn key_level() -> usize {
+    with(|f| f.key_level.min(f.levels.len().saturating_sub(1))).unwrap_or(0)
+}
+
+/// The All list scrolled by `delta` rows (clamped). Returns whether it moved.
+fn scroll_all(idx: usize, delta: isize) -> bool {
+    let moved = with(|f| {
+        let l = f.levels.get_mut(idx)?;
+        let max = l.rows.0.saturating_sub(l.rows.1);
+        match &mut l.view {
+            View::All { first_row } => {
+                let new = (*first_row as isize + delta).clamp(0, max as isize) as usize;
+                Some(std::mem::replace(first_row, new) != new)
+            }
+            _ => None,
+        }
+    })
+    .flatten()
+    .unwrap_or(false);
+    if moved {
+        rebuild(idx);
+    }
+    moved
+}
+
+fn is_row(p: &Placed) -> bool {
+    matches!(p.elem, Elem::Row(_))
+}
+
+fn on_key(vk: u16) -> bool {
+    use flykeys::Dir;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyState, VK_BACK, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT,
+        VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    };
+    let kl = key_level();
+    let dir = match vk {
+        v if v == VK_LEFT.0 => Some(Dir::Left),
+        v if v == VK_RIGHT.0 => Some(Dir::Right),
+        v if v == VK_UP.0 => Some(Dir::Up),
+        v if v == VK_DOWN.0 => Some(Dir::Down),
+        _ => None,
+    };
+    if let Some(dir) = dir {
+        move_focus(kl, dir);
+        return true;
+    }
+    let page = with(|f| f.levels.get(kl).map(|l| l.rows.1.max(1) as isize)).flatten().unwrap_or(1);
+    match vk {
+        v if v == VK_RETURN.0 => enter(kl),
+        // Space launches too, unless it's part of a name being typed.
+        v if v == VK_SPACE.0 => return false,
+        v if v == VK_ESCAPE.0 || v == VK_BACK.0 => back(kl),
+        v if v == VK_TAB.0 => {
+            let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
+            next_button(if shift { -1 } else { 1 });
+        }
+        v if v == VK_PRIOR.0 || v == VK_NEXT.0 => {
+            let up = v == VK_PRIOR.0;
+            scroll_all(kl, if up { -page } else { page });
+            focus_where(kl, |c| {
+                if up { c.iter().find(|(_, p)| is_row(p)) } else { c.iter().rev().find(|(_, p)| is_row(p)) }
+                    .map(|(i, _)| *i)
+            });
+            render(kl);
+        }
+        v if v == VK_HOME.0 || v == VK_END.0 => {
+            let home = v == VK_HOME.0;
+            scroll_all(kl, if home { isize::MIN / 2 } else { isize::MAX / 2 });
+            focus_where(kl, |c| {
+                if home { c.iter().find(|(_, p)| is_row(p)) } else { c.iter().rev().find(|(_, p)| is_row(p)) }
+                    .map(|(i, _)| *i)
+            });
+            render(kl);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// An arrow key: the next element that way, scrolling the All list at its
+/// ends.
+fn move_focus(kl: usize, dir: flykeys::Dir) {
+    let (rects, focus) = with(|f| {
+        f.levels
+            .get(kl)
+            .map(|l| {
+                let rects: Vec<flykeys::Rect> = l
+                    .elems
+                    .iter()
+                    .map(|p| {
+                        if focusable(&p.elem) {
+                            (p.rect.left, p.rect.top, p.rect.right, p.rect.bottom)
+                        } else {
+                            // Not focusable: far away so it's never chosen.
+                            (i32::MIN / 4, i32::MIN / 4, i32::MIN / 4, i32::MIN / 4)
+                        }
+                    })
+                    .collect();
+                (rects, l.focus)
+            })
+            .unwrap_or_default()
+    })
+    .unwrap_or_default();
+    let Some(from) = focus else {
+        focus_first(kl);
+        render(kl);
+        return;
+    };
+    match flykeys::neighbour(&rects, from, dir) {
+        Some(i) if rects[i].0 > i32::MIN / 4 => {
+            with(|f| {
+                if let Some(l) = f.levels.get_mut(kl) {
+                    l.focus = Some(i);
+                    l.hover = Some(i);
+                }
+            });
+        }
+        // At the top or bottom of the All list: scroll a row.
+        _ if matches!(dir, flykeys::Dir::Up | flykeys::Dir::Down) => {
+            let up = dir == flykeys::Dir::Up;
+            if scroll_all(kl, if up { -1 } else { 1 }) {
+                focus_where(kl, |c| {
+                    if up { c.iter().find(|(_, p)| is_row(p)) } else { c.iter().rev().find(|(_, p)| is_row(p)) }
+                        .map(|(i, _)| *i)
+                });
+            }
+        }
+        _ => {}
+    }
+    render(kl);
+}
+
+/// Enter (or Space): open a subcategory and move into it, or do what a
+/// click would.
+fn enter(kl: usize) {
+    let Some(i) = with(|f| f.levels.get(kl).and_then(|l| l.focus)).flatten() else { return };
+    match elem(kl, i) {
+        Some(Elem::Sub(id)) => {
+            open_sub(kl, i, id);
+            if with(|f| f.levels.len() > kl + 1) == Some(true) {
+                with(|f| f.key_level = kl + 1);
+                focus_first(kl + 1);
+                render(kl);
+                render(kl + 1);
+            }
+        }
+        Some(_) => activate(kl, i),
+        None => {}
+    }
+}
+
+/// Esc or Backspace: back to the level below, or close.
+fn back(kl: usize) {
+    if kl == 0 {
+        close();
+        return;
+    }
+    truncate(kl);
+    with(|f| f.key_level = kl - 1);
+    render(kl - 1);
+}
+
+/// Tab / Shift+Tab: the next or previous button on the bar that has a
+/// flyout (All, then the categories), keeping the keyboard.
+fn next_button(step: isize) {
+    let buttons = strip::flyout_buttons();
+    if buttons.is_empty() {
+        return;
+    }
+    let anchor = with(|f| f.anchor);
+    let at = buttons.iter().position(|(h, _)| Some(*h) == anchor).unwrap_or(0) as isize;
+    let n = buttons.len() as isize;
+    let (hit, cat) = buttons[((at + step) % n + n) as usize % buttons.len()];
+    match cat {
+        Some(id) => show(View::Category(id), hit),
+        None => show(View::All { first_row: 0 }, hit),
+    }
+    take_keyboard();
+    with(|f| f.keys_used = true);
+}
+
+/// A typed character: jump to the first app or tile whose name starts with
+/// what has been typed (or has a word that does).
+fn on_char(ch: char) -> bool {
+    if ch.is_control() {
+        return false;
+    }
+    let kl = key_level();
+    let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
+    let Some(typed) = with(|f| f.typeahead.push(ch, now).to_string()) else { return false };
+    if typed.trim().is_empty() {
+        // A lone space: launch what has the focus.
+        with(|f| f.typeahead.clear());
+        enter(kl);
+        return true;
+    }
+    let all = with(|f| f.levels.get(kl).map(|l| matches!(l.view, View::All { .. }))).flatten().unwrap_or(false);
+    if all {
+        // Search the whole list, not just the rows on screen.
+        let (lines, _) = app::with(|s| all_lines(s));
+        let apps: Vec<(usize, &str, &str)> = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(row, l)| match l {
+                AllLine::App { id, name, .. } => Some((row, id.as_str(), name.as_str())),
+                AllLine::Heading(_) => None,
+            })
+            .collect();
+        let names: Vec<&str> = apps.iter().map(|a| a.2).collect();
+        let focused_id = with(|f| {
+            let l = f.levels.get(kl)?;
+            match &l.elems.get(l.focus?)?.elem {
+                Elem::Row(id) => Some(id.clone()),
+                _ => None,
+            }
+        })
+        .flatten();
+        let current = focused_id.and_then(|id| apps.iter().position(|a| a.1 == id));
+        let Some(j) = flykeys::find(&names, &typed, current) else { return true };
+        let (row, id) = (apps[j].0, apps[j].1.to_string());
+        let first = with(|f| {
+            f.levels.get(kl).map(|l| match l.view {
+                View::All { first_row } => (first_row, l.rows.1),
+                _ => (0, 0),
+            })
+        })
+        .flatten()
+        .unwrap_or((0, 0));
+        // Scroll only if the match is off screen.
+        if row < first.0 || row >= first.0 + first.1 {
+            with(|f| {
+                if let Some(View::All { first_row }) = f.levels.get_mut(kl).map(|l| &mut l.view) {
+                    *first_row = row.saturating_sub(1);
+                }
+            });
+            rebuild(kl);
+        }
+        focus_where(kl, |c| c.iter().find(|(_, p)| p.elem == Elem::Row(id.clone())).map(|(i, _)| *i));
+    } else {
+        let (cands, current) = with(|f| {
+            f.levels
+                .get(kl)
+                .map(|l| {
+                    let c: Vec<(usize, String)> = l
+                        .elems
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| matches!(p.elem, Elem::Tile(_) | Elem::Sub(_) | Elem::Row(_)))
+                        .map(|(i, p)| (i, p.text.clone()))
+                        .collect();
+                    let cur = l.focus.and_then(|fi| c.iter().position(|(i, _)| *i == fi));
+                    (c, cur)
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+        let names: Vec<&str> = cands.iter().map(|c| c.1.as_str()).collect();
+        if let Some(j) = flykeys::find(&names, &typed, current) {
+            let target = cands[j].0;
+            focus_where(kl, |_| Some(target));
+        }
+    }
+    render(kl);
+    true
+}
+
 fn pointer_inside() -> bool {
-    if MENU_UP.with(|m| m.get()) {
+    if MENU_UP.with(|m| m.get()) || with(|f| f.keyboard && f.keys_used) == Some(true) {
         return true;
     }
     let mut pt = POINT::default();
@@ -1222,6 +1602,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 let l = &mut f.levels[idx];
                 let changed = l.hover != under;
                 l.hover = under;
+                if f.keyboard && under.is_some() {
+                    l.focus = under;
+                    f.key_level = idx;
+                }
                 (changed, !std::mem::replace(&mut l.tracking_leave, true))
             })
             .unwrap_or((false, false));
@@ -1274,6 +1658,22 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     }
                 }
                 TIMER_HOVER => follow_hover(HOVER_LEVEL.with(|h| h.get())),
+                TIMER_DEACTIVATED => {
+                    let active = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                    let ours = with(|f| f.levels.iter().any(|l| l.hwnd == active)).unwrap_or(false);
+                    if !ours && !MENU_UP.with(|m| m.get()) && with(|f| f.keyboard) == Some(true) {
+                        let just_taken =
+                            with(|f| f.took_keyboard.is_some_and(|t| t.elapsed().as_millis() < 500)).unwrap_or(false);
+                        if just_taken {
+                            unsafe {
+                                let _ = SetForegroundWindow(hwnd);
+                                let _ = SetFocus(Some(hwnd));
+                            }
+                        } else {
+                            close();
+                        }
+                    }
+                }
                 _ => {}
             }
             LRESULT(0)
@@ -1289,6 +1689,21 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             let (x, y) = mouse_xy(lparam);
             if let Some(Elem::Tile(id) | Elem::Row(id)) = elem_at(idx, x, y).and_then(|i| elem(idx, i)) {
                 row_menu(&id);
+            }
+            LRESULT(0)
+        }
+        (WM_KEYDOWN, Some(_)) if mark_keys_used() && on_key(wparam.0 as u16) => LRESULT(0),
+        (WM_CHAR, Some(_)) if mark_keys_used() && on_char(char::from_u32(wparam.0 as u32).unwrap_or('\0')) => {
+            LRESULT(0)
+        }
+        // Another window was activated while the flyouts had the keyboard:
+        // close them, after the activation has settled (a menu of ours
+        // doesn't count).
+        (WM_ACTIVATE, Some(0)) => {
+            if ui::loword(wparam.0) == 0 && with(|f| f.keyboard) == Some(true) && !MENU_UP.with(|m| m.get()) {
+                unsafe {
+                    SetTimer(Some(hwnd), TIMER_DEACTIVATED, 1, None);
+                }
             }
             LRESULT(0)
         }

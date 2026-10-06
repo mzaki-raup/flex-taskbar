@@ -41,6 +41,8 @@ pub enum Command {
     Search = 1,
     Menu = 2,
     Exit = 3,
+    /// Open the bar's *All* list with the keyboard in it.
+    Bar = 4,
 }
 
 impl Command {
@@ -50,6 +52,7 @@ impl Command {
             1 => Some(Command::Search),
             2 => Some(Command::Menu),
             3 => Some(Command::Exit),
+            4 => Some(Command::Bar),
             _ => None,
         }
     }
@@ -75,6 +78,7 @@ fn parse_args() -> Args {
             "--search" => a.command = Some(Command::Search),
             "--menu" => a.command = Some(Command::Menu),
             "--exit" => a.command = Some(Command::Exit),
+            "--bar" => a.command = Some(Command::Bar),
             _ => {}
         }
     }

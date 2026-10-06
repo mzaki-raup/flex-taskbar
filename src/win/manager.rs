@@ -88,6 +88,8 @@ const APPEARANCE: u16 = 69;
 const ARRANGE: u16 = 70;
 const AUTO_RESCAN: u16 = 71;
 const PACKAGE_APPS: u16 = 72;
+const HK_BAR: u16 = 73;
+const LBL_HK_BAR: u16 = 74;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -318,6 +320,11 @@ fn create() {
         }
         controls.insert(LBL_HK_SEARCH, label("Search", LBL_HK_SEARCH));
         controls.insert(LBL_HK_MENU, label("Menu", LBL_HK_MENU));
+        controls.insert(LBL_HK_BAR, label("Bar", LBL_HK_BAR));
+        controls.insert(
+            HK_BAR,
+            ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), HK_BAR),
+        );
         controls.insert(
             HK_SEARCH,
             ui::child(hwnd, "msctls_hotkey32", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), HK_SEARCH),
@@ -403,7 +410,7 @@ fn layout() {
     // Inside a card.
     let (inner_w, ix) = (col_w - 2 * pm.pad, cols.map(|x| x + pm.pad));
     let footer = rc.bottom - pm.footer;
-    let options_h = pm.card_title + 3 * pitch + s(6);
+    let options_h = pm.card_title + 4 * pitch + s(6);
     let options_top = footer - pm.margin - options_h;
     let top = pm.header;
     let pane_bottom = options_top - pm.gap;
@@ -464,8 +471,10 @@ fn layout() {
     place(HK_SEARCH, ix[2] + lw, line(0) + s(2), inner_w - lw, s(24));
     place(LBL_HK_MENU, ix[2], line(1) + s(5), lw, lh);
     place(HK_MENU, ix[2] + lw, line(1) + s(2), inner_w - lw, s(24));
-    place(HK_APPLY, ix[2], line(2), s(120), bh);
-    place(LBL_HINT, ix[2] + s(128), line(2) + s(5), inner_w - s(128), lh);
+    place(LBL_HK_BAR, ix[2], line(2) + s(5), lw, lh);
+    place(HK_BAR, ix[2] + lw, line(2) + s(2), inner_w - lw, s(24));
+    place(HK_APPLY, ix[2], line(3), s(120), bh);
+    place(LBL_HINT, ix[2] + s(128), line(3) + s(5), inner_w - s(128), lh);
 
     // Command bar: where the data lives, and the other windows.
     let by = footer + (pm.footer - bh) / 2;
@@ -1201,10 +1210,12 @@ fn hotkey_from_control(id: u16) -> Option<Hotkey> {
 }
 
 fn load_settings() {
-    let (search, menu) = app::with(|s| (s.cfg.settings.search_hotkey, s.cfg.settings.menu_hotkey));
+    let (search, menu, bar) =
+        app::with(|s| (s.cfg.settings.search_hotkey, s.cfg.settings.menu_hotkey, s.cfg.settings.bar_hotkey));
     unsafe {
         SendMessageW(ctl(HK_SEARCH), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(search))), Some(LPARAM(0)));
         SendMessageW(ctl(HK_MENU), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(menu))), Some(LPARAM(0)));
+        SendMessageW(ctl(HK_BAR), HKM_SETHOTKEY, Some(WPARAM(hotkey_to_control(bar))), Some(LPARAM(0)));
         let check = if autostart::is_enabled() { BST_CHECKED } else { BST_UNCHECKED };
         SendMessageW(ctl(AUTOSTART), BM_SETCHECK, Some(WPARAM(check.0 as usize)), Some(LPARAM(0)));
         let (show, reserve, auto, packages) = app::with(|s| {
@@ -1246,7 +1257,8 @@ fn pin_selected(owner: HWND) {
 fn apply_hotkeys(owner: HWND) {
     let search = hotkey_from_control(HK_SEARCH);
     let menu = hotkey_from_control(HK_MENU);
-    for hk in [search, menu].into_iter().flatten() {
+    let bar = hotkey_from_control(HK_BAR);
+    for hk in [search, menu, bar].into_iter().flatten() {
         let is_f_key = (0x70..=0x87).contains(&hk.key);
         if hk.modifiers == 0 && !is_f_key {
             ui::warn(
@@ -1259,13 +1271,15 @@ fn apply_hotkeys(owner: HWND) {
             return;
         }
     }
-    if search.is_some() && search == menu {
-        ui::warn(Some(owner), "The search and menu hotkeys must be different.");
+    let set: Vec<_> = [search, menu, bar].into_iter().flatten().collect();
+    if (1..set.len()).any(|i| set[..i].contains(&set[i])) {
+        ui::warn(Some(owner), "The search, menu and bar hotkeys must all be different.");
         return;
     }
     app::with(|s| {
         s.cfg.settings.search_hotkey = search;
         s.cfg.settings.menu_hotkey = menu;
+        s.cfg.settings.bar_hotkey = bar;
     });
     app::save();
     let problems = app::register_hotkeys();

@@ -46,6 +46,9 @@ pub fn run(args: &Args) -> i32 {
                 Some(Command::Manage) => {
                     cmd.arg("--manage");
                 }
+                Some(Command::Bar) => {
+                    cmd.arg("--bar");
+                }
                 _ => {}
             }
         } else {

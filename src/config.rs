@@ -63,6 +63,8 @@ pub struct Settings {
     pub search_hotkey: Option<Hotkey>,
     /// Pops the category menu at the mouse cursor.
     pub menu_hotkey: Option<Hotkey>,
+    /// Opens the bar's *All* list with the keyboard in it.
+    pub bar_hotkey: Option<Hotkey>,
     pub max_recents: usize,
     pub show_recents_in_menu: bool,
     /// "All apps" in the menu is split into A–Z submenus above this many apps.
@@ -95,6 +97,7 @@ impl Default for Settings {
         Settings {
             search_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x20 }),
             menu_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x4D }), // M
+            bar_hotkey: Some(Hotkey { modifiers: MOD_CONTROL | MOD_ALT, key: 0x42 }),  // B
             max_recents: 10,
             show_recents_in_menu: true,
             group_all_apps_above: 40,

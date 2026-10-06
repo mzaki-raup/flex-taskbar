@@ -507,6 +507,27 @@ pub fn max_levels() -> usize {
     striplayout::max_levels(edge, (ui::rect_w(&mon), ui::rect_h(&mon)), bar, dpi)
 }
 
+/// The *All* button.
+pub fn all_button() -> Hit {
+    Hit::Left(LEFT_ALL)
+}
+
+/// The buttons that open a flyout, in bar order: *All*, then each category
+/// (with its id).
+pub fn flyout_buttons() -> Vec<(Hit, Option<u64>)> {
+    let mut v = vec![(all_button(), None)];
+    STRIP.with(|s| {
+        if let Some(s) = s.borrow().as_ref() {
+            for (i, item) in s.items.iter().enumerate() {
+                if let Item::Category(id) = item {
+                    v.push((Hit::Item(i), Some(*id)));
+                }
+            }
+        }
+    });
+    v
+}
+
 /// The edge the strip is docked against (flyouts open away from it).
 pub fn edge() -> Edge {
     with(|s| s.edge).unwrap_or(Edge::Bottom)

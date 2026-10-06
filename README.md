@@ -158,6 +158,27 @@ original FlexTaskbar:
     right-click a category and pick *Manage categories…*).
   - The flyouts close shortly after the pointer leaves all of them and the
     bar button.
+  - **Keyboard control.** Click *All*, or press the bar hotkey
+    (**Ctrl+Alt+B**, changeable on the Manage window's *Hotkeys* card, or
+    run `FlexTaskbar.exe --bar`), and the flyouts take the keyboard:
+    - **arrow keys** move between tiles and rows (a ring in the accent
+      colour shows where you are), scrolling the *All* list at its ends;
+      **Page Up/Down**, **Home** and **End** scroll it further;
+    - **typing** jumps to the first app or tile whose name, or a word in
+      it, starts with what you typed (pause a second to start again;
+      typing the same letter again moves to the next one). In *All* it
+      searches the whole list, not just what's on screen;
+    - **Enter** (or **Space**) launches, or opens a subcategory and moves
+      into it; **Esc** or **Backspace** goes back a level, and closes from
+      the first;
+    - **Tab** / **Shift+Tab** move to the next or previous button on the
+      bar with a flyout (*All*, then each category).
+
+    Once a key has been used the flyouts stay open while the pointer is
+    elsewhere, and close when you switch to another window; until then
+    they close when the pointer leaves, as before.
+
+    ![The All list with the keyboard focus ring on Notepad after typing "note"](screenshots/keyboard.png)
   - **Opening animation.** Every flyout (category, subcategory and *All*)
     can animate as it opens. Pick one in the Appearance window
     (*Opening animation*), with its length (60–600 ms, 180 by default):
@@ -281,7 +302,7 @@ The theme also applies to the menus, the search window and the settings
 windows. *Reset to defaults*
 brings back the original look.
 
-**Four ways to launch:**
+**Five ways to launch:**
 
 | How | What you get |
 |---|---|
@@ -289,6 +310,7 @@ brings back the original look.
 | Left- or right-click the tray icon | The full menu |
 | **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
 | **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
+| **Ctrl+Alt+B** (changeable) | The bar's *All* list, ready for the keyboard (see below) |
 
 Search matches the app name, its file name, and the names of the categories it
 is filed under. So typing "dev" finds every app inside "Dev › Editors" too.
@@ -472,6 +494,7 @@ handy for binding to other tools such as AutoHotkey or a mouse utility.
 | *(none)* | Start, or open the Manage window if already running |
 | `--search` | Open the search window |
 | `--menu` | Show the category menu at the mouse pointer |
+| `--bar` | Open the bar's *All* list with the keyboard in it (like the bar hotkey) |
 | `--manage` | Open the Manage window (`--settings` does the same) |
 | `--exit` | Close FlexTaskbar cleanly (it is not restarted) |
 | `--reset` | Start with default settings. The current `config.json` is kept as `config.json.reset-<time>`. Only works when FlexTaskbar isn't already running. |
@@ -533,7 +556,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 73 unit tests cover:
+The 77 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -548,6 +571,10 @@ The 73 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- keyboard control of the flyouts: which tile or row each arrow key moves
+  to (in a grid, a short last row and a list under buttons), stopping at
+  the edges, type-to-jump (name and word starts, the same letter moving on,
+  wrapping round) and typed letters collecting until a pause
 - flyout shadows: each style's look, the room each needs around the flyout
   (following its offset and the DPI), and the blur spreading softly while
   keeping the shadow's amount, symmetric, and safe on empty or short input
@@ -599,6 +626,15 @@ The 73 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - keyboard control: the focus ring on opening *All* by a click and by
+    `--bar`, arrow keys, typing "note" and "you" (jumping to Notepad and
+    YouTube), End, Tab to the first category, Enter opening a
+    subcategory and moving into it, Esc going back, Enter launching
+    Notepad, Esc closing, and *All* still closing when the pointer leaves
+    if no key was used. Wine doesn't give these windows the X keyboard
+    focus by itself, so the tests set it with `xdotool`; Windows gives
+    them the focus when they take the foreground.
+  - the *Bar* hotkey row on the Manage window's *Hotkeys* card
   - the flyout shadows, with a compositor: all six styles on category
     flyouts two levels deep and on the *All* list, choosing one in the
     Appearance window (applied and saved), the shadow stopping at the bar's
@@ -646,7 +682,8 @@ The 73 unit tests cover:
 - importing old .NET settings
 - Start Menu fallback scan, which skips "Uninstall…" entries
 - restore after a corrupt `config.json`
-- `--menu`, `--search`, `--manage` and `--exit` reaching the running copy
+- `--menu`, `--search`, `--manage`, `--bar` and `--exit` reaching the
+  running copy
 - restart after the launcher process was killed, and the crash-loop stop after
   5 kills
 - the screenshots and the GIF above come from a scripted run of this flow
@@ -706,6 +743,7 @@ src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
+src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)
 src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/pkgsources.rs    package managers' folders and console programs   (tested)

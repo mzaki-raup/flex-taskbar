@@ -31,10 +31,11 @@ and described in the README.
   The bar slides out of view and comes back when the pointer reaches the
   screen edge, with a delay setting and the flyout animation styles. The
   reserved screen space must be released while it is hidden.
-- [ ] **Keyboard control of the flyouts** · 🟡
-  Arrow keys move between tiles and rows, Enter launches, Esc closes,
-  Right/Left open and close subcategories. In the *All* list, typing jumps
-  to or filters apps. A hotkey to open the bar's first flyout.
+- [x] **Keyboard control of the flyouts** · 🟡
+  Arrow keys move between tiles and rows, Enter launches or opens a
+  subcategory, Esc goes back, Tab moves between the bar's flyouts, and
+  typing jumps to an app. The bar hotkey (Ctrl+Alt+B) or `--bar` opens
+  *All* ready for the keyboard.
 - [ ] **Multi-monitor** · 🔴
   A bar on every screen, or on a chosen one, each docked and reserving
   space on its own monitor. Hard to test without real multi-monitor

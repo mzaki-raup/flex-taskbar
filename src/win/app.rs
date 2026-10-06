@@ -54,6 +54,7 @@ const NIN_KEYSELECT: u32 = NIN_SELECT | 0x1;
 
 const HOTKEY_SEARCH: i32 = 1;
 const HOTKEY_MENU: i32 = 2;
+const HOTKEY_BAR: i32 = 3;
 
 pub const FOLDER_ICON: &str = "folder";
 
@@ -288,6 +289,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             match wparam.0 as i32 {
                 HOTKEY_SEARCH => searchwin::toggle(),
                 HOTKEY_MENU => show_menu(),
+                HOTKEY_BAR => super::flyout::keyboard_open(),
                 _ => {}
             }
             LRESULT(0)
@@ -388,6 +390,7 @@ pub fn run_command(cmd: Command) {
         Command::Manage => manager::show(),
         Command::Search => searchwin::show(),
         Command::Menu => show_menu(),
+        Command::Bar => super::flyout::keyboard_open(),
         Command::Exit => exit(),
     }
 }
@@ -717,12 +720,15 @@ pub fn reload_icon(key: &str) {
 
 // ---------------------------------------------------------------- hotkeys
 
-/// (Re)registers both hotkeys. Returns a message per hotkey that another
+/// (Re)registers the hotkeys. Returns a message per hotkey that another
 /// program already owns.
 pub fn register_hotkeys() -> Vec<String> {
-    let (main, search, menu) = with(|s| (s.main, s.cfg.settings.search_hotkey, s.cfg.settings.menu_hotkey));
+    let (main, search, menu, bar) = with(|s| {
+        let st = &s.cfg.settings;
+        (s.main, st.search_hotkey, st.menu_hotkey, st.bar_hotkey)
+    });
     let mut problems = Vec::new();
-    for (id, hk, what) in [(HOTKEY_SEARCH, search, "search"), (HOTKEY_MENU, menu, "menu")] {
+    for (id, hk, what) in [(HOTKEY_SEARCH, search, "search"), (HOTKEY_MENU, menu, "menu"), (HOTKEY_BAR, bar, "bar")] {
         unsafe {
             let _ = UnregisterHotKey(Some(main), id);
         }
