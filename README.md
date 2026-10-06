@@ -718,6 +718,11 @@ src/win/panel.rs     the settings windows' look: page title, cards, command bar
 assets/              icon, manifest, resource script
 ```
 
+## Roadmap
+
+Planned features and improvements, with their difficulty and a suggested
+order, are in [ROADMAP.md](ROADMAP.md).
+
 ## Privacy
 
 Everything stays on your machine. There are no network requests, telemetry,
