@@ -57,6 +57,9 @@ pub struct AppEntry {
     pub kind: AppKind,
     /// What its windows are recognised by (see `running::app_keys`).
     pub keys: Vec<String>,
+    /// A custom app whose target is a folder: on the bar it opens as a
+    /// flyout listing the folder (see `folders`).
+    pub folder: Option<std::path::PathBuf>,
 }
 
 #[derive(Default)]
@@ -88,6 +91,7 @@ impl Catalog {
                 } else {
                     running::app_keys(Some(&s.parsing_name), s.target.as_deref())
                 },
+                folder: None,
             });
         }
         for c in custom {
@@ -98,6 +102,10 @@ impl Catalog {
                 kind: appkind::classify_custom(&c.target, &c.args),
                 source: Source::Custom,
                 keys: running::app_keys(None, Some(&super::launch::expand(c.target.trim()))),
+                folder: {
+                    let target = std::path::PathBuf::from(super::launch::expand(c.target.trim()));
+                    (c.args.trim().is_empty() && target.is_dir()).then_some(target)
+                },
             });
         }
         apps.sort_by_cached_key(|a| a.name.to_lowercase());

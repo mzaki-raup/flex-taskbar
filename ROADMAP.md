@@ -52,9 +52,9 @@ Suggested next:
 
 ## Organising
 
-- [ ] **Pin folders and files to the bar** · 🟡
+- [x] **Pin folders and files to the bar** · 🟡
   A folder on the bar opens a flyout listing its contents (like Dock
-  stacks), sorted by name or date; sub-folders open further flyouts.
+  stacks), folders first then by name; sub-folders open further flyouts.
 - [ ] **Drag from a flyout or the All list** · 🟡
   Drag an app onto the bar to pin it, or onto a category to file it there.
 - [ ] **Smart categories** · 🟡

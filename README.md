@@ -240,6 +240,18 @@ original FlexTaskbar:
 - **Pinned apps** launch with a click. You can pin an app from the Manage
   window (*Pin to strip*), from the *All* list, with *Link*, or by dragging
   `.exe`/`.lnk` files onto the bar.
+- **Folders on the bar.** Drag a folder onto the bar (or use *Link* with a
+  folder as the target) and it opens like a category: rest on it, or
+  click it, and a flyout lists what is in it, like the Dock's stacks.
+  Subfolders come first and open their own flyout beyond (as deep as
+  categories may go); files open as they would in Explorer; *Open folder*
+  at the end opens it in Explorer. Hidden and system files are left out,
+  and at most 48 things are shown (*Open folder* says how many more there
+  are). The folder is read when its flyout opens, so it is always up to
+  date; nothing watches it in between. Folders work with the keyboard and
+  Tab like categories.
+
+  ![A pinned folder's flyout (Docs, Pictures, files and Open folder), with Docs open above it](screenshots/folder-stack.png)
 - **Running apps.** An app with a window open gets a mark: a short line under
   its icon on the bar (*Line*, like Windows 11) or a dot (*Dot*, like macOS),
   under its tile in a flyout, and on the left of its row in *All*. Change or
@@ -639,7 +651,7 @@ claimed here.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 93 unit tests cover:
+The 96 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -654,6 +666,9 @@ The 93 unit tests cover:
   run for each edge (rows for top and bottom bars, columns for side bars),
   pinning, and the
   bar order (mixing categories and apps, moves, new and removed buttons)
+- pinned folders: hidden and system files left out, folders first, then
+  by name ignoring case, the cap with the number left over, and shortcut
+  names shown without `.lnk`/`.url`
 - saved looks: unique names ("(2)", "(3)", blank names), saving replacing
   a look of the same name, the pictures a look shows, renaming one, and a
   picture counting as in use while any saved look shows it
@@ -729,6 +744,10 @@ The 93 unit tests cover:
     window. Wine without a compositor shows only fully opaque or clear
     pixels, so Fade and Slide look like darkening there instead of
     see-through.
+  - pinned folders: a folder pinned as a custom app getting the "opens a
+    flyout" mark, its flyout (subfolders first, files, *Open folder*),
+    *Docs* opening beyond on hover with its own subfolder, and clicking
+    `notes.txt` opening it in Notepad
   - saved looks: saving the dark look as "Night", switching to Light, *Use
     "Night"* bringing it back (the window re-theming with it), *Export this
     look…* writing a `.flexlook` that `zipfile` checks, and *Import a
@@ -875,6 +894,7 @@ src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
 src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
 src/backup.rs        settings backups: writing and checking the zip   (tested)
 src/looks.rs         saved looks: names, their pictures                (tested)
+src/folders.rs       pinned folders: what their flyouts list           (tested)
 src/flyanim.rs       flyout opening animations (genie, drawer…)       (tested)
 src/flykeys.rs       keyboard control of the flyouts (arrows, typing) (tested)
 src/shadow.rs        flyout shadow styles and blur                     (tested)

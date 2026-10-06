@@ -61,13 +61,21 @@ const HOVER_DELAY_MS: u32 = 200;
 #[derive(Clone, PartialEq)]
 enum View {
     Category(u64),
-    All { first_row: usize },
+    All {
+        first_row: usize,
+    },
+    /// A folder pinned to the bar, or a folder inside one.
+    Folder(std::path::PathBuf),
 }
 
 #[derive(Clone, PartialEq)]
 enum Elem {
     Sub(u64),
     Tile(String),
+    /// A folder inside a pinned folder: opens beyond, like a subcategory.
+    Folder(std::path::PathBuf),
+    /// A file in a pinned folder (or the folder itself, for *Open folder*).
+    File(std::path::PathBuf),
     Row(String),
     /// Static text ("No apps in this category", the All header).
     Label,
@@ -207,6 +215,17 @@ pub fn open_category(id: u64, anchor: Hit) {
         return;
     }
     show(View::Category(id), anchor);
+}
+
+/// A folder pinned to the bar: its flyout lists what is in it.
+pub fn open_folder(path: std::path::PathBuf, anchor: Hit) {
+    let view = View::Folder(path);
+    let already = with(|f| f.anchor == anchor && f.levels.first().is_some_and(|l| l.view == view));
+    if already == Some(true) {
+        cancel_close();
+        return;
+    }
+    show(view, anchor);
 }
 
 pub fn toggle_all(anchor: Hit) {
@@ -552,7 +571,11 @@ fn rebuild(idx: usize) {
             let below = &f.levels[idx - 1];
             source
                 .and_then(|i| below.elems.get(i))
-                .filter(|p| matches!((&p.elem, &view), (Elem::Sub(a), View::Category(b)) if a == b))
+                .filter(|p| match (&p.elem, &view) {
+                    (Elem::Sub(a), View::Category(b)) => a == b,
+                    (Elem::Folder(a), View::Folder(b)) => a == b,
+                    _ => false,
+                })
                 .map(|p| (p.rect, below.win))
         })
         .flatten()
@@ -578,6 +601,8 @@ fn rebuild(idx: usize) {
     struct Content {
         subs: Vec<(u64, String)>,
         tiles: Vec<(String, String)>,
+        /// A folder's tiles, ready made (subfolders, files, *Open folder*).
+        folder: Vec<(Elem, String, String)>,
         empty: bool,
         rows: Vec<AllLine>,
         /// Apps shown / in total, and the Sort and Show buttons' texts.
@@ -588,11 +613,24 @@ fn rebuild(idx: usize) {
         View::Category(id) => crate::tree::find(&s.cfg.categories, *id).map(|c| Content {
             subs: c.children.iter().map(|ch| (ch.id, ch.name.clone())).collect(),
             tiles: c.apps.iter().filter_map(|a| s.catalog.get(a).map(|e| (a.clone(), e.name.clone()))).collect(),
+            folder: Vec::new(),
             empty: c.children.is_empty() && c.apps.is_empty(),
             rows: Vec::new(),
             counts: (0, 0),
             buttons: Default::default(),
         }),
+        View::Folder(path) => {
+            let folder = folder_tiles(path);
+            Some(Content {
+                subs: Vec::new(),
+                tiles: Vec::new(),
+                empty: folder.len() <= 1,
+                folder,
+                rows: Vec::new(),
+                counts: (0, 0),
+                buttons: Default::default(),
+            })
+        }
         View::All { .. } => {
             let (rows, counts) = all_lines(s);
             let v = &s.cfg.settings.all_apps;
@@ -600,7 +638,15 @@ fn rebuild(idx: usize) {
                 format!("Sort: {}", v.sort.short()),
                 if v.filtering() { "Show: some".to_string() } else { "Show: all".to_string() },
             );
-            Some(Content { subs: Vec::new(), tiles: Vec::new(), empty: false, rows, counts, buttons })
+            Some(Content {
+                subs: Vec::new(),
+                tiles: Vec::new(),
+                folder: Vec::new(),
+                empty: false,
+                rows,
+                counts,
+                buttons,
+            })
         }
     });
     let mon = unsafe {
@@ -628,7 +674,9 @@ fn rebuild(idx: usize) {
     let mut all_rows = None;
 
     match &view {
-        View::Category(_) => {
+        View::Category(_) | View::Folder(_) => {
+            let empty_text =
+                if matches!(view, View::Folder(_)) { "This folder is empty" } else { "No apps in this category" };
             let tile = (s(84), s(76));
             let tm = s(2);
             let cols = (look.flyout_columns as usize).max(1);
@@ -638,8 +686,13 @@ fn rebuild(idx: usize) {
             // nearest the next level opening further down.
             let subs = content.subs.iter().map(|(id, name)| (Elem::Sub(*id), name.clone(), format!("cat:{id}")));
             let apps = content.tiles.iter().map(|(id, name)| (Elem::Tile(id.clone()), name.clone(), id.clone()));
-            let items: Vec<(Elem, String, String)> =
-                if strip::edge() == Edge::Top { apps.chain(subs).collect() } else { subs.chain(apps).collect() };
+            let items: Vec<(Elem, String, String)> = if matches!(view, View::Folder(_)) {
+                content.folder.clone()
+            } else if strip::edge() == Edge::Top {
+                apps.chain(subs).collect()
+            } else {
+                subs.chain(apps).collect()
+            };
             // A horizontal strip for a top or bottom bar, a vertical one for
             // a side bar (see `flyout_cells`).
             let n = items.len();
@@ -655,7 +708,7 @@ fn rebuild(idx: usize) {
             let used_cols = cells.iter().map(|c| c.0 + 1).max().unwrap_or(1);
             let used_rows = cells.iter().map(|c| c.1 + 1).max().unwrap_or(0);
             let tiles_w = used_cols as i32 * (tile.0 + 2 * tm);
-            inner_w = if content.empty { canvas::measure("No apps in this category", font).0 + s(16) } else { tiles_w };
+            inner_w = if content.empty { tiles_w.max(canvas::measure(empty_text, font).0 + s(16)) } else { tiles_w };
             for ((col, row), (elem, text, icon)) in cells.into_iter().zip(items) {
                 let left = pad + col as i32 * (tile.0 + 2 * tm) + tm;
                 let top = y + row as i32 * (tile.1 + 2 * tm) + tm;
@@ -672,7 +725,7 @@ fn rebuild(idx: usize) {
                 elems.push(Placed {
                     rect: RECT { left: pad + s(4), top: y + s(4), right: pad + inner_w, bottom: y + s(24) },
                     elem: Elem::Label,
-                    text: "No apps in this category".into(),
+                    text: empty_text.into(),
                     icon: None,
                     note: "",
                 });
@@ -750,7 +803,7 @@ fn rebuild(idx: usize) {
         .iter()
         .filter_map(|p| {
             let size = match p.elem {
-                Elem::Tile(_) | Elem::Sub(_) => s(look.icon_size as i32),
+                Elem::Tile(_) | Elem::Sub(_) | Elem::Folder(_) | Elem::File(_) => s(look.icon_size as i32),
                 Elem::Row(_) => s(20),
                 _ => s(16),
             };
@@ -863,12 +916,12 @@ fn render(idx: usize) {
             }
             let icon = p.icon.as_deref();
             match &p.elem {
-                Elem::Tile(_) | Elem::Sub(_) => {
+                Elem::Tile(_) | Elem::Sub(_) | Elem::Folder(_) | Elem::File(_) => {
                     let want = s(f.look.icon_size as i32);
                     let size = want.min(ui::rect_w(&rc) - s(16));
                     let x = rc.left + (ui::rect_w(&rc) - size) / 2;
                     let y = rc.top + s(4);
-                    let is_sub = matches!(p.elem, Elem::Sub(_));
+                    let is_sub = matches!(p.elem, Elem::Sub(_) | Elem::Folder(_));
                     match icon.and_then(|k| icon_for(f, k, want)) {
                         Some(img) => cv.image(&img, x, y, size, 1.0),
                         None if is_sub => cv.folder(x as f32, y as f32, size as f32, c.accent),
@@ -1168,6 +1221,7 @@ fn follow_hover(idx: usize) {
     };
     match hover.and_then(|i| elem(idx, i).map(|e| (i, e))) {
         Some((i, Elem::Sub(id))) => open_sub(idx, i, id),
+        Some((i, Elem::Folder(path))) => open_subfolder(idx, i, path),
         // Pointer on something else here: close what's above it. Resting on
         // empty space or padding keeps it, so the pointer can travel to it.
         Some(_) if child.is_some() => {
@@ -1179,6 +1233,67 @@ fn follow_hover(idx: usize) {
 }
 
 /// Opens the flyout of subcategory `id` (tile `i` of level `idx`) above it.
+/// The tiles of a folder's flyout: its subfolders, its files and *Open
+/// folder* last (see `folders::listing`).
+fn folder_tiles(path: &std::path::Path) -> Vec<(Elem, String, String)> {
+    use std::os::windows::fs::MetadataExt;
+    const HIDDEN: u32 = 0x2;
+    const SYSTEM: u32 = 0x4;
+    let entries: Vec<(crate::folders::Entry, std::path::PathBuf)> = std::fs::read_dir(path)
+        .map(|r| {
+            r.flatten()
+                // Never more than a few thousand looked at, however big.
+                .take(5000)
+                .filter_map(|e| {
+                    let meta = e.metadata().ok()?;
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    let hidden = meta.file_attributes() & (HIDDEN | SYSTEM) != 0;
+                    Some((crate::folders::Entry { name, dir: meta.is_dir(), hidden }, e.path()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let by_name: std::collections::HashMap<String, std::path::PathBuf> =
+        entries.iter().map(|(e, p)| (e.name.clone(), p.clone())).collect();
+    let (shown, more) = crate::folders::listing(entries.into_iter().map(|(e, _)| e).collect());
+    let mut tiles: Vec<(Elem, String, String)> = shown
+        .into_iter()
+        .filter_map(|e| {
+            let p = by_name.get(&e.name)?.clone();
+            let icon = format!("path:{}", p.display());
+            let text = crate::folders::display_name(&e.name);
+            Some((if e.dir { Elem::Folder(p) } else { Elem::File(p) }, text, icon))
+        })
+        .collect();
+    let open = if more > 0 { format!("Open folder ({more} more)") } else { "Open folder".to_string() };
+    tiles.push((Elem::File(path.to_path_buf()), open, format!("path:{}", path.display())));
+    tiles
+}
+
+/// Opens a file (or folder) from a pinned folder, as Explorer would.
+fn open_path(path: &std::path::Path) {
+    let target = super::launch::Target::Custom {
+        target: path.display().to_string(),
+        args: String::new(),
+        dir: String::new(),
+        admin: false,
+    };
+    super::launch::spawn(target, |msg| super::supervisor::log(&msg));
+}
+
+fn open_subfolder(idx: usize, i: usize, path: std::path::PathBuf) {
+    let child = with(|f| f.levels.get(idx + 1).map(|c| c.source)).flatten();
+    if child == Some(Some(i)) {
+        return; // already open
+    }
+    truncate(idx + 1);
+    // As deep as categories may go, so every level fits on screen.
+    if idx + 1 < strip::max_levels() && push_level(View::Folder(path), Some(i)) {
+        rebuild(idx + 1);
+    }
+    render(idx);
+}
+
 fn open_sub(idx: usize, i: usize, id: u64) {
     let child = with(|f| f.levels.get(idx + 1).map(|c| c.source)).flatten();
     if child == Some(Some(i)) {
@@ -1334,6 +1449,11 @@ fn activate(idx: usize, i: usize) {
         Some(Elem::SortButton) => sort_menu(),
         Some(Elem::ShowButton) => show_menu(),
         Some(Elem::Sub(id)) => open_sub(idx, i, id),
+        Some(Elem::Folder(path)) => open_subfolder(idx, i, path),
+        Some(Elem::File(path)) => {
+            close();
+            open_path(&path);
+        }
         Some(Elem::Tile(id) | Elem::Row(id)) => {
             close();
             app::launch_app(&id);
@@ -1375,7 +1495,9 @@ fn focus_first(idx: usize) {
         let first = l
             .elems
             .iter()
-            .position(|p| matches!(p.elem, Elem::Row(_) | Elem::Tile(_) | Elem::Sub(_)))
+            .position(|p| {
+                matches!(p.elem, Elem::Row(_) | Elem::Tile(_) | Elem::Sub(_) | Elem::Folder(_) | Elem::File(_))
+            })
             .or_else(|| l.elems.iter().position(|p| focusable(&p.elem)));
         l.focus = first;
         l.hover = first;
@@ -1539,8 +1661,12 @@ fn move_focus(kl: usize, dir: flykeys::Dir) {
 fn enter(kl: usize) {
     let Some(i) = with(|f| f.levels.get(kl).and_then(|l| l.focus)).flatten() else { return };
     match elem(kl, i) {
-        Some(Elem::Sub(id)) => {
-            open_sub(kl, i, id);
+        Some(e @ (Elem::Sub(_) | Elem::Folder(_))) => {
+            match e {
+                Elem::Sub(id) => open_sub(kl, i, id),
+                Elem::Folder(path) => open_subfolder(kl, i, path),
+                _ => {}
+            }
             if with(|f| f.levels.len() > kl + 1) == Some(true) {
                 with(|f| f.key_level = kl + 1);
                 focus_first(kl + 1);
@@ -1574,10 +1700,11 @@ fn next_button(step: isize) {
     let anchor = with(|f| f.anchor);
     let at = buttons.iter().position(|(h, _)| Some(*h) == anchor).unwrap_or(0) as isize;
     let n = buttons.len() as isize;
-    let (hit, cat) = buttons[((at + step) % n + n) as usize % buttons.len()];
-    match cat {
-        Some(id) => show(View::Category(id), hit),
-        None => show(View::All { first_row: 0 }, hit),
+    let (hit, opens) = buttons[((at + step) % n + n) as usize % buttons.len()].clone();
+    match opens {
+        strip::Opens::Category(id) => show(View::Category(id), hit),
+        strip::Opens::Folder(path) => show(View::Folder(path), hit),
+        strip::Opens::All => show(View::All { first_row: 0 }, hit),
     }
     take_keyboard();
     with(|f| f.keys_used = true);
@@ -1649,7 +1776,12 @@ fn on_char(ch: char) -> bool {
                         .elems
                         .iter()
                         .enumerate()
-                        .filter(|(_, p)| matches!(p.elem, Elem::Tile(_) | Elem::Sub(_) | Elem::Row(_)))
+                        .filter(|(_, p)| {
+                            matches!(
+                                p.elem,
+                                Elem::Tile(_) | Elem::Sub(_) | Elem::Row(_) | Elem::Folder(_) | Elem::File(_)
+                            )
+                        })
                         .map(|(i, p)| (i, p.text.clone()))
                         .collect();
                     let cur = l.focus.and_then(|fi| c.iter().position(|(i, _)| *i == fi));

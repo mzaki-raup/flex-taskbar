@@ -516,6 +516,11 @@ pub fn save() {
 }
 
 /// Rebuilds the catalog after custom apps changed.
+/// The folder a pinned app opens as a flyout, if it is one.
+pub fn folder_of(id: &str) -> Option<std::path::PathBuf> {
+    with(|s| s.catalog.get(id).and_then(|a| a.folder.clone()))
+}
+
 pub fn rebuild_catalog() {
     with(|s| s.catalog = Catalog::build(&s.shell_apps, &s.cfg.custom_apps));
     // Apps came or went: which of them are running may have changed.
@@ -685,6 +690,10 @@ fn icon_source(s: &State, app_id: &str) -> Option<IconSource> {
 /// Icon source for any cache key: an app id, `cat:<id>` (custom image or the
 /// folder icon), or [`FOLDER_ICON`].
 pub fn icon_source_for(s: &State, key: &str) -> Option<IconSource> {
+    // A file or folder shown in a pinned folder's flyout.
+    if let Some(path) = key.strip_prefix("path:") {
+        return Some(IconSource::Path(path.to_string()));
+    }
     if key == FOLDER_ICON {
         return Some(IconSource::Path(paths::get().data.display().to_string()));
     }
@@ -815,7 +824,7 @@ pub fn register_hotkeys() -> Vec<String> {
 /// A category's hotkey: its flyout when it has a button on the bar, or
 /// else its menu at the pointer.
 fn open_category_by_hotkey(id: u64) {
-    if let Some((hit, _)) = strip::flyout_buttons().into_iter().find(|(_, c)| *c == Some(id)) {
+    if let Some((hit, _)) = strip::flyout_buttons().into_iter().find(|(_, o)| *o == strip::Opens::Category(id)) {
         super::flyout::keyboard_open_category(hit, id);
         return;
     }

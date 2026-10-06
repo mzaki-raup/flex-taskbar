@@ -628,19 +628,43 @@ pub fn all_button() -> Hit {
     Hit::Left(LEFT_ALL)
 }
 
+/// What a bar button's flyout shows.
+#[derive(Clone, PartialEq)]
+pub enum Opens {
+    All,
+    Category(u64),
+    /// A pinned folder.
+    Folder(std::path::PathBuf),
+}
+
+/// What `item` opens as a flyout, if anything (categories, and apps that
+/// are folders).
+fn opens_of(item: &Item) -> Option<Opens> {
+    match item {
+        Item::Category(id) => Some(Opens::Category(*id)),
+        Item::App(id) => app::folder_of(id).map(Opens::Folder),
+    }
+}
+
+/// Opens the flyout of a bar button.
+fn open_flyout(opens: Opens, hit: Hit) {
+    match opens {
+        Opens::All => flyout::toggle_all(hit),
+        Opens::Category(id) => flyout::open_category(id, hit),
+        Opens::Folder(path) => flyout::open_folder(path, hit),
+    }
+}
+
 /// The buttons that open a flyout, in bar order: *All*, then each category
-/// (with its id).
-pub fn flyout_buttons() -> Vec<(Hit, Option<u64>)> {
-    let mut v = vec![(all_button(), None)];
-    STRIP.with(|s| {
-        if let Some(s) = s.borrow().as_ref() {
-            for (i, item) in s.items.iter().enumerate() {
-                if let Item::Category(id) = item {
-                    v.push((Hit::Item(i), Some(*id)));
-                }
-            }
+/// and pinned folder.
+pub fn flyout_buttons() -> Vec<(Hit, Opens)> {
+    let items: Vec<Item> = STRIP.with(|s| s.borrow().as_ref().map(|s| s.items.clone()).unwrap_or_default());
+    let mut v = vec![(all_button(), Opens::All)];
+    for (i, item) in items.iter().enumerate() {
+        if let Some(o) = opens_of(item) {
+            v.push((Hit::Item(i), o));
         }
-    });
+    }
     v
 }
 
@@ -1028,6 +1052,11 @@ fn render() {
             let x = (cx - size as f32 / 2.0) as i32;
             let y = (cy - size as f32 / 2.0) as i32;
             let is_cat = matches!(s.items[i], Item::Category(_));
+            // A pinned folder opens a flyout too, so it gets the same mark.
+            let opens_flyout = match &s.items[i] {
+                Item::Category(_) => true,
+                Item::App(id) => app::folder_of(id).is_some(),
+            };
             match s.icons.get(&key_of(&s.items[i])).and_then(|p| p.as_ref()) {
                 Some(img) => cv.image(img, x, y, size, 1.0),
                 None if is_cat => cv.folder(x as f32, y as f32, size as f32, c.accent),
@@ -1038,7 +1067,7 @@ fn render() {
                     cv.text(&letter, rc, s.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 }
             }
-            if is_cat {
+            if opens_flyout {
                 // The "opens a flyout" mark (see `indicator`).
                 super::indicator::draw(cv, &s.look, c, s.edge, x, y, size);
             }
@@ -1107,14 +1136,19 @@ fn render() {
 fn click(hit: Hit) {
     match hit {
         Hit::Left(LEFT_ALL) => flyout::toggle_all(hit),
-        Hit::Item(_) => match item(hit) {
-            Some(Item::Category(id)) => flyout::open_category(id, hit),
-            Some(Item::App(id)) => {
-                flyout::close();
-                app::launch_app(&id);
+        Hit::Item(_) => {
+            if let Some(item) = item(hit) {
+                match opens_of(&item) {
+                    Some(o) => open_flyout(o, hit),
+                    None => {
+                        if let Item::App(id) = item {
+                            flyout::close();
+                            app::launch_app(&id);
+                        }
+                    }
+                }
             }
-            None => {}
-        },
+        }
         Hit::Right(RIGHT_LINK) => {
             flyout::close();
             add_link();
@@ -1410,12 +1444,13 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 unsafe {
                     let _ = KillTimer(Some(hwnd), TIMER_HOVER);
                 }
-                match under.and_then(|h| item(h).map(|it| (h, it))) {
-                    // Categories open on hover (immediately if another flyout is
-                    // already open, so moving along the bar switches between them).
-                    Some((h, Item::Category(id))) => {
+                match under.and_then(|h| item(h).and_then(|it| opens_of(&it)).map(|o| (h, o))) {
+                    // Categories (and pinned folders) open on hover (immediately if
+                    // another flyout is already open, so moving along the bar
+                    // switches between them).
+                    Some((h, o)) => {
                         if flyout::is_open() {
-                            flyout::open_category(id, h);
+                            open_flyout(o, h);
                         } else {
                             let ms = app::with(|s| s.cfg.settings.hover_delay_ms);
                             unsafe {
@@ -1466,10 +1501,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 let _ = KillTimer(Some(hwnd), TIMER_HOVER);
             }
             if let Some(h) = with(|s| s.hover).flatten()
-                && let Some(Item::Category(id)) = item(h)
+                && let Some(o) = item(h).and_then(|it| opens_of(&it))
                 && pointer_over(h)
             {
-                flyout::open_category(id, h);
+                open_flyout(o, h);
             }
             LRESULT(0)
         }
