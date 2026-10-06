@@ -132,6 +132,9 @@ struct Level {
     shadow: Option<(ShadowKey, Pixmap)>,
     /// The element with the keyboard focus.
     focus: Option<usize>,
+    /// Where the button it opened from lies across the window, for the
+    /// closing animation.
+    across: (f32, f32),
 }
 
 /// What a cached shadow was drawn for.
@@ -268,7 +271,7 @@ fn show(view: View, anchor: Hit) {
             })
         });
     }
-    truncate(0);
+    truncate_now(0);
     // Opened by the pointer: keyboard callers take the keyboard afterwards.
     with(|f| {
         f.anchor = anchor;
@@ -336,6 +339,7 @@ fn push_level(view: View, source: Option<usize>) -> bool {
             anim: None,
             pad: (0, 0, 0, 0),
             focus: None,
+            across: (0.0, 0.0),
             shadow: None,
         })
     });
@@ -344,11 +348,108 @@ fn push_level(view: View, source: Option<usize>) -> bool {
 
 /// Closes every level from `keep` up, leaving `keep` levels open.
 fn truncate(keep: usize) {
-    let gone: Vec<HWND> =
-        with(|f| f.levels.drain(keep.min(f.levels.len())..).map(|l| l.hwnd).collect()).unwrap_or_default();
-    for h in gone {
+    close_levels(keep, true);
+}
+
+/// [`truncate`] without the closing animation (switching to another
+/// category: the new flyout replaces the old one at once).
+fn truncate_now(keep: usize) {
+    close_levels(keep, false);
+}
+
+fn close_levels(keep: usize, animate: bool) {
+    let (gone, style, ms, reverse) = with(|f| {
+        let gone: Vec<Level> = f.levels.drain(keep.min(f.levels.len())..).collect();
+        (gone, f.look.flyout_animation, f.look.flyout_animation_ms.clamp(60, 600), f.look.flyout_close_animation)
+    })
+    .unwrap_or((Vec::new(), FlyoutAnim::Off, 0, false));
+    for l in gone {
+        let play = animate && reverse && style != FlyoutAnim::Off && l.frame.is_some();
+        match l.frame {
+            Some(frame) if play => closing::start(closing::Closing {
+                hwnd: l.hwnd,
+                frame,
+                at: (l.win.left - l.pad.0, l.win.top - l.pad.1),
+                across: l.across,
+                style,
+                // A little quicker than opening, so it never lingers.
+                ms: ms as f32 * 0.75,
+                // Part-way through opening: close from where it got to.
+                from: l.anim.map(|(t, _)| (t.elapsed().as_secs_f32() * 1000.0 / ms as f32).min(1.0)).unwrap_or(1.0),
+                start: std::time::Instant::now(),
+            }),
+            _ => unsafe {
+                let _ = DestroyWindow(l.hwnd);
+            },
+        }
+    }
+}
+
+/// Flyouts playing their opening animation backwards before going away.
+/// They are no longer part of the open flyouts (nothing they show can be
+/// clicked: the pointer passes through them), so new ones open at once.
+mod closing {
+    use super::{FlyoutAnim, HWND, Pixmap, animation_frame};
+    use std::cell::RefCell;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DestroyWindow, GWL_EXSTYLE, GetWindowLongW, KillTimer, SetTimer, SetWindowLongW, WS_EX_TRANSPARENT,
+    };
+
+    pub struct Closing {
+        pub hwnd: HWND,
+        pub frame: Pixmap,
+        pub at: (i32, i32),
+        pub across: (f32, f32),
+        pub style: FlyoutAnim,
+        pub ms: f32,
+        /// How far open it was (1 = fully).
+        pub from: f32,
+        pub start: std::time::Instant,
+    }
+
+    thread_local! {
+        static CLOSING: RefCell<Vec<Closing>> = const { RefCell::new(Vec::new()) };
+        static TIMER: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    pub fn start(c: Closing) {
         unsafe {
-            let _ = DestroyWindow(h);
+            // Clicks and the pointer go to whatever is under it now.
+            let ex = GetWindowLongW(c.hwnd, GWL_EXSTYLE);
+            SetWindowLongW(c.hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT.0 as i32);
+        }
+        CLOSING.with(|v| v.borrow_mut().push(c));
+        if TIMER.with(|t| t.get()) == 0 {
+            let id = unsafe { SetTimer(None, 0, 10, Some(tick)) };
+            TIMER.with(|t| t.set(id));
+        }
+    }
+
+    unsafe extern "system" fn tick(_: HWND, _: u32, _: usize, _: u32) {
+        let done: Vec<HWND> = CLOSING.with(|v| {
+            let mut v = v.borrow_mut();
+            let mut done = Vec::new();
+            v.retain(|c| {
+                let t = c.from - c.start.elapsed().as_secs_f32() * 1000.0 / c.ms;
+                if t <= 0.0 {
+                    done.push(c.hwnd);
+                    return false;
+                }
+                animation_frame(&c.frame, c.style, t, c.across).present(c.hwnd, c.at.0, c.at.1);
+                true
+            });
+            done
+        });
+        for h in done {
+            unsafe {
+                let _ = DestroyWindow(h);
+            }
+        }
+        if CLOSING.with(|v| v.borrow().is_empty()) {
+            let id = TIMER.with(|t| t.replace(0));
+            unsafe {
+                let _ = KillTimer(None, id);
+            }
         }
     }
 }
@@ -660,13 +761,14 @@ fn rebuild(idx: usize) {
     let starts = with(|f| {
         let l = &mut f.levels[idx];
         let first = !std::mem::replace(&mut l.shown, true);
+        // Where the button lies across the window (along the bar).
+        let across = if strip::edge().vertical() {
+            ((anchor_rc.top - win.top + pad.1) as f32, (anchor_rc.bottom - win.top + pad.1) as f32)
+        } else {
+            ((anchor_rc.left - win.left + pad.0) as f32, (anchor_rc.right - win.left + pad.0) as f32)
+        };
+        l.across = across;
         if first && animated {
-            // Where the button lies across the window (along the bar).
-            let across = if strip::edge().vertical() {
-                ((anchor_rc.top - win.top + pad.1) as f32, (anchor_rc.bottom - win.top + pad.1) as f32)
-            } else {
-                ((anchor_rc.left - win.left + pad.0) as f32, (anchor_rc.right - win.left + pad.0) as f32)
-            };
             l.anim = Some((std::time::Instant::now(), across));
         }
         first && animated

@@ -74,7 +74,7 @@ Suggested next:
   Manage, Appearance, *Arrange the bar* and custom-app windows are always
   light. Give `panel` a dark palette and apply dark title bars and control
   themes.
-- [ ] **Closing animations** · 🟢
+- [x] **Closing animations** · 🟢
   The opening styles (Fade, Slide, Scale, Drawer, Genie) played in
   reverse when a flyout closes, without delaying the next one opening.
 - [ ] **Mica or acrylic behind the bar and flyouts** · 🔴

@@ -33,6 +33,7 @@ const FLYOUT_ANIMATION: u16 = 16;
 const FLYOUT_SHADOW: u16 = 17;
 const RUNNING_MARK: u16 = 18;
 const AUTO_HIDE: u16 = 19;
+const FLYOUT_CLOSING: u16 = 26;
 // The indicator picture's button, and its Remove button (+100).
 const INDICATOR_IMAGE: u16 = 24;
 // The All button's picture, and its "Use text" button (+100).
@@ -130,7 +131,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 33] = [
+const ROWS: [Row; 34] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -148,6 +149,7 @@ const ROWS: [Row; 33] = [
         &["Off", "Fade", "Slide", "Scale", "Drawer", "Genie (like macOS)"],
     ),
     Row::Slider(FLYOUT_ANIMATION_MS),
+    Row::Combo(FLYOUT_CLOSING, "When closing", &["Play it in reverse", "Close at once"]),
     Row::Combo(
         FLYOUT_SHADOW,
         "Shadow",
@@ -436,6 +438,7 @@ fn load() {
     sel(FLYOUT_SHADOW, a.flyout_shadow as usize);
     sel(RUNNING_MARK, a.running_mark as usize);
     sel(AUTO_HIDE, a.auto_hide as usize);
+    sel(FLYOUT_CLOSING, if a.flyout_close_animation { 0 } else { 1 });
     ui::set_text(ctl(ALL_ICON), a.all_icon.as_deref().map(|_| "Change…").unwrap_or("Choose…"));
     unsafe {
         let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
@@ -672,6 +675,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     change(|a, _| a.all_icon = None);
                     forget_picture(old);
                     load();
+                }
+                (FLYOUT_CLOSING, CBN_SELCHANGE) => {
+                    let reverse = combo(id) == 0;
+                    change(|a, _| a.flyout_close_animation = reverse);
                 }
                 (AUTO_HIDE, CBN_SELCHANGE) => {
                     let i = combo(id);

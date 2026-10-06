@@ -217,6 +217,8 @@ pub struct Appearance {
     pub flyout_animation: FlyoutAnim,
     /// How long that takes, in milliseconds.
     pub flyout_animation_ms: u32,
+    /// Play the opening animation in reverse when a flyout closes.
+    pub flyout_close_animation: bool,
     /// The mark under running apps.
     pub running_mark: RunningMark,
     /// Hide the bar until the pointer reaches the screen edge.
@@ -255,6 +257,7 @@ impl Default for Appearance {
             flyout_border: None,
             flyout_animation: FlyoutAnim::Fade,
             flyout_animation_ms: 180,
+            flyout_close_animation: true,
             running_mark: RunningMark::Line,
             auto_hide: AutoHide::Off,
             auto_hide_delay_ms: 600,

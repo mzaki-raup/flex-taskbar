@@ -191,6 +191,13 @@ original FlexTaskbar:
       button until last;
     - *Off*: shown at once.
 
+    **Closing** plays the same animation in reverse (a little quicker),
+    back into the button: a Genie flyout is pulled back in, a Drawer one
+    slides back into the bar. Turn it off with *When closing* → *Close at
+    once*. A closing flyout no longer takes the pointer, so the next one
+    opens straight away; moving along the bar to another category swaps
+    them at once.
+
     Each frame is made from the finished flyout, so it is drawn only once;
     the frames run only while it opens, and the flyout can be used straight
     away.
@@ -327,6 +334,7 @@ Every change shows on the bar straight away:
 | Corner radius | 0–24 | 6 |
 | Opening animation | Off, Fade, Slide, Scale, Drawer, Genie (like macOS) | Fade |
 | Animation length | 60–600 ms | 180 ms |
+| When closing | Play it in reverse, Close at once | Play it in reverse |
 | Shadow | Off, Soft (like Windows 11), Floating, Even all round, Sharp, Glow (accent colour) | Soft |
 | Shadow strength | 10–100 % | 100 % |
 
@@ -687,6 +695,8 @@ The 89 unit tests cover:
     and when the chosen item lies outside it
   - the hover animations: Magnify following the pointer along the bar,
     Lift, Bounce and Pulse
+  - the closing animation: Genie played back into the button frame by
+    frame after the pointer left
   - the flyout opening animations: Genie from bottom, top and right bars,
     Scale, Drawer and Slide frame by frame, choosing one in the Appearance
     window. Wine without a compositor shows only fully opaque or clear
