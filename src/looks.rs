@@ -16,7 +16,8 @@ pub struct Look {
 /// `wanted`, or `wanted (2)`, `wanted (3)`… if a look already has that
 /// name (compared without case). Blank names become "My look".
 pub fn unique_name(existing: &[&str], wanted: &str) -> String {
-    let base = wanted.trim();
+    let tidy = tidy_name(wanted);
+    let base = tidy.as_str();
     let base = if base.is_empty() { "My look" } else { base };
     let taken = |n: &str| existing.iter().any(|e| e.trim().eq_ignore_ascii_case(n));
     if !taken(base) {
@@ -25,9 +26,19 @@ pub fn unique_name(existing: &[&str], wanted: &str) -> String {
     (2..).map(|i| format!("{base} ({i})")).find(|n| !taken(n)).unwrap_or_default()
 }
 
+/// The longest name a look (or a bar) may have, in characters.
+pub const MAX_NAME: usize = 60;
+
+/// A name as typed, made fit for a menu: on one line, without characters
+/// that reorder text, trimmed and at most [`MAX_NAME`] characters.
+pub fn tidy_name(wanted: &str) -> String {
+    let plain = crate::folders::plain_text(wanted);
+    plain.trim().chars().take(MAX_NAME).collect::<String>().trim_end().to_string()
+}
+
 /// Saves `appearance` as `name`, replacing a look of the same name.
 pub fn save(looks: &mut Vec<Look>, name: &str, appearance: &Appearance) {
-    let name = name.trim().to_string();
+    let name = tidy_name(name);
     match looks.iter_mut().find(|l| l.name.eq_ignore_ascii_case(&name)) {
         Some(l) => l.appearance = appearance.clone(),
         None => looks.push(Look { name, appearance: appearance.clone() }),
@@ -66,6 +77,10 @@ mod tests {
         assert_eq!(unique_name(&["Night", "Night (2)"], "Night"), "Night (3)");
         assert_eq!(unique_name(&[], "   "), "My look");
         assert_eq!(unique_name(&["My look"], ""), "My look (2)");
+        // On one line, nothing reordering it, and not endless.
+        assert_eq!(unique_name(&[], "Night\nshift\u{202E}"), "Night shift");
+        assert_eq!(unique_name(&[], &"x".repeat(500)).chars().count(), MAX_NAME);
+        assert_eq!(tidy_name("  \u{200F}  "), "");
     }
 
     #[test]

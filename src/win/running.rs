@@ -240,7 +240,8 @@ fn window_aumid(h: HWND) -> Option<String> {
 
 /// Whether the app `id` has a window open (cheap: drawn every frame).
 pub fn is_running(id: &str) -> bool {
-    STATE.with(|s| s.borrow().as_ref().is_some_and(|st| st.ids.contains(id)))
+    // Never panics, as screen readers' questions call it too.
+    STATE.with(|s| s.try_borrow().ok().is_some_and(|st| st.as_ref().is_some_and(|st| st.ids.contains(id))))
 }
 
 fn still_open(h: isize) -> bool {

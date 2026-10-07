@@ -105,14 +105,14 @@ pub fn add(cfg: &mut Config, wanted: &str, copy: bool) -> String {
 /// if it is blank or unchanged.
 pub fn rename(cfg: &mut Config, wanted: &str) -> Option<String> {
     let cur = current(cfg);
-    let wanted = wanted.trim();
+    let wanted = crate::looks::tidy_name(wanted);
     if wanted.is_empty() || wanted == cur {
         return None;
     }
     store_current(cfg);
     let others: Vec<String> = names(cfg).into_iter().filter(|n| *n != cur).collect();
     let others: Vec<&str> = others.iter().map(String::as_str).collect();
-    let name = crate::looks::unique_name(&others, wanted);
+    let name = crate::looks::unique_name(&others, &wanted);
     if let Some(b) = cfg.bars.iter_mut().find(|b| b.name == cur) {
         b.name = name.clone();
     }
@@ -216,6 +216,10 @@ mod tests {
         assert_eq!(names(&c), ["Work"]);
         assert_eq!(rename(&mut c, "Work"), None);
         assert_eq!(rename(&mut c, ""), None);
+        assert_eq!(rename(&mut c, "Work\u{202E}\n"), None); // tidied, it is the same name
+        assert_eq!(add(&mut c, "Tab\tbar", false), "Tab bar");
+        assert!(switch(&mut c, "Work"));
+        c.bars.retain(|b| b.name != "Tab bar");
         // The last bar stays.
         assert_eq!(delete_current(&mut c), None);
         add(&mut c, "Play", false);

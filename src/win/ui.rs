@@ -209,3 +209,37 @@ pub fn child_popup(owner: HWND, class: &str, style: WINDOW_STYLE) -> HWND {
         .unwrap_or_default()
     }
 }
+
+/// Whether `path` is on a network share (a `\\server` path or a mapped
+/// drive). Those can take a long time to answer (or not at all, while the
+/// share is offline), so nothing on the UI thread waits on them.
+pub fn on_network(path: &std::path::Path) -> bool {
+    use std::path::{Component, Prefix};
+    match path.components().next() {
+        Some(Component::Prefix(p)) => match p.kind() {
+            Prefix::UNC(..) | Prefix::VerbatimUNC(..) => true,
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => {
+                let root = wide(&format!("{}:\\", d as char));
+                // DRIVE_REMOTE.
+                unsafe { windows::Win32::Storage::FileSystem::GetDriveTypeW(windows::core::PCWSTR(root.as_ptr())) == 4 }
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Whether `path` is a folder, without letting an offline network share
+/// hold things up: those are asked on a helper thread, given up on (as not
+/// a folder) after `wait`.
+pub fn is_dir_quick(path: &std::path::Path, wait: std::time::Duration) -> bool {
+    if !on_network(path) {
+        return path.is_dir();
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = path.to_path_buf();
+    let spawned = std::thread::Builder::new().name("is-dir".into()).spawn(move || {
+        let _ = tx.send(p.is_dir());
+    });
+    spawned.is_ok() && rx.recv_timeout(wait).unwrap_or(false)
+}

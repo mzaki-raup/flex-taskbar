@@ -632,27 +632,40 @@ fn rebuild(idx: usize) {
         /// A folder's tiles, ready made (subfolders, files, *Open folder*).
         folder: Vec<(Elem, String, String)>,
         empty: bool,
+        /// What an empty folder's flyout says.
+        empty_text: &'static str,
         rows: Vec<AllLine>,
         /// Apps shown / in total, and the Sort and Show buttons' texts.
         counts: (usize, usize),
         buttons: (String, String),
     }
+    // Read before the app's state is borrowed: it can take a moment.
+    let folder = match &view {
+        View::Folder(path) => Some(folder_tiles(path)),
+        _ => None,
+    };
     let content = app::with(|s| match &view {
         View::Category(id) => crate::tree::find(&s.cfg.categories, *id).map(|c| Content {
             subs: c.children.iter().map(|ch| (ch.id, ch.name.clone())).collect(),
             tiles: c.apps.iter().filter_map(|a| s.catalog.get(a).map(|e| (a.clone(), e.name.clone()))).collect(),
             folder: Vec::new(),
             empty: c.children.is_empty() && c.apps.is_empty(),
+            empty_text: "No apps in this category",
             rows: Vec::new(),
             counts: (0, 0),
             buttons: Default::default(),
         }),
-        View::Folder(path) => {
-            let folder = folder_tiles(path);
+        View::Folder(_) => {
+            let (folder, empty_text) = match folder {
+                Some(FolderRead::Tiles(t)) => (t, "This folder is empty"),
+                Some(FolderRead::NotResponding(t)) => (t, "This folder isn't responding"),
+                None => (Vec::new(), "This folder is empty"),
+            };
             Some(Content {
                 subs: Vec::new(),
                 tiles: Vec::new(),
                 empty: folder.len() <= 1,
+                empty_text,
                 folder,
                 rows: Vec::new(),
                 counts: (0, 0),
@@ -671,6 +684,7 @@ fn rebuild(idx: usize) {
                 tiles: Vec::new(),
                 folder: Vec::new(),
                 empty: false,
+                empty_text: "",
                 rows,
                 counts,
                 buttons,
@@ -703,8 +717,7 @@ fn rebuild(idx: usize) {
 
     match &view {
         View::Category(_) | View::Folder(_) => {
-            let empty_text =
-                if matches!(view, View::Folder(_)) { "This folder is empty" } else { "No apps in this category" };
+            let empty_text = content.empty_text;
             let tile = (s(84), s(76));
             let tm = s(2);
             let cols = (look.flyout_columns as usize).max(1);
@@ -744,7 +757,7 @@ fn rebuild(idx: usize) {
                     rect: RECT { left, top, right: left + tile.0, bottom: top + tile.1 },
                     elem,
                     text,
-                    icon: Some(icon),
+                    icon: (!icon.is_empty()).then_some(icon),
                     note: "",
                 });
             }
@@ -956,7 +969,14 @@ fn render(idx: usize) {
                     match icon.and_then(|k| icon_for(f, k, want)) {
                         Some(img) => cv.image(&img, x, y, size, 1.0),
                         None if is_sub => cv.folder(x as f32, y as f32, size as f32, c.accent),
-                        None => {}
+                        None => {
+                            // No icon (or a file on a network share): its first letter on a tile.
+                            cv.fill_round_rect(x as f32, y as f32, size as f32, size as f32, s(6) as f32, c.pressed);
+                            let letter: String =
+                                p.text.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
+                            let lrc = RECT { left: x, top: y, right: x + size, bottom: y + size };
+                            cv.text(&letter, lrc, f.font, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        }
                     }
                     if is_sub {
                         // The same badge as the strip's category buttons, pointing
@@ -1102,7 +1122,8 @@ pub fn accessible(hwnd: HWND) -> super::access::Tree {
         return empty();
     };
     let name = match &view {
-        View::Category(id) => app::with(|s| crate::tree::find(&s.cfg.categories, *id).map(|c| c.name.clone()))
+        View::Category(id) => app::try_with(|s| crate::tree::find(&s.cfg.categories, *id).map(|c| c.name.clone()))
+            .flatten()
             .unwrap_or_else(|| "Category".into()),
         View::All { .. } => "All apps".into(),
         View::Folder(path) => {
@@ -1376,26 +1397,54 @@ fn follow_hover(idx: usize) {
 }
 
 /// Opens the flyout of subcategory `id` (tile `i` of level `idx`) above it.
-/// The tiles of a folder's flyout: its subfolders, its files and *Open
-/// folder* last (see `folders::listing`).
-fn folder_tiles(path: &std::path::Path) -> Vec<(Elem, String, String)> {
+/// How a pinned folder's flyout came out.
+enum FolderRead {
+    /// Its subfolders, its files and *Open folder* last (see
+    /// `folders::listing`), as (element, name, icon key; empty for none).
+    Tiles(Vec<(Elem, String, String)>),
+    /// It didn't answer in time (a network share that is offline): just
+    /// *Open folder*.
+    NotResponding(Vec<(Elem, String, String)>),
+}
+
+/// How long a folder may take to list before its flyout gives up on it.
+const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Lists a folder on a helper thread, so a slow or offline folder can't
+/// freeze the bar: after [`FOLDER_TIMEOUT`] the flyout opens without it
+/// (the helper finishes, or fails, by itself).
+fn folder_tiles(path: &std::path::Path) -> FolderRead {
     use std::os::windows::fs::MetadataExt;
     const HIDDEN: u32 = 0x2;
     const SYSTEM: u32 = 0x4;
-    let entries: Vec<(crate::folders::Entry, std::path::PathBuf)> = std::fs::read_dir(path)
-        .map(|r| {
-            r.flatten()
-                // Never more than a few thousand looked at, however big.
-                .take(5000)
-                .filter_map(|e| {
-                    let meta = e.metadata().ok()?;
+    let open = |label: String| (Elem::File(path.to_path_buf()), label, format!("path:{}", path.display()));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let dir = path.to_path_buf();
+    let spawned = std::thread::Builder::new().name("folder".into()).spawn(move || {
+        let mut read_all = true;
+        let entries: Vec<(crate::folders::Entry, std::path::PathBuf)> = std::fs::read_dir(&dir)
+            .map(|r| {
+                let mut v = Vec::new();
+                for e in r.flatten() {
+                    if v.len() == crate::folders::MAX_READ {
+                        read_all = false;
+                        break;
+                    }
+                    let Ok(meta) = e.metadata() else { continue };
                     let name = e.file_name().to_string_lossy().into_owned();
                     let hidden = meta.file_attributes() & (HIDDEN | SYSTEM) != 0;
-                    Some((crate::folders::Entry { name, dir: meta.is_dir(), hidden }, e.path()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+                    v.push((crate::folders::Entry { name, dir: meta.is_dir(), hidden }, e.path()));
+                }
+                v
+            })
+            .unwrap_or_default();
+        let _ = tx.send((entries, read_all));
+    });
+    let Some((entries, read_all)) = spawned.ok().and_then(|_| rx.recv_timeout(FOLDER_TIMEOUT).ok()) else {
+        return FolderRead::NotResponding(vec![open("Open folder".into())]);
+    };
+    // The shell can take long over each file on a share: plain icons there.
+    let network = super::ui::on_network(path);
     let by_name: std::collections::HashMap<String, std::path::PathBuf> =
         entries.iter().map(|(e, p)| (e.name.clone(), p.clone())).collect();
     let (shown, more) = crate::folders::listing(entries.into_iter().map(|(e, _)| e).collect());
@@ -1403,25 +1452,18 @@ fn folder_tiles(path: &std::path::Path) -> Vec<(Elem, String, String)> {
         .into_iter()
         .filter_map(|e| {
             let p = by_name.get(&e.name)?.clone();
-            let icon = format!("path:{}", p.display());
+            let icon = if network { String::new() } else { format!("path:{}", p.display()) };
             let text = crate::folders::display_name(&e.name);
             Some((if e.dir { Elem::Folder(p) } else { Elem::File(p) }, text, icon))
         })
         .collect();
-    let open = if more > 0 { format!("Open folder ({more} more)") } else { "Open folder".to_string() };
-    tiles.push((Elem::File(path.to_path_buf()), open, format!("path:{}", path.display())));
-    tiles
+    tiles.push(open(crate::folders::open_label(more, read_all)));
+    FolderRead::Tiles(tiles)
 }
 
 /// Opens a file (or folder) from a pinned folder, as Explorer would.
 fn open_path(path: &std::path::Path) {
-    let target = super::launch::Target::Custom {
-        target: path.display().to_string(),
-        args: String::new(),
-        dir: String::new(),
-        admin: false,
-    };
-    super::launch::spawn(target, |msg| super::supervisor::log(&msg));
+    super::launch::spawn(super::launch::Target::Path(path.to_path_buf()), |msg| super::supervisor::log(&msg));
 }
 
 fn open_subfolder(idx: usize, i: usize, path: std::path::PathBuf) {

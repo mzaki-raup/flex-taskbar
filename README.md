@@ -292,6 +292,12 @@ original FlexTaskbar:
   date; nothing watches it in between. Folders work with the keyboard and
   Tab like categories.
 
+  A folder on a network share that doesn't answer within 1.5 seconds (an
+  offline server) opens as just *Open folder* with "This folder isn't
+  responding", instead of freezing the bar. Files on a share show their
+  first letter rather than their icon, since asking Windows for each icon
+  there can be slow.
+
   ![A pinned folder's flyout (Docs, Pictures, files and Open folder), with Docs open above it](screenshots/folder-stack.png)
 - **Running apps.** An app with a window open gets a mark: a short line under
   its icon on the bar (*Line*, like Windows 11) or a dot (*Dot*, like macOS),
@@ -328,7 +334,8 @@ original FlexTaskbar:
   in the full menu (tray icon, or right-click an empty part of the bar):
   - Pick a bar to switch to it (the one in use is ticked). **Ctrl+Alt+N**
     (changeable: *Next bar* on the Manage window's *Hotkeys* card) goes to
-    the next one.
+    the next one. FlexTaskbar only takes that key once there are two
+    bars, so with one bar other programs keep it.
   - *New empty bar…* starts with just the categories. *New bar copying
     this one…* starts as a copy of the bar in use.
   - *Rename this bar…* and *Delete this bar*. The last bar can't be
@@ -730,6 +737,10 @@ The launcher is built to cost almost nothing while idle:
   frames are stretched copies of the finished flyout, not redrawn.
   Menus are native Windows popup menus.
 - The search list is virtual, so it only creates rows for what's on screen.
+- Nothing on the UI thread waits on a network share. A pinned folder is
+  read on a helper thread and given 1.5 seconds; at most 5,000 entries are
+  read however big it is. Whether a custom app's target on a share is a
+  folder is asked the same way, for 300 ms, when the app list is built.
 - A flyout's shadow is a blurred copy of its shape: a running-sum box blur
   (its cost doesn't grow with the blur's size), drawn once per flyout size
   and look and reused on every redraw.
@@ -774,7 +785,7 @@ Run *Diagnostics…* on your PC for real Windows numbers.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 112 unit tests cover:
+The 114 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -791,7 +802,9 @@ The 112 unit tests cover:
   (including pinning at a place, or moving an app already pinned there),
   and the bar order (mixing categories and apps, moves, new and removed
   buttons)
-- pinned folders: hidden and system files left out, folders first, then
+- pinned folders: names cleaned of characters that reorder text, the
+  *Open folder* label when the folder was too big to count to the end,
+  hidden and system files left out, folders first, then
   by name ignoring case, the cap with the number left over, and shortcut
   names shown without `.lnk`/`.url`
 - smart categories: recently installed (newest first, the day limit, apps
@@ -810,7 +823,8 @@ The 112 unit tests cover:
   each keeping its pins, order and hidden categories, the next bar
   wrapping round, renaming, deleting (never the last), hiding and showing
   a category, and a deleted app leaving every bar
-- saved looks: unique names ("(2)", "(3)", blank names), saving replacing
+- saved looks: unique names ("(2)", "(3)", blank names, names tidied to one
+  line and 60 characters), saving replacing
   a look of the same name, the pictures a look shows, renaming one, and a
   picture counting as in use while any saved look shows it
 - settings backups: the zip round trip (including an empty file), the CRC
@@ -932,6 +946,11 @@ The 112 unit tests cover:
     - the flyout read as a pane named Development with its tiles;
     - focus events while arrowing through *All* (7z, then Clock, then
       Command Prompt).
+  - the performance and security review: a pinned folder still listing and
+    opening `notes.txt` in Notepad through the new path-only launch, and
+    Ctrl+Alt+N left free for other programs with one bar, taken when a
+    second bar is made (and switching bars), and freed again when it is
+    deleted
   - *Animation effects* turned off in Windows: no hover animation. Wine
     keeps the old value in a running program, so the live switch is only
     seen on the next start there; on Windows the change message re-reads
@@ -1144,6 +1163,21 @@ seen. Only apps still installed are kept, and nothing else is recorded.
   their windows are listed and their processes opened for reading their
   program path (the limited "query information" right). A window is
   brought to the front or minimised only when you click its app.
+- **Pinned folders.** File names are shown without the invisible
+  characters that reorder text, so a downloaded `photo‹right-to-left
+  override›gpj.exe` reads as `photogpj.exe`, not `photoexe.jpg`. App names
+  from the Start Menu are cleaned the same way. A file opens exactly as named
+  on disk: no `%VARIABLES%` are expanded in its path, so its name can't
+  make it open something else. Windows' own checks (SmartScreen, "this file
+  came from the internet") still apply.
+- **Names you type** (bars, saved looks, smart-category words) are kept on
+  one line, without those characters, and to 60 characters.
+- **Screen readers.** Any program on your desktop may ask the bar and
+  flyouts what they show, as Windows allows for accessibility, and press
+  a button as a click would. The answers are read from the bar's state
+  as it is at that moment, without changing anything, and a question
+  that arrives in the middle of an update is answered empty rather than
+  waited on.
 - **Backups.** Restoring checks every name, size and checksum in the zip
   and that its settings load before anything is replaced, and writes only
   `config.json` and plain file names in `icons\`; the current settings are

@@ -28,6 +28,10 @@ pub enum Target {
         dir: String,
         admin: bool,
     },
+    /// A file or folder exactly as named on disk (from a pinned folder):
+    /// opened as Explorer would, with no `%VARIABLES%` expanded in it, so a
+    /// file's name can't make it open something else.
+    Path(std::path::PathBuf),
 }
 
 /// Starts the launch in the background; `on_error` gets a readable message if it
@@ -47,7 +51,20 @@ fn launch(target: &Target) -> Result<(), String> {
     match target {
         Target::Shell(parsing_name) => launch_shell(parsing_name),
         Target::Custom { target, args, dir, admin } => launch_custom(target, args, dir, *admin),
+        Target::Path(path) => launch_path(path),
     }
+}
+
+fn launch_path(path: &std::path::Path) -> Result<(), String> {
+    let shown = path.display().to_string();
+    let file_w = wide(&shown);
+    let dir_w = wide(&path.parent().map(|d| d.display().to_string()).unwrap_or_default());
+    let mut sei = base_info();
+    sei.lpFile = PCWSTR(file_w.as_ptr());
+    if path.is_file() {
+        sei.lpDirectory = PCWSTR(dir_w.as_ptr());
+    }
+    unsafe { execute(&mut sei, &shown) }
 }
 
 fn launch_shell(parsing_name: &str) -> Result<(), String> {

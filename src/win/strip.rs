@@ -744,7 +744,8 @@ pub fn accessible() -> super::access::Tree {
                         Hit::Item(i) => match s.items.get(i)? {
                             Item::Category(_) => (s.names[i].clone(), true, "Category".to_string()),
                             Item::App(id) => {
-                                let folder = app::folder_of(id).is_some();
+                                let folder = app::try_with(|s| s.catalog.get(id).is_some_and(|a| a.folder.is_some()))
+                                    .unwrap_or(false);
                                 let running = super::running::is_running(id);
                                 let what = if folder {
                                     "Folder"

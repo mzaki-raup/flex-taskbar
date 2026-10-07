@@ -770,7 +770,7 @@ fn smart_menu(owner: HWND) {
     };
     let ask_words = |initial: &str| {
         super::prompt::ask(owner, "Smart category", "Apps whose name or file contains", initial)
-            .map(|t| t.trim().to_string())
+            .map(|t| crate::looks::tidy_name(&t))
             .filter(|t| !t.is_empty())
     };
     let change = |f: &dyn Fn(&mut Option<Smart>)| {
@@ -826,7 +826,7 @@ fn smart_menu(owner: HWND) {
             if let Some(answer) =
                 super::prompt::ask(owner, "Smart category", "Apps whose name or file contains", &initial)
             {
-                let words = answer.trim().to_string();
+                let words = crate::looks::tidy_name(&answer);
                 change(&|r| {
                     let kinds = match r.take() {
                         Some(Smart::Matching { kinds, .. }) => kinds,

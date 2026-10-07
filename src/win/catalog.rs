@@ -74,7 +74,8 @@ impl Catalog {
         for s in shell {
             apps.push(AppEntry {
                 id: s.parsing_name.clone(),
-                name: s.name.clone(),
+                // Shown everywhere: nothing in it may reorder what is displayed.
+                name: crate::folders::plain_text(&s.name),
                 file_hint: file_hint(&s.parsing_name),
                 kind: if s.file {
                     appkind::classify_file(&s.parsing_name)
@@ -97,14 +98,17 @@ impl Catalog {
         for c in custom {
             apps.push(AppEntry {
                 id: c.id.clone(),
-                name: c.name.clone(),
+                name: crate::folders::plain_text(&c.name),
                 file_hint: file_hint(&c.target),
                 kind: appkind::classify_custom(&c.target, &c.args),
                 source: Source::Custom,
                 keys: running::app_keys(None, Some(&super::launch::expand(c.target.trim()))),
                 folder: {
                     let target = std::path::PathBuf::from(super::launch::expand(c.target.trim()));
-                    (c.args.trim().is_empty() && target.is_dir()).then_some(target)
+                    // A share that is offline counts as not a folder for now
+                    // rather than holding up the app list.
+                    let wait = std::time::Duration::from_millis(300);
+                    (c.args.trim().is_empty() && super::ui::is_dir_quick(&target, wait)).then_some(target)
                 },
             });
         }

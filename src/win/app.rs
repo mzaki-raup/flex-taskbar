@@ -99,6 +99,13 @@ pub fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("app state not initialized")))
 }
 
+/// [`with`], or `None` while the state is already in use. For code that can
+/// be called back from outside at any moment (a screen reader's question),
+/// which must never panic.
+pub fn try_with<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
+    STATE.with(|s| s.try_borrow_mut().ok()?.as_mut().map(f))
+}
+
 pub fn register_dialog(hwnd: HWND, add: bool) {
     DIALOGS.with(|d| {
         let mut d = d.borrow_mut();
@@ -530,6 +537,8 @@ fn new_bar(copy: bool) {
     super::flyout::close();
     with(|s| crate::bars::add(&mut s.cfg, &name, copy));
     save();
+    // The Next bar hotkey is only taken once there are two bars.
+    report_hotkeys(register_hotkeys());
 }
 
 fn rename_bar() {
@@ -551,6 +560,14 @@ fn delete_bar() {
     super::flyout::close();
     if with(|s| crate::bars::delete_current(&mut s.cfg)).is_some() {
         save();
+        register_hotkeys();
+    }
+}
+
+/// Tells the user about hotkeys another program already owns.
+fn report_hotkeys(problems: Vec<String>) {
+    if !problems.is_empty() {
+        balloon(&problems.join("\n"), true);
     }
 }
 
@@ -910,7 +927,10 @@ pub fn reload_icon(key: &str) {
 pub fn register_hotkeys() -> Vec<String> {
     let (main, search, menu, bar, next) = with(|s| {
         let st = &s.cfg.settings;
-        (s.main, st.search_hotkey, st.menu_hotkey, st.bar_hotkey, st.next_bar_hotkey)
+        // With only one bar there is nothing to switch to: leave the keys
+        // to other programs until a second bar is made.
+        let several = crate::bars::names(&s.cfg).len() > 1;
+        (s.main, st.search_hotkey, st.menu_hotkey, st.bar_hotkey, st.next_bar_hotkey.filter(|_| several))
     });
     let mut problems = Vec::new();
     for (id, hk, what) in [
