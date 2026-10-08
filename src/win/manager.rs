@@ -442,11 +442,34 @@ fn layout() {
     let place = |id: u16, x: i32, y: i32, w: i32, hh: i32| unsafe {
         let _ = SetWindowPos(ctl(id), None, x, y, w.max(0), hh.max(0), SWP_NOZORDER);
     };
+    // Buttons are measured from the labels they carry, so a long one is
+    // never cut off: a row is shared out in proportion to what each needs,
+    // and a group that can't fit on one line wraps onto more.
+    let widths = |ids: &[u16]| -> Vec<i32> { ids.iter().map(|id| panel::button_width(ctl(*id), dpi)).collect() };
     let row = |ids: &[u16], x: i32, y: i32, w: i32| {
-        let n = ids.len() as i32;
-        let bw = (w - gap * (n - 1)) / n;
-        for (i, id) in ids.iter().enumerate() {
-            place(*id, x + i as i32 * (bw + gap), y, bw, bh);
+        let mut cx = x;
+        for (id, bw) in ids.iter().zip(panel::fit_row(&widths(ids), w, gap)) {
+            place(*id, cx, y, bw, bh);
+            cx += bw + gap;
+        }
+    };
+    /// A group of buttons and the rows it needs, worked out before anything
+    /// above it is sized so the card always has room for them.
+    struct Group {
+        ids: Vec<u16>,
+        rows: Vec<Vec<usize>>,
+    }
+    let group = |ids: &[u16], w: i32| Group { ids: ids.to_vec(), rows: panel::pack_rows(&widths(ids), w, gap) };
+    let group_h = |g: &Group| g.rows.len() as i32 * bh + (g.rows.len() as i32 - 1).max(0) * gap;
+    let place_group = |g: &Group, x: i32, y: i32, w: i32| {
+        let all = widths(&g.ids);
+        for (r, line) in g.rows.iter().enumerate() {
+            let line_widths: Vec<i32> = line.iter().map(|&i| all[i]).collect();
+            let mut cx = x;
+            for (&i, bw) in line.iter().zip(panel::fit_row(&line_widths, w, gap)) {
+                place(g.ids[i], cx, y + r as i32 * (bh + gap), bw, bh);
+                cx += bw + gap;
+            }
         }
     };
     let card = |i: usize, t: i32, b: i32, title: &str| panel::Card {
@@ -457,35 +480,41 @@ fn layout() {
     // The panes' grey subtitles are labels (they change with the selection).
     let sub_y = top + s(33);
     let content = pm.content_top(top, true);
-    let last_row = pane_bottom - pm.pad - bh;
+    let card_bottom = pane_bottom - pm.pad;
 
-    // Categories.
+    // Categories: the tree, the selected category's hotkey, then two groups
+    // of buttons. The tree takes whatever is left once they have their rows.
     place(LBL_CATS, ix[0], sub_y, inner_w, s(16));
-    // Under the tree: the selected category's hotkey, then its buttons.
-    let tree_bottom = last_row - 2 * bh - 3 * gap;
-    place(TREE, ix[0], content, inner_w, tree_bottom - content);
-    let hk_y = tree_bottom + gap;
+    let cat_edit = group(&[CAT_NEW, CAT_SUB, CAT_RENAME, CAT_DELETE, CAT_ICON], inner_w);
+    let cat_move = group(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN, CAT_SMART], inner_w);
+    let cat_buttons_h = group_h(&cat_edit) + gap + group_h(&cat_move);
+    let hk_y = card_bottom - cat_buttons_h - gap - bh;
+    place(TREE, ix[0], content, inner_w, hk_y - gap - content);
     place(LBL_CAT_HOTKEY, ix[0], hk_y + s(5), s(56), lh);
-    place(CAT_HOTKEY, ix[0] + s(56), hk_y + s(2), inner_w - s(56) - s(80) - gap, s(24));
-    place(CAT_HOTKEY_SET, ix[0] + inner_w - s(80), hk_y, s(80), bh);
-    let tree_bottom = hk_y + bh;
-    row(&[CAT_NEW, CAT_SUB, CAT_RENAME, CAT_DELETE, CAT_ICON], ix[0], tree_bottom + gap, inner_w);
-    row(&[CAT_UP, CAT_DOWN, CAT_OUT, CAT_IN, CAT_SMART], ix[0], last_row, inner_w);
+    let set_w = panel::button_width(ctl(CAT_HOTKEY_SET), dpi);
+    place(CAT_HOTKEY, ix[0] + s(56), hk_y + s(2), inner_w - s(56) - set_w - gap, s(24));
+    place(CAT_HOTKEY_SET, ix[0] + inner_w - set_w, hk_y, set_w, bh);
+    place_group(&cat_edit, ix[0], hk_y + bh + gap, inner_w);
+    place_group(&cat_move, ix[0], hk_y + bh + gap + group_h(&cat_edit) + gap, inner_w);
 
     // Apps in the category.
     place(LBL_APPS, ix[1], sub_y, inner_w, s(16));
-    let apps_bottom = last_row - gap;
+    let app_buttons = group(&[APP_REMOVE, APP_UP, APP_DOWN, APP_ICON], inner_w);
+    let apps_bottom = card_bottom - group_h(&app_buttons) - gap;
     place(APPS, ix[1], content, inner_w, apps_bottom - content);
-    row(&[APP_REMOVE, APP_UP, APP_DOWN, APP_ICON], ix[1], last_row, inner_w);
+    place_group(&app_buttons, ix[1], apps_bottom + gap, inner_w);
 
     // All apps.
     place(LBL_ALL, ix[2], sub_y, inner_w, s(16));
     place(ALL_FILTER, ix[2], content, inner_w, s(24));
     let all_top = content + s(24) + gap;
-    let all_bottom = last_row - bh - 2 * gap;
+    let all_add = group(&[ALL_ADD, ALL_PIN, ALL_ICON], inner_w);
+    let all_custom = group(&[CUSTOM_NEW, CUSTOM_EDIT, CUSTOM_DELETE], inner_w);
+    let all_buttons_h = group_h(&all_add) + gap + group_h(&all_custom);
+    let all_bottom = card_bottom - all_buttons_h - gap;
     place(ALL, ix[2], all_top, inner_w, all_bottom - all_top);
-    row(&[ALL_ADD, ALL_PIN, ALL_ICON], ix[2], all_bottom + gap, inner_w);
-    row(&[CUSTOM_NEW, CUSTOM_EDIT, CUSTOM_DELETE], ix[2], last_row, inner_w);
+    place_group(&all_add, ix[2], all_bottom + gap, inner_w);
+    place_group(&all_custom, ix[2], all_bottom + gap + group_h(&all_add) + gap, inner_w);
 
     // Options: one card per subject under the panes.
     let oy = pm.content_top(options_top, false);
@@ -512,9 +541,10 @@ fn layout() {
 
     // Command bar: where the data lives, and the other windows.
     let by = footer + (pm.footer - bh) / 2;
-    let actions_w = 4 * s(130) + 3 * gap;
+    let actions = [OPEN_DATA, ARRANGE, APPEARANCE, CLOSE];
+    let actions_w = widths(&actions).iter().sum::<i32>() + 3 * gap;
     place(STATUS, pm.margin, by + s(5), rc.right - 2 * pm.margin - actions_w - pm.gap, lh);
-    row(&[OPEN_DATA, ARRANGE, APPEARANCE, CLOSE], rc.right - pm.margin - actions_w, by, actions_w);
+    row(&actions, rc.right - pm.margin - actions_w, by, actions_w);
 
     panel::set(
         h,

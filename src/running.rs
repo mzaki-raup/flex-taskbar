@@ -65,32 +65,57 @@ pub fn app_keys(aumid: Option<&str>, exe: Option<&str>) -> Vec<String> {
     id.into_iter().chain(program.or(shell)).collect()
 }
 
-/// The keys a window is recognised by.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct WindowKeys {
-    /// What it is matched by: its own AppUserModelID when it has one,
-    /// otherwise the program it runs (full path, and bare file name for
-    /// apps whose target is just `notepad.exe`, found on the PATH).
-    pub keys: Vec<String>,
-    /// The program it runs, when an id is what it is matched by. Only an app
-    /// with no id of its own falls back to this, so a Chrome web-app window
-    /// doesn't make the Chrome browser look open — but an app known only by
-    /// the program it starts still matches the packaged window that program
-    /// opens.
-    pub program: Vec<String>,
+/// What a custom app's target starts with when it names an app from the
+/// Apps folder rather than a program on disk.
+const APPS_FOLDER: &str = "shell:appsfolder\\";
+
+/// The keys a custom app is recognised by, worked out from what the user
+/// gave as its target and arguments:
+///
+/// - `shell:AppsFolder\<AppUserModelID>` is a Store or web app pinned from
+///   the Apps folder: its windows carry that id;
+/// - `chrome.exe --app-id=<id>` (or `chrome_proxy.exe`) is a Chrome web app,
+///   whose window carries `Chrome._crx_<id>`;
+/// - anything else is a program, matched by its path.
+///
+/// Without this a custom app pinned from the Apps folder has no keys at all
+/// — its target is not a `.exe` — and so never looks open.
+pub fn target_keys(target: &str, args: &str) -> Vec<String> {
+    let t = target.trim();
+    if t.len() > APPS_FOLDER.len() && t[..APPS_FOLDER.len()].eq_ignore_ascii_case(APPS_FOLDER) {
+        return app_keys(Some(&t[APPS_FOLDER.len()..]), None);
+    }
+    if let Some(id) = chrome_app_id(t, args) {
+        return app_keys(Some(&format!("Chrome._crx_{id}")), None);
+    }
+    app_keys(None, Some(t))
 }
 
-pub fn window_keys(aumid: Option<&str>, exe: Option<&str>) -> WindowKeys {
-    let program = match exe.and_then(exe_key) {
-        Some(full) => {
+/// The web app `chrome.exe --app-id=<id>` opens, if that is what this is.
+fn chrome_app_id(target: &str, args: &str) -> Option<String> {
+    let exe = norm_path(target);
+    let exe = exe.rsplit_once('\\').map(|(_, name)| name).unwrap_or(&exe);
+    if exe != "chrome.exe" && exe != "chrome_proxy.exe" {
+        return None;
+    }
+    let id = args.split_whitespace().find_map(|a| a.strip_prefix("--app-id="))?;
+    let id = id.trim_matches('"');
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// The keys a window is recognised by. A window with its own
+/// AppUserModelID is matched by that alone, so a Chrome web-app window
+/// doesn't make the Chrome browser look open. Otherwise its program's full
+/// path, and its bare file name (for apps whose target is just
+/// `notepad.exe`, found on the PATH).
+pub fn window_keys(aumid: Option<&str>, exe: Option<&str>) -> Vec<String> {
+    match aumid.and_then(id_key) {
+        Some(k) => vec![k],
+        None => {
+            let Some(full) = exe.and_then(exe_key) else { return Vec::new() };
             let bare = full.rsplit_once('\\').map(|(_, name)| format!("exe:{name}"));
             std::iter::once(full).chain(bare).collect()
         }
-        None => Vec::new(),
-    };
-    match aumid.and_then(id_key) {
-        Some(k) => WindowKeys { keys: vec![k], program },
-        None => WindowKeys { keys: program, program: Vec::new() },
     }
 }
 
@@ -98,36 +123,27 @@ pub fn window_keys(aumid: Option<&str>, exe: Option<&str>) -> WindowKeys {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Running {
     by_key: HashMap<String, Vec<isize>>,
-    /// The programs behind windows matched by their id (see
-    /// [`WindowKeys::program`]).
-    by_program: HashMap<String, Vec<isize>>,
 }
 
 impl Running {
     /// `windows`: (window handle, its keys), front to back.
-    pub fn new(windows: &[(isize, WindowKeys)]) -> Running {
+    pub fn new(windows: &[(isize, Vec<String>)]) -> Running {
         let mut by_key: HashMap<String, Vec<isize>> = HashMap::new();
-        let mut by_program: HashMap<String, Vec<isize>> = HashMap::new();
-        for (hwnd, w) in windows {
-            for k in &w.keys {
+        for (hwnd, keys) in windows {
+            for k in keys {
                 by_key.entry(k.clone()).or_default().push(*hwnd);
             }
-            for k in &w.program {
-                by_program.entry(k.clone()).or_default().push(*hwnd);
-            }
         }
-        Running { by_key, by_program }
+        Running { by_key }
     }
 
     /// The app's windows, front first, without repeats.
     pub fn windows(&self, app_keys: &[String]) -> Vec<isize> {
         let mut out: Vec<isize> = Vec::new();
-        for map in self.maps(app_keys) {
-            for k in app_keys {
-                for h in map.get(k).into_iter().flatten() {
-                    if !out.contains(h) {
-                        out.push(*h);
-                    }
+        for k in app_keys {
+            for h in self.by_key.get(k).into_iter().flatten() {
+                if !out.contains(h) {
+                    out.push(*h);
                 }
             }
         }
@@ -135,15 +151,7 @@ impl Running {
     }
 
     pub fn is_running(&self, app_keys: &[String]) -> bool {
-        self.maps(app_keys).iter().any(|m| app_keys.iter().any(|k| m.contains_key(k)))
-    }
-
-    /// Where to look: an app with an id of its own is matched by its keys
-    /// alone; one known only by the program it starts may also match the
-    /// program behind a window that has an id.
-    fn maps(&self, app_keys: &[String]) -> Vec<&HashMap<String, Vec<isize>>> {
-        let has_id = app_keys.iter().any(|k| k.starts_with("id:"));
-        if has_id { vec![&self.by_key] } else { vec![&self.by_key, &self.by_program] }
+        app_keys.iter().any(|k| self.by_key.contains_key(k))
     }
 }
 
@@ -204,14 +212,9 @@ mod tests {
         );
         // Only programs count as a path key (not a shortcut or document).
         assert!(app_keys(None, Some(r"C:\x\readme.txt")).is_empty());
-        // A window with its own id is matched by that; the program it runs
-        // is only a fallback.
-        let web = window_keys(Some("Chrome._crx_abc"), Some(r"C:\Chrome\chrome.exe"));
-        assert_eq!(web.keys, ["id:chrome._crx_abc"]);
-        assert_eq!(web.program, [r"exe:c:\chrome\chrome.exe", "exe:chrome.exe"]);
-        let plain = window_keys(None, Some(r"C:\Chrome\chrome.exe"));
-        assert_eq!(plain.keys, [r"exe:c:\chrome\chrome.exe", "exe:chrome.exe"]);
-        assert!(plain.program.is_empty());
+        // A window with its own id is matched by that alone.
+        assert_eq!(window_keys(Some("Chrome._crx_abc"), Some(r"C:\Chrome\chrome.exe")), ["id:chrome._crx_abc"]);
+        assert_eq!(window_keys(None, Some(r"C:\Chrome\chrome.exe")), [r"exe:c:\chrome\chrome.exe", "exe:chrome.exe"]);
         // An app started by bare name matches a window by its file name.
         let bare = app_keys(None, Some("Notepad.exe"));
         assert_eq!(bare, ["exe:notepad.exe"]);
@@ -235,20 +238,42 @@ mod tests {
     }
 
     #[test]
-    fn an_app_known_only_by_its_program_matches_a_packaged_window() {
-        // The window is a packaged app, so it carries an id; the app was
-        // filed by the program it starts.
-        let window = window_keys(Some("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"), Some(r"C:\Apps\Note\Note.exe"));
-        let r = Running::new(&[(7, window)]);
-        let by_path = app_keys(None, Some(r"C:\Apps\Note\Note.exe"));
-        assert!(r.is_running(&by_path));
-        assert_eq!(r.windows(&by_path), [7]);
-        // An app with an id of its own still goes by the id alone, so a web
-        // app doesn't light up its browser.
-        let chrome = app_keys(Some("Chrome"), Some(r"C:\Chrome\chrome.exe"));
-        let web = Running::new(&[(8, window_keys(Some("Chrome._crx_yt"), Some(r"C:\Chrome\chrome.exe")))]);
-        assert!(!web.is_running(&chrome));
-        assert!(web.windows(&chrome).is_empty());
+    fn a_custom_app_from_the_apps_folder_is_known_by_its_id() {
+        let keys = target_keys(r"shell:AppsFolder\Microsoft.WindowsNotepad_8wekyb3d8bbwe!App", "");
+        assert_eq!(keys, ["id:microsoft.windowsnotepad_8wekyb3d8bbwe!app"]);
+        // Which is what the packaged window carries.
+        let window = window_keys(
+            Some("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"),
+            Some(r"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.0_x64__8wekyb3d8bbwe\Notepad.exe"),
+        );
+        assert!(Running::new(&[(1, window)]).is_running(&keys));
+        // The prefix is matched whatever its case, and only as a prefix.
+        assert_eq!(target_keys(r"SHELL:AppsFolder\X_y!App", ""), ["id:x_y!app"]);
+        assert!(target_keys("shell:appsfolder\\", "").is_empty());
+    }
+
+    #[test]
+    fn a_custom_chrome_web_app_is_known_by_the_window_chrome_opens() {
+        let keys = target_keys(
+            r"C:\Program Files\Google\Chrome\Application\chrome_proxy.exe",
+            "--profile-directory=Default --app-id=pmcldnnnmmnmciefimlcklhggnepdpba",
+        );
+        assert_eq!(keys, ["id:chrome._crx_pmcldnnnmmnmciefimlcklhggnepdpba"]);
+        let window = window_keys(
+            Some("Chrome._crx_pmcldnnnmmnmciefimlcklhggnepdpba"),
+            Some(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        );
+        let r = Running::new(&[(1, window)]);
+        assert!(r.is_running(&keys));
+        // The browser itself is still only the browser.
+        assert!(!r.is_running(&target_keys(r"C:\Program Files\Google\Chrome\Application\chrome.exe", "")));
+    }
+
+    #[test]
+    fn an_ordinary_custom_app_is_still_known_by_its_program() {
+        assert_eq!(target_keys(r"C:\Apps\Note\Note.exe", ""), [r"exe:c:\apps\note\note.exe"]);
+        // Not a program and not an Apps-folder entry: nothing to match on.
+        assert!(target_keys(r"C:\Docs\readme.txt", "").is_empty());
     }
 
     #[test]

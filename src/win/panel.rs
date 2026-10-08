@@ -328,6 +328,68 @@ pub fn color(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     }
 }
 
+/// The width a button needs for the label it carries: the text in its own
+/// font, plus room either side. Buttons are laid out from this rather than
+/// by dividing the space equally, so a long label is never cut off.
+pub fn button_width(control: HWND, dpi: u32) -> i32 {
+    let text = super::ui::get_text(control);
+    let font = HFONT(unsafe { SendMessageW(control, WM_GETFONT, None, None) }.0 as *mut _);
+    let text_w = if font.is_invalid() {
+        text.chars().count() as i32 * super::ui::scale(7, dpi)
+    } else {
+        super::canvas::measure(&text, font).0
+    };
+    (text_w + super::ui::scale(22, dpi)).max(super::ui::scale(34, dpi))
+}
+
+/// Packs buttons of the given widths into rows no wider than `total`,
+/// keeping their order. A button too wide even on its own gets a row to
+/// itself (and is squeezed by the caller). Pure, so the wrapping is
+/// unit-tested.
+pub fn pack_rows(widths: &[i32], total: i32, gap: i32) -> Vec<Vec<usize>> {
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut row: Vec<usize> = Vec::new();
+    let mut used = 0;
+    for (i, &w) in widths.iter().enumerate() {
+        let with_this = if row.is_empty() { w } else { used + gap + w };
+        if !row.is_empty() && with_this > total {
+            rows.push(std::mem::take(&mut row));
+            used = w;
+        } else {
+            used = with_this;
+        }
+        row.push(i);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
+/// How the widths of one row's buttons come out once the row is stretched
+/// (or squeezed) to exactly `total`: each keeps its share of the spare room
+/// in proportion to what it needs, so a long label stays longer than a
+/// short one. Pure.
+pub fn fit_row(widths: &[i32], total: i32, gap: i32) -> Vec<i32> {
+    let n = widths.len() as i32;
+    if n == 0 {
+        return Vec::new();
+    }
+    let natural: i32 = widths.iter().sum();
+    let spare = total - gap * (n - 1) - natural;
+    let mut out: Vec<i32> = if natural > 0 {
+        widths.iter().map(|w| (w + spare * w / natural).max(1)).collect()
+    } else {
+        widths.iter().map(|_| (total / n).max(1)).collect()
+    };
+    // Rounding goes to the last one, so the row ends exactly on the edge.
+    let used: i32 = out.iter().sum::<i32>() + gap * (n - 1);
+    if let Some(last) = out.last_mut() {
+        *last = (*last + total - used).max(1);
+    }
+    out
+}
+
 /// Check-box styles (`BS_CHECKBOX`, `BS_AUTOCHECKBOX` and the 3-state ones).
 const CHECK_BOX_STYLES: [u32; 4] = [2, 3, 5, 6];
 
@@ -538,5 +600,54 @@ pub fn theme_changed() {
     let open: Vec<isize> = PAGES.with(|p| p.borrow().keys().copied().collect());
     for h in open {
         apply_theme(HWND(h as *mut _));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buttons_that_fit_stay_on_one_row() {
+        assert_eq!(pack_rows(&[50, 50, 50], 200, 6), [vec![0, 1, 2]]);
+        // Exactly full, gaps counted.
+        assert_eq!(pack_rows(&[60, 60, 60], 192, 6), [vec![0, 1, 2]]);
+    }
+
+    #[test]
+    fn buttons_that_dont_fit_wrap_in_order() {
+        assert_eq!(pack_rows(&[100, 100, 100], 210, 6), [vec![0, 1], vec![2]]);
+        assert_eq!(pack_rows(&[80, 80, 80, 80], 170, 6), [vec![0, 1], vec![2, 3]]);
+    }
+
+    #[test]
+    fn a_button_wider_than_the_row_gets_one_to_itself() {
+        assert_eq!(pack_rows(&[300, 40], 200, 6), [vec![0], vec![1]]);
+        assert_eq!(pack_rows(&[40, 300], 200, 6), [vec![0], vec![1]]);
+    }
+
+    #[test]
+    fn no_buttons_means_no_rows() {
+        assert!(pack_rows(&[], 200, 6).is_empty());
+    }
+
+    #[test]
+    fn a_row_is_stretched_to_the_full_width_in_proportion() {
+        let w = fit_row(&[50, 100], 200, 6);
+        assert_eq!(w.iter().sum::<i32>() + 6, 200);
+        // The wider one stays wider.
+        assert!(w[1] > w[0]);
+    }
+
+    #[test]
+    fn a_row_that_doesnt_fit_is_squeezed_rather_than_overflowing() {
+        let w = fit_row(&[200, 200], 300, 6);
+        assert_eq!(w.iter().sum::<i32>() + 6, 300);
+        assert!(w.iter().all(|&x| x > 0));
+    }
+
+    #[test]
+    fn one_button_takes_the_whole_row() {
+        assert_eq!(fit_row(&[40], 200, 6), [200]);
     }
 }

@@ -325,9 +325,11 @@ original FlexTaskbar:
   Windows are matched to apps by their AppUserModelID (Store apps, Chrome and
   Edge web apps) or by the program they run, which the app list reads from
   each Start Menu shortcut. A web app's window counts only for that web app,
-  not for the browser; an app known only by the program it starts still
-  matches that program's window even when the window carries an id of its
-  own. A few of Windows' own apps are listed under an id their windows don't
+  not for the browser. A **custom app** is matched by what you gave as its
+  target: `shell:AppsFolder\<id>` by that id (so a Store or web app pinned
+  from the app list is recognised), `chrome.exe --app-id=<id>` by the
+  `Chrome._crx_<id>` window Chrome opens for it, and anything else by its
+  program. A few of Windows' own apps are listed under an id their windows don't
   carry at all — File Explorer is `Microsoft.Windows.Explorer` in the app
   list, but its windows are plain `explorer.exe` windows — and are matched by
   their program instead. Windows tells FlexTaskbar when windows open and close
