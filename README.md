@@ -939,10 +939,20 @@ already installed is untouched, and it is stopped again whether the checks
 pass or not. Run it yourself with
 `powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1`.
 
-It needs a desktop to draw on. Where there isn't one — a runner started as a
-Windows **service** runs in session 0 and has none — the script exits 2 and
-CI reports a skip rather than a failure. For the smoke test to actually run,
-the runner has to be started as a logged-in user.
+It needs a desktop to draw on, which is a question of how the CI runner was
+started rather than anything in the workflow:
+
+- a runner started as a **Windows service** runs in session 0, which has no
+  desktop. The script exits 2 and CI reports a skip rather than a failure, so
+  the rest of the build still tells you what it should;
+- a runner started as a **logged-on user** runs in that user's session, which
+  does have one, and the checks run for real.
+
+The service is the steadier of the two — it is up whether or not anyone is
+logged in — so this is a genuine trade rather than one being simply better.
+Pick the user session when you want the desktop checks; pick the service when
+you want builds to happen while nobody is at the machine.
+
 The 185 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
