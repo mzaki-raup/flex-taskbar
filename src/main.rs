@@ -15,6 +15,7 @@ mod looks;
 mod migrate;
 mod perf;
 mod pkgsources;
+mod release;
 mod running;
 mod search;
 mod shadow;

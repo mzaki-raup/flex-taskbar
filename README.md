@@ -596,6 +596,7 @@ data\
   config.json.bak       the previous good version (automatic)
   apps-cache.json       last app scan, for instant startup (safe to delete)
   icons\                copies of the custom icons and indicator picture you picked
+  update\               a downloaded update, until it is put in place
   crash.log             restarts and problems, newest last
 ```
 
@@ -647,6 +648,38 @@ Settings are saved after every change. Each save is atomic: it writes a temporar
 file and then swaps it in, keeping the previous version as `config.json.bak`.
 If `config.json` is ever damaged, FlexTaskbar keeps the damaged file as
 `config.json.corrupt-<time>`, loads the backup, and tells you.
+
+## Updating
+
+FlexTaskbar can replace itself with a newer release.
+
+- **Where it looks.** The releases published for the repository it was built
+  from, over HTTPS. *Check for updates… (v2.0.0)* at the bottom of the menu
+  looks now and reports whatever it finds; by itself the app looks **once a
+  day**, in the background, and only says something when there is a newer
+  version (a tray notification). Nothing is sent but the request: no identifier,
+  no settings, no app list. Turn the daily check off with
+  `"check_for_updates": false` under `settings`.
+- **What it checks.** A release counts only if its tag is a plain version
+  (`v2.0.1`), it isn't a draft or a pre-release, and it has `FlexTaskbar.exe`
+  attached. The newest such release wins, and only if it is newer than the
+  running version.
+- **Installing.** With your go-ahead the program is downloaded to
+  `data\update\` and its SHA-256 compared with the `SHA256SUMS.txt` published
+  beside it. Only if they match is anything replaced. A release published
+  **without** checksums is never installed automatically — the app offers to
+  open its page instead.
+- **Putting it in place.** Windows won't let a running program be overwritten,
+  so the running `FlexTaskbar.exe` is renamed to `FlexTaskbar.old.exe`, the new
+  one takes its name, and FlexTaskbar restarts (the supervisor starts the new
+  program straight away). If anything fails the old name is put back, so there
+  is never a moment without a working program. The leftover `.old.exe` is
+  deleted on the next start.
+- **Without a supervisor** (`--no-supervisor`), the update is installed and
+  FlexTaskbar tells you to start it again yourself.
+
+Releases are built and published by `.github/workflows/release.yml` when a
+`v*` tag is pushed; see *Building*.
 
 ## Command-line options
 
@@ -710,6 +743,8 @@ These can be edited in `data\config.json` while FlexTaskbar is not running:
 | `show_recents_in_menu` | `true` | Show the *Recent* submenu |
 | `group_all_apps_above` | `40` | Above this many apps, *All apps* is split into A–Z submenus |
 | `hover_delay_ms` | `100` | How long the pointer rests on a category before its flyout opens |
+| `check_for_updates` | `true` | Look for a newer release once a day (see *Updating*) |
+| `update_feed` | `""` | Where to look, if not the releases of the repository this was built from |
 
 Showing the bar, reserving its space, rescanning automatically and including
 package managers' apps are checkboxes in the Manage window (`show_strip`,
@@ -1118,8 +1153,24 @@ To cross-compile from Linux, install `mingw-w64`, then run
 `cargo build --release --target x86_64-pc-windows-gnu`. On Linux,
 `cargo test` runs the platform-independent tests.
 
-CI (`.github/workflows/build.yml`) builds on Windows, runs the checks and tests,
-and uploads `FlexTaskbar-portable.zip` as a build artifact.
+CI (`.github/workflows/build.yml`) runs on Windows with the latest stable Rust
+on every branch and pull request: `cargo fmt --check`, `cargo test`,
+`cargo clippy --release --all-targets -- -D warnings` and a release build, which
+it keeps as a build artifact.
+
+To publish a release, set the version in `Cargo.toml`, commit it, then tag and
+push:
+
+```powershell
+git tag v2.0.1
+git push origin v2.0.1
+```
+
+`.github/workflows/release.yml` runs the same checks (and refuses a tag that
+doesn't match `Cargo.toml`, which would otherwise make every copy offer the
+same update for ever), then publishes `FlexTaskbar.exe`, `SHA256SUMS.txt` and a
+zip, with the commits since the previous tag as the notes. That is exactly what
+*Check for updates…* reads — see *Updating*.
 
 ### Source layout
 
@@ -1150,6 +1201,7 @@ src/appkind.rs       Store app / Chrome or Edge web app detection     (tested)
 src/pkgsources.rs    package managers' folders and console programs   (tested)
 src/running.rs       which windows count, matching them to apps, clicks (tested)
 src/allview.rs       sorting and filtering the All list               (tested)
+src/release.rs       released versions: which one is newer, checksums  (tested)
 src/win/watch.rs     automatic rescan when apps are installed
 src/win/backupwin.rs Back up settings… and Restore…
 src/win/prompt.rs    asking for one line of text (a look's name)
@@ -1171,6 +1223,7 @@ src/win/icons.rs     shell, WIC and SVG icon loading
 src/win/launch.rs    ShellExecuteEx launching
 src/win/autostart.rs Run-key toggle
 src/win/paths.rs     portable data folder
+src/win/update.rs    checking for a release, downloading and swapping it in
 src/win/theme.rs     light/dark support (menus, search window)
 src/win/ui.rs        small Win32 helpers
 src/win/panel.rs     the settings windows' look: page title, cards, command bar
@@ -1184,10 +1237,18 @@ order, are in [ROADMAP.md](ROADMAP.md).
 
 ## Privacy
 
-Everything stays on your machine. There are no network requests, telemetry,
-analytics or cloud services. For *Most used* and *Recently installed*,
-`config.json` keeps a launch count per app and the time each app was first
-seen. Only apps still installed are kept, and nothing else is recorded.
+Everything stays on your machine. There is no telemetry, no analytics and no
+cloud service. For *Most used* and *Recently installed*, `config.json` keeps a
+launch count per app and the time each app was first seen. Only apps still
+installed are kept, and nothing else is recorded.
+
+The **one** thing that leaves your machine is the update check (see
+*Updating*): an HTTPS request for the list of published releases, and the
+download if you accept one. It carries nothing about you — no identifier, no
+settings, no app list — only the request itself and a user agent saying which
+version is asking (`FlexTaskbar/2.0.0`). The forge sees your IP address, as
+any web request shows it. Set `"check_for_updates": false` under `settings`
+and nothing is requested unless you pick *Check for updates…* yourself.
 
 ## Security
 
@@ -1225,6 +1286,12 @@ seen. Only apps still installed are kept, and nothing else is recorded.
   and that its settings load before anything is replaced, and writes only
   `config.json` and plain file names in `icons\`; the current settings are
   kept. See *Portable data*.
+- **Updates** are fetched over HTTPS only (a plain-HTTP feed is refused), and
+  the download is replaced into place only if its SHA-256 matches the
+  `SHA256SUMS.txt` published with the release — a release without one is never
+  installed by itself, only opened in the browser. The running program is
+  renamed aside rather than overwritten, and put back if the swap fails.
+  Windows' own checks still apply to the program that is started.
 - **Settings** are plain JSON in the data folder, saved atomically with a
   backup; a corrupt file is restored from the backup rather than trusted.
 - Nothing runs elevated unless you tick *Run as administrator* on a custom

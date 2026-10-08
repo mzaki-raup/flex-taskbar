@@ -95,6 +95,13 @@ pub struct Settings {
     pub package_apps: bool,
     /// How the All apps list is sorted, and what it hides.
     pub all_apps: crate::allview::AllAppsView,
+    /// Look for a newer release once a day, and say so when there is one.
+    /// *Check for updates…* in the menu always looks, whatever this says.
+    pub check_for_updates: bool,
+    /// Where to look: the forge's releases API. Empty means the one the app
+    /// was built with (`win::update::RELEASES_API`), which is where its own
+    /// releases are published.
+    pub update_feed: String,
     /// Theme, colours, transparency, border, corners and size of the strip.
     pub appearance: crate::appearance::Appearance,
 }
@@ -119,6 +126,8 @@ impl Default for Settings {
             looks: Vec::new(),
             package_apps: true,
             all_apps: crate::allview::AllAppsView::default(),
+            check_for_updates: true,
+            update_feed: String::new(),
             appearance: crate::appearance::Appearance::default(),
         }
     }
@@ -221,6 +230,9 @@ pub struct Config {
     pub first_seen: BTreeMap<String, u64>,
     /// How often each app was launched (or switched to), for *Most used*.
     pub launches: BTreeMap<String, u32>,
+    /// When the automatic update check last ran (Unix seconds), so it runs
+    /// about once a day rather than on every start.
+    pub last_update_check: u64,
     pub next_id: u64,
 }
 
@@ -240,6 +252,7 @@ impl Default for Config {
             bar: String::new(),
             first_seen: BTreeMap::new(),
             launches: BTreeMap::new(),
+            last_update_check: 0,
             next_id: 1,
         }
     }

@@ -26,6 +26,7 @@ pub enum Action {
     ToggleStrip,
     OpenDataFolder,
     Diagnostics,
+    CheckForUpdates,
     /// Bars (see `bars`): switch to one, make one (a copy of this one or
     /// empty), rename or delete this one, put a hidden category back.
     SwitchBar(String),
@@ -309,6 +310,9 @@ pub fn build_main() -> Built {
         b.item(root, "Diagnostics…", id, None, None, MENU_ITEM_STATE(0));
         let id = b.command(Action::OpenDataFolder);
         b.item(root, "Open data folder", id, None, None, MENU_ITEM_STATE(0));
+        let id = b.command(Action::CheckForUpdates);
+        let label = format!("Check for updates… (v{})", crate::release::Version::running());
+        b.item(root, &label, id, None, None, MENU_ITEM_STATE(0));
         b.separator(root);
         let id = b.command(Action::Exit);
         b.item(root, "Exit", id, None, None, MENU_ITEM_STATE(0));
