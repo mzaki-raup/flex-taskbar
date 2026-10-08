@@ -69,3 +69,19 @@ jobs:
           # No upload-artifact (see the note at the top): the program is left
           # in the runner's workspace.
           Get-Item target/release/FlexTaskbar.exe | Select-Object FullName, Length, LastWriteTime
+
+      # What only a real desktop can answer: the bar appearing, docking,
+      # reserving its screen space and giving it back, and what it tells a
+      # screen reader. The script exits 2 when it can't run — a runner started
+      # as a Windows service has no desktop — and that is a skip, not a
+      # failure, so this step is useful where it can run and quiet where it
+      # can't.
+      - name: Smoke test on the desktop
+        run: |
+          powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1
+          $code = $LASTEXITCODE
+          if ($code -eq 2) {
+            Write-Host "::warning::Smoke test skipped: no interactive desktop on this runner."
+            exit 0
+          }
+          exit $code
