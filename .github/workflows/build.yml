@@ -2,6 +2,12 @@ name: Build
 
 # Every branch and pull request: the same checks the project asks for before
 # anything is merged (see CLAUDE.md).
+#
+# Nothing here uses a published action (`actions/checkout` and friends). A
+# Forgejo runner fetches those from code.forgejo.org, which this instance
+# can't authenticate against (forgejo#2809), and they would need Node on the
+# runner. Cloning the repository by hand is a few lines and has neither
+# problem.
 on:
   push:
     branches: ['**']
@@ -17,7 +23,21 @@ jobs:
   check:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out this commit
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The job runs on the host, in a workspace that may hold the last
+          # job's files: start from an empty one.
+          Get-ChildItem -Force . | Remove-Item -Recurse -Force
+          git init --quiet --initial-branch=build .
+          git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+          # The credential goes on the command, never into .git/config.
+          $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:TOKEN"))
+          $auth = "http.extraheader=Authorization: Basic $basic"
+          git -c $auth fetch --quiet --depth=1 origin ${{ github.sha }}
+          git checkout --quiet --detach FETCH_HEAD
+          git log --oneline -1
 
       - name: Use the latest stable Rust
         run: |
@@ -37,11 +57,8 @@ jobs:
         run: cargo clippy --release --all-targets --locked -- -D warnings
 
       - name: Build
-        run: cargo build --release --locked
-
-      - name: Keep the program
-        uses: actions/upload-artifact@v4
-        with:
-          name: FlexTaskbar-${{ github.sha }}
-          path: target/release/FlexTaskbar.exe
-          if-no-files-found: error
+        run: |
+          cargo build --release --locked
+          # No upload-artifact (see the note at the top): the program is left
+          # in the runner's workspace.
+          Get-Item target/release/FlexTaskbar.exe | Select-Object FullName, Length, LastWriteTime

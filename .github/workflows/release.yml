@@ -10,6 +10,9 @@ name: Release
 #
 # Without SHA256SUMS.txt the app refuses to install the release by itself, so
 # never publish one of these without the other.
+#
+# As in build.yml, nothing here uses a published action: this instance can't
+# fetch them from code.forgejo.org (forgejo#2809).
 on:
   push:
     tags: ['v*']
@@ -23,9 +26,20 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # the notes below are the commits since the last tag
+      - name: Check out this tag, with the history the notes need
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Get-ChildItem -Force . | Remove-Item -Recurse -Force
+          git init --quiet --initial-branch=release .
+          git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+          $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:TOKEN"))
+          $auth = "http.extraheader=Authorization: Basic $basic"
+          # Not shallow, and with every tag: the notes below are the commits
+          # since the previous tag.
+          git -c $auth fetch --quiet --tags origin
+          git checkout --quiet --detach ${{ github.sha }}
+          git log --oneline -1
 
       - name: Use the latest stable Rust
         run: |
@@ -74,7 +88,6 @@ jobs:
           Get-Content dist/SHA256SUMS.txt
 
       - name: Release notes from the commits since the last tag
-        id: notes
         run: |
           $previous = git describe --tags --abbrev=0 "${{ github.ref_name }}^" 2>$null
           $range = if ($previous) { "$previous..${{ github.ref_name }}" } else { "${{ github.ref_name }}" }
@@ -92,10 +105,10 @@ jobs:
           $api = "${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
           $headers = @{ Authorization = "token $env:TOKEN" }
           $body = @{
-            tag_name = "${{ github.ref_name }}"
-            name     = "FlexTaskbar ${{ steps.version.outputs.version }}"
-            body     = (Get-Content notes.md -Raw)
-            draft    = $false
+            tag_name   = "${{ github.ref_name }}"
+            name       = "FlexTaskbar ${{ steps.version.outputs.version }}"
+            body       = (Get-Content notes.md -Raw)
+            draft      = $false
             prerelease = $false
           } | ConvertTo-Json
           $release = Invoke-RestMethod -Method Post -Uri "$api/releases" -Headers $headers `
