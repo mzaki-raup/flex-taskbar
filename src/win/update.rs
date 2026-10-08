@@ -444,6 +444,38 @@ mod tests {
 
     /// Not part of the normal run (it needs the network and the forge):
     /// `cargo test -- --ignored fetches` checks the WinHTTP path by hand.
+    /// The live feed, read by the same code the app uses: the published
+    /// release must parse, and offer itself to an older copy.
+    #[test]
+    #[ignore = "needs the network"]
+    fn reads_the_published_releases() {
+        let body = http::get(RELEASES_API, MAX_JSON).expect("the releases");
+        let json = String::from_utf8(body).expect("text");
+        let older = Version { major: 2, minor: 0, patch: 0 };
+        let found = release::newer_than(&json, older).expect("an update for 2.0.0");
+        assert!(found.version > older, "{:?}", found.version);
+        assert_eq!(found.exe.name, release::EXE_ASSET);
+        assert!(found.exe.url.starts_with("https://"), "{}", found.exe.url);
+        assert!(found.sums.is_some(), "a release must publish checksums");
+        // The running copy is current, so nothing is offered to it.
+        assert_eq!(release::newer_than(&json, found.version), None);
+    }
+
+    /// Everything an install does bar replacing the program: the published
+    /// release is downloaded and checked against its published checksum.
+    #[test]
+    #[ignore = "needs the network"]
+    fn downloads_and_verifies_a_published_release() {
+        let body = http::get(RELEASES_API, MAX_JSON).expect("the releases");
+        let json = String::from_utf8(body).expect("text");
+        let older = Version { major: 0, minor: 0, patch: 0 };
+        let found = release::newer_than(&json, older).expect("an update");
+        let file = download(&found).expect("a verified download");
+        let size = std::fs::metadata(&file).expect("the file").len();
+        assert_eq!(size, found.exe.size, "{} is the wrong size", file.display());
+        let _ = std::fs::remove_file(&file);
+    }
+
     #[test]
     #[ignore = "needs the network"]
     fn fetches_over_https() {
