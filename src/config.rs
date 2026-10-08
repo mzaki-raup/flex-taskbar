@@ -81,6 +81,8 @@ pub struct Settings {
     pub strip_height: u32,
     /// Which screen edge the strip docks against.
     pub strip_edge: StripEdge,
+    /// Which monitors carry a bar: the main one, every one, or a chosen one.
+    pub strip_monitors: crate::monitors::Monitors,
     /// Milliseconds the pointer rests on a category icon before it opens.
     pub hover_delay_ms: u32,
     /// Rescan the app list by itself when apps are installed or removed.
@@ -120,6 +122,7 @@ impl Default for Settings {
             reserve_space: true,
             strip_height: 48,
             strip_edge: StripEdge::Taskbar,
+            strip_monitors: crate::monitors::Monitors::Primary,
             hover_delay_ms: 100,
             auto_rescan: true,
             switch_to_running: true,

@@ -13,7 +13,7 @@ Done: dark settings windows, keyboard control of the flyouts, running-app
 indicators, auto-hide, settings backup and restore, closing animations, a
 hotkey per category, saved looks (theme presets), pinned folders, the
 Diagnostics report, dragging apps out of flyouts, smart categories, several
-bars and accessibility. Every 🟢 and 🟡 item is done.
+bars, accessibility and multi-monitor. Every 🟢 and 🟡 item is done.
 
 Suggested next: **Checks on real Windows** (🔴). *Diagnostics…* can now
 collect real numbers there, and Narrator and high contrast need checking
@@ -36,10 +36,13 @@ on a real PC. After that, the remaining 🔴 items below.
   subcategory, Esc goes back, Tab moves between the bar's flyouts, and
   typing jumps to an app. The bar hotkey (Ctrl+Alt+B) or `--bar` opens
   *All* ready for the keyboard.
-- [ ] **Multi-monitor** · 🔴
-  A bar on every screen, or on a chosen one, each docked and reserving
-  space on its own monitor. Hard to test without real multi-monitor
-  Windows.
+- [x] **Multi-monitor** · 🔴
+  *Screens* in the Appearance window: the main screen, every screen, or one
+  chosen screen. Each bar is docked and reserves space on its own monitor,
+  at that monitor's DPI; attaching or detaching a screen adds or removes its
+  bar and leaves the others alone. The choosing and add/remove logic is unit
+  tested; two screens at once still need a real multi-monitor PC (see the
+  README's *Still not verified*).
 - [ ] **Jump lists and quick actions** · 🔴
   Right-click an app for its recent files (Windows jump lists), *Open file
   location*, *Run as administrator* and *Uninstall*. Jump lists come

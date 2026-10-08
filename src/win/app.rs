@@ -48,6 +48,9 @@ const WM_APP_ERROR: u32 = WM_APP + 5;
 const WM_APP_APPS_CHANGED: u32 = WM_APP + 6;
 /// From `update`: a check or a download finished.
 pub const WM_APP_UPDATE: u32 = WM_APP + 7;
+/// A monitor was attached, detached or rearranged: the bars may need
+/// rebuilding. Posted by `strip` so no bar is destroyed inside its own proc.
+pub const WM_APP_DISPLAY: u32 = WM_APP + 8;
 /// Rescan once changes have settled.
 const TIMER_RESCAN: usize = 7;
 
@@ -405,6 +408,10 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_APP_UPDATE => {
             let event = unsafe { Box::from_raw(lparam.0 as *mut super::update::Event) };
             super::update::event(*event);
+            LRESULT(0)
+        }
+        WM_APP_DISPLAY => {
+            strip::display_settled();
             LRESULT(0)
         }
         WM_SETTINGCHANGE => {
@@ -1007,6 +1014,7 @@ pub fn register_hotkeys() -> Vec<String> {
 /// A category's hotkey: its flyout when it has a button on the bar, or
 /// else its menu at the pointer.
 fn open_category_by_hotkey(id: u64) {
+    strip::activate_at_cursor();
     if let Some((hit, _)) = strip::flyout_buttons().into_iter().find(|(_, o)| *o == strip::Opens::Category(id)) {
         super::flyout::keyboard_open_category(hit, id);
         return;

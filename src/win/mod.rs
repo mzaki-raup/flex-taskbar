@@ -17,6 +17,7 @@ mod indicator;
 mod launch;
 mod manager;
 mod menu;
+mod monitors;
 mod panel;
 mod paths;
 mod prompt;

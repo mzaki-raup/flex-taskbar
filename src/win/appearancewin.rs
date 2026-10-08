@@ -34,6 +34,8 @@ const FLYOUT_SHADOW: u16 = 17;
 const RUNNING_MARK: u16 = 18;
 const AUTO_HIDE: u16 = 19;
 const FLYOUT_CLOSING: u16 = 26;
+// Which screens carry a bar; its list is built from the monitors attached now.
+const SCREENS: u16 = 27;
 // The indicator picture's button, and its Remove button (+100).
 const INDICATOR_IMAGE: u16 = 24;
 // The All button's picture, and its "Use text" button (+100).
@@ -127,12 +129,14 @@ enum Row {
     Picture(u16, &'static str, &'static str),
     Heading(&'static str),
     Combo(u16, &'static str, &'static [&'static str]),
+    /// Like `Combo`, but the choices are the screens attached right now.
+    Screens(u16, &'static str),
     Colour(u16),
     Slider(u16),
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 34] = [
+const ROWS: [Row; 35] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -164,6 +168,7 @@ const ROWS: [Row; 34] = [
         "Position (or drag the bar)",
         &["Next to the Windows taskbar", "Bottom", "Top", "Left", "Right"],
     ),
+    Row::Screens(SCREENS, "Screens"),
     Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
     Row::Combo(AUTO_HIDE, "Auto-hide", &["Never", "Slide away", "Fade away"]),
     Row::Slider(AUTO_HIDE_DELAY),
@@ -314,6 +319,15 @@ fn create() {
                     controls.insert(id, h);
                     y += row_h;
                 }
+                Row::Screens(id, text) => {
+                    place(label(&mut controls, text), lx, label_w, s(18), y);
+                    let owned = crate::monitors::options(&super::monitors::all());
+                    let items: Vec<&str> = owned.iter().map(String::as_str).collect();
+                    let h = combo(id, &items);
+                    let _ = SetWindowPos(h, None, cx, y + (row_h - s(24)) / 2, ctl_w, s(200), SWP_NOZORDER);
+                    controls.insert(id, h);
+                    y += row_h;
+                }
                 Row::Colour(id) => {
                     let text = COLOURS.iter().find(|(c, _)| *c == id).map(|(_, t)| *t).unwrap_or_default();
                     place(label(&mut controls, text), lx, label_w, s(18), y);
@@ -458,6 +472,10 @@ fn load() {
         );
     }
     sel(POSITION, app::with(|s| s.cfg.settings.strip_edge) as usize);
+    sel(
+        SCREENS,
+        crate::monitors::option_of(&app::with(|s| s.cfg.settings.strip_monitors.clone()), &super::monitors::all()),
+    );
     for (id, value) in [
         (OPACITY, a.opacity as u32),
         (BORDER_WIDTH, a.border_width),
@@ -516,6 +534,12 @@ fn change_settings(f: impl FnOnce(&mut crate::config::Settings)) {
         panel::theme_changed();
     }
     strip::apply_appearance();
+    save_soon();
+}
+
+/// Writes the settings out shortly, so dragging a slider doesn't save on
+/// every step.
+fn save_soon() {
     if let Some(h) = hwnd() {
         unsafe {
             SetTimer(Some(h), TIMER_SAVE, 400, None);
@@ -901,6 +925,14 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                         [HoverAnim::Off, HoverAnim::Magnify, HoverAnim::Lift, HoverAnim::Bounce, HoverAnim::Pulse]
                             [i.min(4)];
                     change(|a, _| a.hover_animation = kind);
+                }
+                (SCREENS, CBN_SELCHANGE) => {
+                    // A bar comes or goes, so the whole set is rebuilt rather
+                    // than just restyled.
+                    let want = crate::monitors::from_option(combo(id), &super::monitors::all());
+                    app::with(|s| s.cfg.settings.strip_monitors = want);
+                    strip::apply_settings();
+                    save_soon();
                 }
                 (POSITION, CBN_SELCHANGE) => {
                     use crate::config::StripEdge;

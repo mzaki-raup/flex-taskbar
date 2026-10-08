@@ -296,6 +296,8 @@ pub fn keyboard_open() {
         close();
         return;
     }
+    // With a bar on each screen, open the one the pointer is on.
+    strip::activate_at_cursor();
     show(View::All { first_row: 0 }, strip::all_button());
     take_keyboard();
     with(|f| f.keys_used = true);
