@@ -46,6 +46,8 @@ const WM_APP_SCAN_DONE: u32 = WM_APP + 4;
 const WM_APP_ERROR: u32 = WM_APP + 5;
 /// From `watch`: something was installed or removed.
 const WM_APP_APPS_CHANGED: u32 = WM_APP + 6;
+/// From `update`: a check or a download finished.
+pub const WM_APP_UPDATE: u32 = WM_APP + 7;
 /// Rescan once changes have settled.
 const TIMER_RESCAN: usize = 7;
 
@@ -214,6 +216,9 @@ pub fn run(args: &Args) -> i32 {
     start_scan();
     super::watch::start(main, WM_APP_APPS_CHANGED);
     super::running::start(main);
+    // The program the last update replaced is no longer running: it can go.
+    super::update::clean_leftovers();
+    super::update::check_in_background();
 
     // Tell the user about anything that happened on the way up.
     let mut notes = Vec::new();
@@ -397,6 +402,11 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             ui::error(None, &text);
             LRESULT(0)
         }
+        WM_APP_UPDATE => {
+            let event = unsafe { Box::from_raw(lparam.0 as *mut super::update::Event) };
+            super::update::event(*event);
+            LRESULT(0)
+        }
         WM_SETTINGCHANGE => {
             let area = if lparam.0 != 0 {
                 unsafe { PCWSTR(lparam.0 as *const u16).to_string().unwrap_or_default() }
@@ -489,6 +499,7 @@ pub fn perform(action: menu::Action) {
         menu::Action::ToggleStrip => set_strip(None),
         menu::Action::OpenDataFolder => open_data_folder(),
         menu::Action::Diagnostics => super::diagnostics::show(),
+        menu::Action::CheckForUpdates => super::update::check(true),
         menu::Action::SwitchBar(name) => switch_bar(&name),
         menu::Action::NextBar => next_bar(),
         menu::Action::NewBar { copy } => new_bar(copy),
@@ -585,6 +596,26 @@ pub fn toggle_autostart(owner: Option<HWND>) {
     if let Err(e) = autostart::set_enabled(enable) {
         ui::error(owner, &format!("Couldn't change the startup setting.\n\n{e}"));
     }
+}
+
+/// Opens a web page (a release's own page) in the browser.
+pub fn open_link(url: &str) {
+    let url = wide(url);
+    unsafe {
+        ShellExecuteW(None, w!("open"), PCWSTR(url.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// An update has been put in place: start the new program. Without a
+/// supervisor to do it, the user is told to start it themselves.
+pub fn restart_for_update(version: crate::release::Version) {
+    if !SUPERVISED.with(|s| s.get()) {
+        ui::info(None, &format!("FlexTaskbar {version} is installed. Start FlexTaskbar again to use it."));
+        std::process::exit(super::EXIT_CLEAN);
+    }
+    strip::destroy();
+    remove_tray_icon(main_hwnd());
+    std::process::exit(super::EXIT_RESTART);
 }
 
 pub fn open_data_folder() {

@@ -1,0 +1,47 @@
+name: Build
+
+# Every branch and pull request: the same checks the project asks for before
+# anything is merged (see CLAUDE.md).
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the latest stable Rust
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+          rustc --version
+          cargo --version
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Clippy
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Keep the program
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlexTaskbar-${{ github.sha }}
+          path: target/release/FlexTaskbar.exe
+          if-no-files-found: error

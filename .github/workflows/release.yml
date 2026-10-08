@@ -1,0 +1,108 @@
+name: Release
+
+# Tag a commit `v2.0.1` and push the tag: this runs the same checks as the
+# build workflow, then publishes the program as a release. The app's
+# *Check for updates…* reads exactly what this publishes:
+#
+#   FlexTaskbar.exe                        the program, downloaded in place
+#   SHA256SUMS.txt                         checked before anything is replaced
+#   FlexTaskbar-<version>-windows-x64.zip  for people who update by hand
+#
+# Without SHA256SUMS.txt the app refuses to install the release by itself, so
+# never publish one of these without the other.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the notes below are the commits since the last tag
+
+      - name: Use the latest stable Rust
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: The tag must match the version in Cargo.toml
+        id: version
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          $inCargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          if ($version -ne $inCargo) {
+            # The app compares the tag against the version it was built with,
+            # so a mismatch would offer the same update for ever.
+            throw "Tag $tag does not match Cargo.toml version $inCargo"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Clippy
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Checksums and archive
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/FlexTaskbar.exe dist/
+          Copy-Item README.md dist/
+          $zip = "FlexTaskbar-${{ steps.version.outputs.version }}-windows-x64.zip"
+          Compress-Archive -Path dist/FlexTaskbar.exe, dist/README.md -DestinationPath "dist/$zip"
+          Remove-Item dist/README.md
+          # `sha256sum` layout, which the app's release.rs reads.
+          Get-ChildItem dist -File | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Release notes from the commits since the last tag
+        id: notes
+        run: |
+          $previous = git describe --tags --abbrev=0 "${{ github.ref_name }}^" 2>$null
+          $range = if ($previous) { "$previous..${{ github.ref_name }}" } else { "${{ github.ref_name }}" }
+          $log = git log --no-merges --pretty=format:"- %s" $range
+          $notes = if ($log) { $log -join "`n" } else { "No changes recorded." }
+          $notes | Set-Content notes.md -Encoding utf8
+          Get-Content notes.md
+
+      - name: Publish the release
+        env:
+          # Forgejo/Gitea hand the workflow a token with write access to this
+          # repository; the API below is their /api/v1, not GitHub's.
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $api = "${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
+          $headers = @{ Authorization = "token $env:TOKEN" }
+          $body = @{
+            tag_name = "${{ github.ref_name }}"
+            name     = "FlexTaskbar ${{ steps.version.outputs.version }}"
+            body     = (Get-Content notes.md -Raw)
+            draft    = $false
+            prerelease = $false
+          } | ConvertTo-Json
+          $release = Invoke-RestMethod -Method Post -Uri "$api/releases" -Headers $headers `
+            -ContentType 'application/json' -Body $body
+          Write-Host "Release $($release.id) created at $($release.html_url)"
+          foreach ($file in Get-ChildItem dist -File) {
+            $uri = "$api/releases/$($release.id)/assets?name=$([uri]::EscapeDataString($file.Name))"
+            Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Form @{ attachment = Get-Item $file.FullName } | Out-Null
+            Write-Host "Attached $($file.Name)"
+          }
