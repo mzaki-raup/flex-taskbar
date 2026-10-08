@@ -9,16 +9,20 @@ and described in the README.
 
 ## Recommended order
 
-Done: dark settings windows, keyboard control of the flyouts, running-app
-indicators, auto-hide, settings backup and restore, closing animations, a
-hotkey per category, saved looks (theme presets), pinned folders, the
-Diagnostics report, dragging apps out of flyouts, smart categories, several
-bars, accessibility, multi-monitor, jump lists and quick actions, and a
-Windows 11 backdrop behind the bar. Every 🟢 and 🟡 item is done.
+**Every item below is done.** The last four — multi-monitor, jump lists and
+quick actions, a Windows 11 backdrop behind the bar, and the checks on real
+Windows — went in together; everything before them was already in.
 
-Suggested next: **Checks on real Windows** (🔴). *Diagnostics…* can now
-collect real numbers there, and Narrator and high contrast need checking
-on a real PC. After that, the remaining 🔴 items below.
+What is left is not a feature but a short list of things no one has been able
+to *see* working yet, kept in the README under *Still not verified*: two or
+more monitors (and mixed DPI between them), a Windows taskbar on the top or a
+side, a real drag from Explorer, importing old .NET settings, and NVDA and
+JAWS. Each needs hardware or a setup the machine this was built on doesn't
+have, rather than more code.
+
+The one piece of unmade work named below: the **flyouts** have no Windows 11
+backdrop, because their opening animations need the layered window a backdrop
+can't be. That trade is described under *Look*.
 
 ## Everyday use
 
@@ -101,12 +105,21 @@ on a real PC. After that, the remaining 🔴 items below.
   GDI/USER objects, handles and bar and flyout drawing times; the README
   has numbers measured under Wine. Numbers from real Windows are still to
   come (see *Checks on real Windows*).
-- [ ] **Checks on real Windows** · 🔴
-  What Wine couldn't verify (see the README): high-DPI scaling, Store and
-  web-app icons, dragging files in, the bar beside the real taskbar, *Start
-  with Windows*, Narrator reading the bar and flyouts, and high contrast. A
-  UI-automation smoke test in CI would keep them working (the bar and
-  flyouts now answer UI Automation, which makes one easier to write).
+- [x] **Checks on real Windows** · 🔴
+  Everything Wine couldn't verify has now been seen on Windows 11 25H2 —
+  high-DPI scaling, Store and web-app icons, dropping files in, the bar
+  beside the real taskbar, *Start with Windows*, Narrator, and high contrast
+  — and `tools\smoke-test.ps1` keeps the core of it working: CI starts the
+  exe it just built and checks, through Windows itself, that the bar appears,
+  docks, reserves its screen space and gives it back, and that a screen
+  reader reads it as a toolbar of named, placed, pressable buttons.
+
+  Two notes. The bar answers **MSAA**, not UI Automation — a UIA client sees
+  no children — so the test asks the way a screen reader does. And the smoke
+  test needs a desktop: a runner started as a Windows *service* has none, so
+  it skips there rather than failing. What is still unseen (two monitors, a
+  taskbar on another edge, a real Explorer drag, NVDA and JAWS) is listed in
+  the README under *Still not verified*.
 - [x] **Accessibility** · 🟡
   Screen-reader names and roles for the bar and flyout buttons (UI
   Automation), visible keyboard focus, and a high-contrast theme that

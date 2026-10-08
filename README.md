@@ -915,6 +915,24 @@ Run *Diagnostics…* on your own PC for numbers from your app list.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
+It then runs `tools\smoke-test.ps1`, which starts the exe it just built and
+checks it through Windows itself — the things no unit test can reach:
+
+- the bar appears, is a sensible size, and is docked against a screen edge;
+- it reserves its screen space as an AppBar, and gives it back when it exits;
+- a screen reader reads it as a **toolbar** called FlexTaskbar whose buttons
+  all have a name, a place on screen and something to press;
+- it leaves no crash log.
+
+The app runs from a copy with its own `data\` folder, so a FlexTaskbar
+already installed is untouched, and it is stopped again whether the checks
+pass or not. Run it yourself with
+`powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1`.
+
+It needs a desktop to draw on. Where there isn't one — a runner started as a
+Windows **service** runs in session 0 and has none — the script exits 2 and
+CI reports a skip rather than a failure. For the smoke test to actually run,
+the runner has to be started as a logged-in user.
 The 180 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
@@ -1216,6 +1234,9 @@ covered the things Wine could not show:
   app's folder, and clicking the recent file opened it in its default program.
   A live test (`cargo test -- --ignored two_apps`) reads two real apps' jump
   lists in one process and checks each gets its own files.
+- a Chrome **web app** launched from the bar and matched back to its window by
+  AppUserModelID: *Google Keep*, pinned and clicked, came up and the bar put
+  the running line under it. Earlier only a Store app had been matched
 - the *Backdrop* setting on Windows 11 25H2: *Acrylic* and *Mica* both drawn
   behind the bar (the bar stops being a flat rectangle and takes the
   backdrop's tint), with icons, text, the hover animation and tooltips drawn
@@ -1239,7 +1260,13 @@ covered the things Wine could not show:
   frozen UI thread (every thread suspended) and replacing it, and stopping
   after five crashes in two minutes with a message
 - Narrator running against the bar, and an MSAA client reading the bar as a
-  toolbar with every button named, placed and pressable
+  toolbar with every button named, placed and pressable. To be exact about
+  which interface that is: the bar answers **MSAA** (`IAccessible`, served
+  from `WM_GETOBJECT`), which is what Narrator and NVDA read. It is not a
+  native UI Automation provider — a UIA client asking
+  `AutomationElement.FromHandle(bar)` for its children gets none — so
+  anything driving the bar should ask the way a screen reader does.
+  `tools\smoke-test.ps1` does.
 
 **Found and fixed during that run:**
 - the bar and the flyouts told screen readers they had *no* buttons at all.
@@ -1262,8 +1289,6 @@ covered the things Wine could not show:
   path is the same code
 - a Windows taskbar on the top or a side: *Next to the Windows taskbar* was
   only seen against a bottom taskbar
-- matching Chrome/Edge *web apps* back to their windows by AppUserModelID —
-  only a Store app was launched and matched; the code path is the same
 - a real drag from Explorer onto the bar or the Manage window: the drop
   handler was exercised with a real `HDROP`, but not the shell's drag source
 - importing old .NET settings (no previous install on the machine)
