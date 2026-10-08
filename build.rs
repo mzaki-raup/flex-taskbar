@@ -35,6 +35,10 @@ fn write_resource_script() -> std::path::PathBuf {
 
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
     let description = std::env::var("CARGO_PKG_DESCRIPTION").unwrap_or_default();
+    // Shown as "Company" in the file properties, and as the publisher in Task
+    // Manager. `authors` in Cargo.toml records who wrote it; executables have
+    // no author field of their own.
+    let company = "Procybro Solutions";
     // FILEVERSION wants four numbers; a package version is three.
     let mut parts: Vec<u16> = version.split('.').map(|p| p.parse().unwrap_or(0)).collect();
     parts.resize(4, 0);
@@ -56,6 +60,7 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
+            VALUE "CompanyName", "{company}"
             VALUE "FileDescription", "{description}"
             VALUE "FileVersion", "{major}.{minor}.{patch}.{build}"
             VALUE "InternalName", "FlexTaskbar"
