@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "flex-taskbar"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "embed-resource",
  "resvg",

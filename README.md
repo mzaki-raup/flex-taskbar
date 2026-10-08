@@ -1252,7 +1252,7 @@ The **one** thing that leaves your machine is the update check (see
 *Updating*): an HTTPS request for the list of published releases, and the
 download if you accept one. It carries nothing about you — no identifier, no
 settings, no app list — only the request itself and a user agent saying which
-version is asking (`FlexTaskbar/2.0.1`). The forge sees your IP address, as
+version is asking (`FlexTaskbar/2.0.2`). The forge sees your IP address, as
 any web request shows it. Set `"check_for_updates": false` under `settings`
 and nothing is requested unless you pick *Check for updates…* yourself.
 
