@@ -2,6 +2,11 @@
 //! windows, which is what allows a translucent background with solid icons and
 //! text, anti-aliased rounded corners, and real transparency outside the shape.
 //!
+//! A bar with one of Windows 11's backdrops behind it (see `backdrop`) can't
+//! be a layered window, so the same picture is blended onto its device
+//! context in `WM_PAINT` instead ([`paint_pixmap`]). Everything above that is
+//! the same: one pixmap, drawn once.
+//!
 //! Shapes are drawn with tiny-skia. Text is drawn by GDI into a grey coverage
 //! mask (GDI can't write alpha) and then blended in the requested colour.
 
@@ -11,7 +16,7 @@ use crate::appearance::Rgba;
 use resvg::tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform};
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
+    AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, AlphaBlend, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_NOPREFIX,
     DT_SINGLELINE, DeleteDC, DeleteObject, DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
     FONT_QUALITY, FW_NORMAL, FW_SEMIBOLD, GdiFlush, GetDC, GetDIBits, GetTextExtentPoint32W, HBITMAP, HDC, HFONT,
@@ -285,6 +290,60 @@ pub fn present_pixmap_alpha(pix: &Pixmap, hwnd: HWND, x: i32, y: i32, alpha: u8)
         let _ = DeleteObject(HGDIOBJ(bmp.0));
         let _ = DeleteDC(mem);
         ReleaseDC(None, screen);
+    }
+}
+
+/// A 32-bit DIB holding `pix`, ready to blend. GDI wants premultiplied BGRA;
+/// tiny-skia gives premultiplied RGBA, so only the channels are swapped.
+///
+/// Returns the memory DC, the bitmap and what was selected into the DC
+/// before; the caller puts the old object back and frees both.
+unsafe fn pixmap_dc(screen: HDC, pix: &Pixmap) -> Option<(HDC, HBITMAP, HGDIOBJ)> {
+    let (w, h) = (pix.width() as i32, pix.height() as i32);
+    unsafe {
+        let mem = CreateCompatibleDC(Some(screen));
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let Ok(bmp) = CreateDIBSection(Some(mem), &bitmap_info(w, h), DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = DeleteDC(mem);
+            return None;
+        };
+        let dst = std::slice::from_raw_parts_mut(bits as *mut u8, (w * h * 4) as usize);
+        for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(pix.data().as_chunks::<4>().0) {
+            d[0] = s[2];
+            d[1] = s[1];
+            d[2] = s[0];
+            d[3] = s[3];
+        }
+        let old = SelectObject(mem, HGDIOBJ(bmp.0));
+        Some((mem, bmp, old))
+    }
+}
+
+/// Blends `pix` onto `hdc` at (`x`, `y`) for a window that is painted rather
+/// than layered — one with a backdrop behind it (see `backdrop`).
+///
+/// Inside a window whose frame has been extended, DWM shows its backdrop
+/// wherever the window is black with zero alpha. GDI never writes alpha, so
+/// everything it draws stays at zero and would vanish into the backdrop;
+/// `AlphaBlend` from a premultiplied bitmap is the one call that does write
+/// it. So the window is cleared to black first (all glass), and this lays the
+/// picture over it: solid pixels arrive with alpha and hide the backdrop,
+/// part-way ones darken it, and pixels the picture leaves clear are not
+/// touched at all and stay glass.
+pub fn paint_pixmap(pix: &Pixmap, hdc: HDC, x: i32, y: i32) {
+    let (w, h) = (pix.width() as i32, pix.height() as i32);
+    unsafe {
+        let Some((mem, bmp, old)) = pixmap_dc(hdc, pix) else { return };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        let _ = AlphaBlend(hdc, x, y, w, h, mem, 0, 0, w, h, blend);
+        SelectObject(mem, old);
+        let _ = DeleteObject(HGDIOBJ(bmp.0));
+        let _ = DeleteDC(mem);
     }
 }
 

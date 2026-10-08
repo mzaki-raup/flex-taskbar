@@ -13,8 +13,8 @@ Done: dark settings windows, keyboard control of the flyouts, running-app
 indicators, auto-hide, settings backup and restore, closing animations, a
 hotkey per category, saved looks (theme presets), pinned folders, the
 Diagnostics report, dragging apps out of flyouts, smart categories, several
-bars, accessibility, multi-monitor, and jump lists and quick actions.
-Every 🟢 and 🟡 item is done.
+bars, accessibility, multi-monitor, jump lists and quick actions, and a
+Windows 11 backdrop behind the bar. Every 🟢 and 🟡 item is done.
 
 Suggested next: **Checks on real Windows** (🔴). *Diagnostics…* can now
 collect real numbers there, and Narrator and high contrast need checking
@@ -78,10 +78,14 @@ on a real PC. After that, the remaining 🔴 items below.
 - [x] **Closing animations** · 🟢
   The opening styles (Fade, Slide, Scale, Drawer, Genie) played in
   reverse when a flyout closes, without delaying the next one opening.
-- [ ] **Mica or acrylic behind the bar and flyouts** · 🔴
-  Windows 11's blurred backdrop as an alternative to plain translucency.
-  Layered windows can't use it directly, so this means a different window
-  setup and careful testing on Windows 10 and 11.
+- [x] **Mica or acrylic behind the bar** · 🔴
+  *Backdrop* in the Appearance window: Mica, Acrylic or Mica Alt behind the
+  bar on Windows 11 22H2 and later, greyed out where Windows can't draw one.
+  A layered window can't have a backdrop, so with one chosen the bar is built
+  as an ordinary window and painted into; the margin, *Fit to icons* and
+  *Fade* auto-hide don't apply while it is on (see the README).
+  **The flyouts still don't have one** — their opening animations need the
+  layered window a backdrop can't be, so that trade is left unmade.
 - [x] **Theme presets** · 🟢
   Save the current look under a name, switch between saved looks, and
   import or export a look as a small file (pictures included).

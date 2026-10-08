@@ -149,6 +149,30 @@ FlexTaskbar:
   without a bar; attach it again and the bar goes back to it. Windows reuses
   display names (`\\.\DISPLAY2`), so a *different* monitor plugged into the
   same slot inherits the choice.
+- **Mica or Acrylic behind the bar** (Windows 11 22H2 and later). *Backdrop*
+  in the Appearance window swaps the bar's plain translucency for one of
+  Windows 11's own blurred backdrops: *Mica* (the wallpaper, heavily blurred),
+  *Acrylic* (what is behind the bar, blurred and tinted), or *Mica Alt* (more
+  of the wallpaper's colour). *Off* is the default and changes nothing.
+
+  A backdrop is drawn by Windows behind the whole window, which a layered
+  window can't have — so with one chosen the bar is built as an ordinary
+  window and painted into instead. That settles a few things, and the
+  Appearance window simply behaves accordingly while a backdrop is on:
+  - the bar's **own background goes**, because the backdrop *is* the
+    background; icons, text, the border and the hover and pressed highlights
+    are drawn over it as before;
+  - the **floating margin and *Fit to icons*** don't apply: Windows fills the
+    whole window with the backdrop, so a margin would be a blurred band around
+    the bar. The bar sits flush and takes the full width;
+  - **auto-hide slides** rather than fades, since fading needs the layered
+    window a backdrop can't be;
+  - the **corners are Windows' own**, rounded to match *Corner radius*.
+
+  The **flyouts keep their plain translucency**: their opening animations
+  (Genie, Drawer, Fade…) need a layered window, and a backdrop would cost
+  them. On Windows 10, and Windows 11 before 22H2, there is no such backdrop
+  and the setting is greyed out.
 - **Any edge.** By default it sits next to the Windows taskbar, on the same
   edge. To move it, press on an empty spot of the bar and drag it towards
   another edge of the screen: it docks there as soon as the pointer is nearest
@@ -891,7 +915,7 @@ Run *Diagnostics…* on your own PC for numbers from your app list.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 171 unit tests cover:
+The 180 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -924,6 +948,13 @@ The 171 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- the Windows 11 backdrop: each kind asking DWM for its own (`DWMSBT_*`),
+  the bar's own fill going when one is on, the floating margin and *Fit to
+  icons* not applying, *Fade* auto-hide becoming *Slide*, the background
+  becoming the glass Windows shows its backdrop through while every other
+  colour is left alone, high contrast turning the backdrop off, and a Windows
+  that can't draw one falling back to the plain layered bar with its own
+  opacity and margin intact
 - an app's recent files and quick actions: every action found from the verb
   the shell reports whatever its capitals (`runas` and `RunAs` are the same
   action), verbs we don't offer ignored, the menu's shape (recent files alone,
@@ -1185,6 +1216,16 @@ covered the things Wine could not show:
   app's folder, and clicking the recent file opened it in its default program.
   A live test (`cargo test -- --ignored two_apps`) reads two real apps' jump
   lists in one process and checks each gets its own files.
+- the *Backdrop* setting on Windows 11 25H2: *Acrylic* and *Mica* both drawn
+  behind the bar (the bar stops being a flat rectangle and takes the
+  backdrop's tint), with icons, text, the hover animation and tooltips drawn
+  over it, and switching between *Off*, *Mica*, *Acrylic* and *Mica Alt* in
+  the Appearance window rebuilding the bar each time without losing it.
+  Getting there needed the one thing the documentation doesn't spell out:
+  GDI never writes alpha, so the window is cleared to black (all glass) and
+  the picture laid over it with `AlphaBlend`, which is the only call that
+  writes the alpha that stops a pixel being glass. Painting the picture
+  opaquely, or copying it with `BitBlt`, leaves a flat black bar.
 - the *Screens* setting on a one-monitor machine: *Main screen only*, *Every
   screen* and the screen picked by name each giving exactly one bar, docked and
   reserving its space; a name that is not attached (`\\.\DISPLAY9` in the
@@ -1303,6 +1344,7 @@ src/win/access.rs    screen readers: the bar and flyouts as MSAA objects
 src/win/diagnostics.rs  Diagnostics…: memory, CPU, objects, draw times
 src/win/running.rs   following open windows (shell notifications), switching
 src/win/appmenu.rs   an app's jump list and the quick actions Windows offers
+src/win/backdrop.rs  Windows 11's Mica and Acrylic behind the bar
 src/win/monitors.rs  asking Windows which monitors are attached, and where
 src/win/strip.rs     the bars: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
