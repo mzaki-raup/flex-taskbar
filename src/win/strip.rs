@@ -31,17 +31,18 @@ use super::menu;
 use super::theme;
 use super::ui::{self, scale, wide};
 use crate::anim;
-use crate::appearance::{Appearance, AutoHide, Colors, DockWidth, HoverAnim};
+use crate::appearance::{Appearance, AutoHide, Backdrop, Colors, DockWidth, HoverAnim};
 use crate::autohide;
 use crate::config::CustomApp;
 use crate::striplayout::{self, BarLayout, Edge, Hit, Metrics, Slot};
 use resvg::tiny_skia::Pixmap;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ, MONITOR_DEFAULTTOPRIMARY,
-    MONITORINFO, MonitorFromPoint,
+    BeginPaint, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, EndPaint, FillRect,
+    GetMonitorInfoW, HFONT, HGDIOBJ, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
+    PAINTSTRUCT,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
@@ -56,9 +57,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING,
     PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer,
     SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON,
-    TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED,
-    WM_DROPFILES, WM_GETOBJECT, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP,
-    WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WINDOW_EX_STYLE, WM_APP, WM_CAPTURECHANGED,
+    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_ERASEBKGND, WM_GETOBJECT, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_PAINT, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -87,6 +89,10 @@ struct Strip {
     /// The monitor this bar is docked to: Windows' device name, and the
     /// monitor and work rectangles last seen for it.
     device: String,
+    /// The backdrop this window was made for. A layered window can't take one
+    /// and a window with one can't be layered, so changing this rebuilds the
+    /// bar rather than restyling it.
+    backdrop: Backdrop,
     mon: RECT,
     work: RECT,
     items: Vec<Item>,
@@ -263,7 +269,13 @@ pub fn current_look() -> (Appearance, Colors) {
     match theme::high_contrast() {
         Some(sc) => (look.for_high_contrast(), Colors::high_contrast(&sc)),
         None => {
+            // A backdrop changes the window, not just the colours, so what it
+            // settles (a lighter fill, no margin, no fading) is worked out
+            // before anything is drawn or placed.
+            let look = look.over_backdrop(super::backdrop::available());
             let colors = look.colors(theme::is_dark_cached());
+            // With a backdrop the background is the glass DWM blurs through.
+            let colors = if look.backdrop.on() { colors.over_backdrop() } else { colors };
             (look, colors)
         }
     }
@@ -308,8 +320,14 @@ pub fn apply_appearance() {
     if count() == 0 {
         return;
     }
-    flyout::close();
     let (look, colors) = current_look();
+    // The window itself has to change: rebuild rather than restyle.
+    if read(|s| s.backdrop != look.backdrop).unwrap_or(false) {
+        destroy();
+        apply_settings();
+        return;
+    }
+    flyout::close();
     for_each(|i| {
         with_at(i, |s| {
             if s.look.icon_size != look.icon_size {
@@ -347,8 +365,11 @@ fn create_on(screen: &crate::monitors::Screen) {
         RegisterClassW(&wc);
         // Start on its own monitor so the window gets that monitor's DPI.
         let wa = super::monitors::to_rect(screen.work);
+        // A backdrop needs an ordinary composited window; without one the bar
+        // is layered, which is what gives it per-pixel translucency.
+        let layered = if look.backdrop.on() { WINDOW_EX_STYLE(0) } else { WS_EX_LAYERED };
         match CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_ACCEPTFILES | WS_EX_LAYERED,
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_ACCEPTFILES | layered,
             PCWSTR(class.as_ptr()),
             w!("FlexTaskbar strip"),
             WS_POPUP,
@@ -371,6 +392,7 @@ fn create_on(screen: &crate::monitors::Screen) {
         hwnd,
         tooltip,
         device: screen.device.clone(),
+        backdrop: look.backdrop,
         mon: super::monitors::to_rect(screen.bounds),
         work: super::monitors::to_rect(screen.work),
         items: Vec::new(),
@@ -420,6 +442,16 @@ fn create_on(screen: &crate::monitors::Screen) {
     reposition();
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+    // After the window is on screen: DWM ignores a backdrop asked for before
+    // it has anything to composite.
+    if let Some((backdrop, radius)) = read_at(index, |s| (s.backdrop, s.look.corner_radius))
+        && backdrop.on()
+    {
+        super::backdrop::apply(hwnd, backdrop, theme::is_dark_cached(), radius);
+        unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, true);
+        }
     }
     schedule_hide();
 }
@@ -527,8 +559,55 @@ fn present_frame_at(index: usize) {
         let across = if s.edge.vertical() { ui::rect_w(&s.win) } else { ui::rect_h(&s.win) };
         let reveal = scale(autohide::REVEAL_DIP, s.dpi);
         let ((dx, dy), alpha) = autohide::placement(s.look.auto_hide, s.hide, s.edge, across, reveal);
-        canvas::present_pixmap_alpha(pix, s.hwnd, s.win.left + dx, s.win.top + dy, alpha);
+        if s.backdrop.on() {
+            // A window with a backdrop isn't layered, so the picture can't be
+            // moved or faded as it is put on screen: the window itself moves,
+            // and `WM_PAINT` draws into it. Auto-hide is always Slide with a
+            // backdrop (see `Appearance::over_backdrop`), so ignoring `alpha`
+            // loses nothing.
+            unsafe {
+                let _ = SetWindowPos(
+                    s.hwnd,
+                    Some(HWND_TOPMOST),
+                    s.win.left + dx,
+                    s.win.top + dy,
+                    ui::rect_w(&s.win),
+                    ui::rect_h(&s.win),
+                    SWP_NOACTIVATE,
+                );
+                let _ = InvalidateRect(Some(s.hwnd), None, false);
+            }
+        } else {
+            canvas::present_pixmap_alpha(pix, s.hwnd, s.win.left + dx, s.win.top + dy, alpha);
+        }
     });
+}
+
+/// Draws the last picture into a bar that has a backdrop: an ordinary window,
+/// painted like any other, with DWM's blur showing through wherever the
+/// picture is clear.
+fn on_paint(hwnd: HWND) {
+    let Some(index) = index_of(hwnd) else { return };
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = BeginPaint(hwnd, &mut ps);
+        // Black first: in a window whose frame is extended, that is the glass
+        // DWM shows its backdrop through. Whatever the picture draws on top
+        // hides the backdrop, which is exactly what the icons and text should
+        // do; the bar's own background is left black on purpose, so what the
+        // user sees behind the icons is the backdrop itself.
+        let black = CreateSolidBrush(COLORREF(0));
+        if !black.is_invalid() {
+            FillRect(hdc, &ps.rcPaint, black);
+            let _ = DeleteObject(HGDIOBJ(black.0));
+        }
+        read_at(index, |s| {
+            if let Some(pix) = &s.frame {
+                canvas::paint_pixmap(pix, hdc, 0, 0);
+            }
+        });
+        let _ = EndPaint(hwnd, &ps);
+    }
 }
 
 /// Removes every bar, releasing the screen space they reserved.
@@ -1985,6 +2064,12 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
+        WM_PAINT if read(|s| s.backdrop.on()).unwrap_or(false) => {
+            on_paint(hwnd);
+            LRESULT(0)
+        }
+        // DWM paints the backdrop; filling the background would cover it.
+        WM_ERASEBKGND if read(|s| s.backdrop.on()).unwrap_or(false) => LRESULT(1),
         WM_DPICHANGED => {
             reposition();
             LRESULT(0)

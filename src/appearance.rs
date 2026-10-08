@@ -69,6 +69,44 @@ pub enum AutoHide {
     Fade,
 }
 
+/// Windows 11's blurred backdrop behind the bar, instead of the plain
+/// translucency a layered window gives.
+///
+/// This is not a colour but a different kind of window: DWM draws the
+/// backdrop behind the whole window and the bar is painted over it. Windows
+/// 10 has no such backdrop, and nor do Windows 11 builds before 22H2, so
+/// `win::backdrop` falls back to `Off` where it isn't available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Backdrop {
+    /// Plain translucency: the bar is a layered window, as it has always been.
+    #[default]
+    Off,
+    /// Mica: the desktop wallpaper, heavily blurred and barely moving.
+    Mica,
+    /// Acrylic: what is behind the bar, blurred and tinted. More obvious than
+    /// Mica, and it follows windows moving underneath.
+    Acrylic,
+    /// Mica Alt: like Mica, with more of the wallpaper's colour.
+    MicaAlt,
+}
+
+impl Backdrop {
+    /// What `DWMWA_SYSTEMBACKDROP_TYPE` wants (`DWMSBT_*`).
+    pub fn dwm_value(self) -> u32 {
+        match self {
+            Backdrop::Off => 1,     // DWMSBT_NONE
+            Backdrop::Mica => 2,    // DWMSBT_MAINWINDOW
+            Backdrop::Acrylic => 3, // DWMSBT_TRANSIENTWINDOW
+            Backdrop::MicaAlt => 4, // DWMSBT_TABBEDWINDOW
+        }
+    }
+
+    pub fn on(self) -> bool {
+        self != Backdrop::Off
+    }
+}
+
 /// The mark under apps that have a window open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -185,6 +223,9 @@ pub struct Appearance {
     pub background: Option<Rgba>,
     /// Background opacity in percent (100 = solid). Icons and text stay solid.
     pub opacity: u8,
+    /// Windows 11's blurred backdrop behind the bar, instead of plain
+    /// translucency.
+    pub backdrop: Backdrop,
     /// Border colour. `None`: a faint line in the theme's text colour.
     pub border: Option<Rgba>,
     /// Border thickness in DIPs (0 = none).
@@ -241,6 +282,7 @@ impl Default for Appearance {
             accent: None,
             background: None,
             opacity: 87,
+            backdrop: Backdrop::Off,
             border: None,
             border_width: 1,
             corner_radius: 0,
@@ -285,8 +327,23 @@ pub struct Colors {
 }
 
 pub const DEFAULT_ACCENT: Rgba = Rgba::rgb(0x60, 0xCD, 0xFF);
+/// What DWM shows its backdrop through, inside a window whose frame has been
+/// extended: nothing drawn at all. The window is cleared to black first and
+/// the picture laid over it, so a pixel the picture leaves alone keeps the
+/// black and the zero alpha that together mean glass (see `win::canvas`).
+pub const GLASS: Rgba = Rgba { r: 0, g: 0, b: 0, a: 0 };
 const DARK_BG: Rgba = Rgba::rgb(0x20, 0x20, 0x20);
 const LIGHT_BG: Rgba = Rgba::rgb(0xF3, 0xF3, 0xF3);
+
+impl Colors {
+    /// The palette for a bar with a backdrop behind it. Only the background
+    /// changes: it becomes the glass DWM shows its blur through, since GDI
+    /// has no alpha channel to tint a backdrop with. Icons, text, the border
+    /// and the hover and pressed fills are drawn over it as usual.
+    pub fn over_backdrop(&self) -> Colors {
+        Colors { background: GLASS, ..*self }
+    }
+}
 
 impl Appearance {
     /// Whether the dark palette applies, given whether Windows is in dark mode.
@@ -391,10 +448,48 @@ impl Appearance {
     pub fn for_high_contrast(&self) -> Appearance {
         Appearance {
             opacity: 100,
+            // High contrast asks for flat, solid colours: no blurred backdrop.
+            backdrop: Backdrop::Off,
             border_width: self.border_width.max(1),
             flyout_border_width: self.flyout_border_width.max(1),
             flyout_shadow: FlyoutShadow::Off,
             indicator: if self.indicator == Indicator::Image { Indicator::Badge } else { self.indicator },
+            ..self.clone()
+        }
+    }
+
+    /// What the bar should look like with a backdrop behind it.
+    ///
+    /// DWM draws a backdrop behind the *whole window*, which settles three
+    /// things that the plain layered bar does for itself:
+    ///
+    /// - the bar's own fill can only tint the blur; at the usual opacity it
+    ///   would hide it entirely;
+    /// - the floating margin was clear space inside the window, and a
+    ///   backdrop would fill it with a blurred band around the bar, so the
+    ///   bar sits flush and takes the whole window;
+    /// - fading needs a layered window, which is the one thing a backdrop
+    ///   cannot be, so *Fade* auto-hide slides instead.
+    ///
+    /// The corners stay as they are: DWM rounds the window itself to match
+    /// (see `win::backdrop`).
+    ///
+    /// `Off` — and a Windows that can't draw one — leaves the look alone, so
+    /// nothing changes for anyone who hasn't asked for a backdrop.
+    pub fn over_backdrop(&self, available: bool) -> Appearance {
+        if !available || !self.backdrop.on() {
+            return Appearance { backdrop: Backdrop::Off, ..self.clone() };
+        }
+        Appearance {
+            // The backdrop is the background. GDI has no alpha to tint it
+            // with (see `Colors::over_backdrop`), so the fill goes entirely.
+            opacity: 0,
+            margin: 0,
+            dock_width: DockWidth::Full,
+            auto_hide: match self.auto_hide {
+                AutoHide::Fade => AutoHide::Slide,
+                other => other,
+            },
             ..self.clone()
         }
     }
@@ -413,6 +508,82 @@ impl Appearance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_backdrop_replaces_the_bars_own_fill() {
+        let a = Appearance { opacity: 95, backdrop: Backdrop::Acrylic, ..Default::default() };
+        let over = a.over_backdrop(true);
+        assert_eq!(over.opacity, 0, "any fill at all would hide the blur");
+        assert_eq!(over.backdrop, Backdrop::Acrylic);
+    }
+
+    #[test]
+    fn the_background_becomes_the_glass_dwm_shows_through() {
+        let colors = Appearance::default().colors(true);
+        let glass = colors.over_backdrop();
+        assert_eq!(glass.background, GLASS, "nothing drawn is what DWM shows its backdrop through");
+        assert_eq!(glass.background.a, 0, "and that means fully clear, not black paint");
+        assert_eq!(glass.text, colors.text, "everything else is drawn as usual");
+        assert_eq!(glass.accent, colors.accent);
+        assert_eq!(glass.border, colors.border);
+    }
+
+    #[test]
+    fn a_backdrop_fills_the_window_so_the_bar_sits_flush() {
+        let a = Appearance { backdrop: Backdrop::Mica, margin: 12, dock_width: DockWidth::Fit, ..Default::default() };
+        let over = a.over_backdrop(true);
+        assert_eq!(over.margin, 0, "a margin would be a blurred band around the bar");
+        assert_eq!(over.dock_width, DockWidth::Full);
+    }
+
+    #[test]
+    fn fading_becomes_sliding_because_a_backdrop_cannot_fade() {
+        let a = Appearance { backdrop: Backdrop::Acrylic, auto_hide: AutoHide::Fade, ..Default::default() };
+        assert_eq!(a.over_backdrop(true).auto_hide, AutoHide::Slide);
+        let sliding = Appearance { backdrop: Backdrop::Acrylic, auto_hide: AutoHide::Slide, ..Default::default() };
+        assert_eq!(sliding.over_backdrop(true).auto_hide, AutoHide::Slide);
+        let never = Appearance { backdrop: Backdrop::Acrylic, auto_hide: AutoHide::Off, ..Default::default() };
+        assert_eq!(never.over_backdrop(true).auto_hide, AutoHide::Off);
+    }
+
+    #[test]
+    fn a_fading_bar_without_a_backdrop_still_fades() {
+        let a = Appearance { backdrop: Backdrop::Off, auto_hide: AutoHide::Fade, margin: 12, ..Default::default() };
+        let over = a.over_backdrop(true);
+        assert_eq!(over.auto_hide, AutoHide::Fade);
+        assert_eq!(over.margin, 12);
+    }
+
+    #[test]
+    fn without_a_backdrop_the_look_is_untouched() {
+        let a = Appearance { opacity: 95, backdrop: Backdrop::Off, ..Default::default() };
+        assert_eq!(a.over_backdrop(true), a, "nothing changes for anyone who asked for none");
+    }
+
+    #[test]
+    fn a_backdrop_windows_cant_draw_falls_back_to_none() {
+        let a = Appearance { opacity: 95, backdrop: Backdrop::Acrylic, ..Default::default() };
+        let over = a.over_backdrop(false);
+        assert_eq!(over.backdrop, Backdrop::Off, "Windows 10 gets the plain layered bar");
+        assert_eq!(over.opacity, 95, "and its own opacity back");
+    }
+
+    #[test]
+    fn high_contrast_turns_the_backdrop_off() {
+        let a = Appearance { backdrop: Backdrop::Acrylic, ..Default::default() };
+        assert_eq!(a.for_high_contrast().backdrop, Backdrop::Off);
+    }
+
+    #[test]
+    fn each_backdrop_asks_dwm_for_its_own_kind() {
+        let values: Vec<u32> = [Backdrop::Off, Backdrop::Mica, Backdrop::Acrylic, Backdrop::MicaAlt]
+            .iter()
+            .map(|b| b.dwm_value())
+            .collect();
+        assert_eq!(values, [1, 2, 3, 4], "DWMSBT_NONE, MAINWINDOW, TRANSIENTWINDOW, TABBEDWINDOW");
+        assert!(!Backdrop::Off.on());
+        assert!(Backdrop::Mica.on() && Backdrop::Acrylic.on() && Backdrop::MicaAlt.on());
+    }
 
     #[test]
     fn high_contrast() {

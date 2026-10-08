@@ -36,6 +36,8 @@ const AUTO_HIDE: u16 = 19;
 const FLYOUT_CLOSING: u16 = 26;
 // Which screens carry a bar; its list is built from the monitors attached now.
 const SCREENS: u16 = 27;
+// Windows 11's blurred backdrop; greyed out where Windows can't draw one.
+const BACKDROP: u16 = 28;
 // The indicator picture's button, and its Remove button (+100).
 const INDICATOR_IMAGE: u16 = 24;
 // The All button's picture, and its "Use text" button (+100).
@@ -136,7 +138,7 @@ enum Row {
 }
 
 /// Two columns: general look and the flyouts on the left, the bar on the right.
-const ROWS: [Row; 35] = [
+const ROWS: [Row; 36] = [
     Row::Heading("General"),
     Row::Combo(THEME, "Theme", &["Windows default", "Dark", "Light"]),
     Row::Colour(ACCENT),
@@ -170,6 +172,7 @@ const ROWS: [Row; 35] = [
     ),
     Row::Screens(SCREENS, "Screens"),
     Row::Combo(DOCK, "Bar width", &["Full screen width", "Fit to icons (floating dock)"]),
+    Row::Combo(BACKDROP, "Backdrop (Windows 11)", &["Off (plain translucency)", "Mica", "Acrylic", "Mica Alt"]),
     Row::Combo(AUTO_HIDE, "Auto-hide", &["Never", "Slide away", "Fade away"]),
     Row::Slider(AUTO_HIDE_DELAY),
     Row::Colour(BORDER),
@@ -472,6 +475,11 @@ fn load() {
         );
     }
     sel(POSITION, app::with(|s| s.cfg.settings.strip_edge) as usize);
+    sel(BACKDROP, a.backdrop as usize);
+    // Windows 10, and Windows 11 before 22H2, have no backdrop to draw.
+    unsafe {
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctl(BACKDROP), super::backdrop::available());
+    }
     sel(
         SCREENS,
         crate::monitors::option_of(&app::with(|s| s.cfg.settings.strip_monitors.clone()), &super::monitors::all()),
@@ -933,6 +941,12 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     app::with(|s| s.cfg.settings.strip_monitors = want);
                     strip::apply_settings();
                     save_soon();
+                }
+                (BACKDROP, CBN_SELCHANGE) => {
+                    use crate::appearance::Backdrop;
+                    let i = combo(id);
+                    let kind = [Backdrop::Off, Backdrop::Mica, Backdrop::Acrylic, Backdrop::MicaAlt][i.min(3)];
+                    change(|a, _| a.backdrop = kind);
                 }
                 (POSITION, CBN_SELCHANGE) => {
                     use crate::config::StripEdge;

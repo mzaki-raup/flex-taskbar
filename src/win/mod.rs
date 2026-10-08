@@ -7,6 +7,7 @@ mod appearancewin;
 mod appmenu;
 mod arrangewin;
 mod autostart;
+mod backdrop;
 mod backupwin;
 mod canvas;
 mod catalog;
