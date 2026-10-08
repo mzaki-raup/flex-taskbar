@@ -39,6 +39,7 @@ fn write_resource_script() -> std::path::PathBuf {
     // Manager. `authors` in Cargo.toml records who wrote it; executables have
     // no author field of their own.
     let company = "Procybro Solutions";
+    let copyright = "(C) 2026 Procybro Solutions";
     // FILEVERSION wants four numbers; a package version is three.
     let mut parts: Vec<u16> = version.split('.').map(|p| p.parse().unwrap_or(0)).collect();
     parts.resize(4, 0);
@@ -64,6 +65,7 @@ BEGIN
             VALUE "FileDescription", "{description}"
             VALUE "FileVersion", "{major}.{minor}.{patch}.{build}"
             VALUE "InternalName", "FlexTaskbar"
+            VALUE "LegalCopyright", "{copyright}"
             VALUE "OriginalFilename", "FlexTaskbar.exe"
             VALUE "ProductName", "FlexTaskbar"
             VALUE "ProductVersion", "{version}"
