@@ -135,7 +135,8 @@ original FlexTaskbar:
   On the left or right edge the bar stands upright: *All* at the top, icons
   down the middle, *Link* and ⚙ at the bottom.
 - **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
-  right-click an app to pin or unpin it).
+  right-click an app to pin or unpin it). A row too narrow for a long name
+  ends in an ellipsis and shows the full name as a tooltip.
   - **Sort:** the *Sort* button at the top orders the list by name (A–Z or
     Z–A), by type (desktop programs, Store apps, web apps, package managers'
     apps, custom apps), by category (a heading per root category, an app filed
@@ -172,7 +173,10 @@ original FlexTaskbar:
   it, on the screen side: above a bottom bar, below a top bar, to the right of
   a left bar and to the left of a right bar:
   - its **subcategories and apps as tiles**, each a large icon with the name
-    underneath. Subcategories come first and carry the same arrow badge, like
+    underneath, wrapped over **two lines** and ending in an ellipsis when it
+    is longer than that (a long name never spills past its tile). Resting the
+    pointer on a tile shows the **full name as a tooltip**, as on the bar.
+    Subcategories come first and carry the same arrow badge, like
     categories on the bar. The flyout runs the same way as the bar: on a top
     or bottom bar it is a **horizontal strip** (4 tiles per row by default,
     wrapping into more rows); on a left or right bar it is a **vertical
@@ -278,6 +282,12 @@ original FlexTaskbar:
   - Let go **on a category's button** (it gets a ring) and the app is filed
     in that category. The same works on a **subcategory's tile** in an open
     flyout.
+  - Let go **between two tiles of a category flyout** (a caret in the accent
+    colour shows where) and the app moves there: that is how the tiles of a
+    flyout are **rearranged**. Dropped in another category's flyout it joins
+    that category in that place. Smart categories fill themselves, so their
+    tiles can't be rearranged, and the *All* list and folders keep their own
+    order. The flyouts stay open, so several tiles can be moved in a row.
   - The app stays wherever else it was filed; an app can be in several
     categories.
   - Letting go anywhere else, or pressing Esc, cancels.

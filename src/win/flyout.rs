@@ -114,8 +114,22 @@ struct Drag {
     active: bool,
     /// The subcategory tile it would be filed in: (level, element).
     target: Option<(usize, usize)>,
+    /// Where it would land among a category flyout's tiles.
+    insert: Option<Insert>,
     /// Esc was pressed: nothing happens until the button is let go.
     cancelled: bool,
+}
+
+/// Where a dragged app would be dropped among the tiles of a category
+/// flyout, so the tiles can be rearranged by dragging one between two
+/// others.
+#[derive(Clone, PartialEq)]
+struct Insert {
+    level: usize,
+    /// The app it would go in front of (`None`: last).
+    before: Option<String>,
+    /// The caret marking the place, in the level's content pixels.
+    caret: RECT,
 }
 
 thread_local! {
@@ -142,11 +156,21 @@ struct Placed {
 
 struct Level {
     hwnd: HWND,
+    /// Shows an app's name in full when the pointer rests on its tile (the
+    /// tile itself only has room for a couple of lines).
+    tooltip: HWND,
+    /// How many tools the tooltip has, to replace them when this level is
+    /// laid out again.
+    tools: usize,
     view: View,
     /// For levels above 0: the index of the subcategory tile in the level
     /// below that opened this one.
     source: Option<usize>,
     elems: Vec<Placed>,
+    /// Tile names broken into the lines they are drawn as, worked out when
+    /// the level is laid out rather than on every frame (one per element;
+    /// empty for everything that isn't a tile).
+    labels: Vec<String>,
     hover: Option<usize>,
     /// Window rectangle on screen.
     win: RECT,
@@ -383,12 +407,16 @@ fn create_window() -> Option<HWND> {
 
 fn push_level(view: View, source: Option<usize>) -> bool {
     let Some(hwnd) = create_window() else { return false };
+    let tooltip = ui::tooltip_for(hwnd);
     with(|f| {
         f.levels.push(Level {
             hwnd,
+            tooltip,
+            tools: 0,
             view,
             source,
             elems: Vec::new(),
+            labels: Vec::new(),
             hover: None,
             win: RECT::default(),
             tracking_leave: false,
@@ -706,7 +734,7 @@ fn rebuild(idx: usize) {
         return;
     };
 
-    let Some((look, dpi, font)) = with(|f| (f.look.clone(), f.dpi, f.font)) else { return };
+    let Some((look, dpi, font, small)) = with(|f| (f.look.clone(), f.dpi, f.font, f.small)) else { return };
     let s = |v: i32| scale(v, dpi);
     let border = if look.flyout_border_width > 0 { s(look.flyout_border_width as i32).max(1) } else { 0 };
     let pad = s(4) + border;
@@ -886,9 +914,20 @@ fn rebuild(idx: usize) {
             SetTimer(Some(b), TIMER_ANIM, ANIM_FRAME_MS, None);
         }
     }
+    // Tile names, wrapped to the room under the icon.
+    let labels: Vec<String> = elems
+        .iter()
+        .map(|p| match p.elem {
+            Elem::Tile(_) | Elem::Sub(_) | Elem::Folder(_) | Elem::File(_) => {
+                canvas::wrap(&p.text, small, ui::rect_w(&p.rect) - 2 * s(4), 2)
+            }
+            _ => String::new(),
+        })
+        .collect();
     let hwnd = with(|f| {
         let l = &mut f.levels[idx];
         l.elems = elems;
+        l.labels = labels;
         l.win = win;
         l.pad = pad;
         if let Some((total, visible, first)) = all_rows {
@@ -906,6 +945,29 @@ fn rebuild(idx: usize) {
             let _ = SetWindowPos(hw, Some(HWND_TOPMOST), win.left - pad.0, win.top - pad.1, ww, wh, SWP_NOACTIVATE);
             let _ = ShowWindow(hw, SW_SHOWNOACTIVATE);
         }
+    }
+    // A tooltip with the full name over every app (subcategories and folders
+    // open on hover, so a tooltip would only get in their way). The window is
+    // the shadow's padding larger than the content the rectangles are in.
+    let tools = with(|f| {
+        let l = f.levels.get_mut(idx)?;
+        let (pad, hwnd) = (l.pad, l.hwnd);
+        let tools: Vec<(String, RECT)> = l
+            .elems
+            .iter()
+            .filter(|p| matches!(p.elem, Elem::Tile(_) | Elem::Row(_) | Elem::File(_)))
+            .map(|p| {
+                let r = p.rect;
+                let rect =
+                    RECT { left: r.left + pad.0, top: r.top + pad.1, right: r.right + pad.0, bottom: r.bottom + pad.1 };
+                (p.text.clone(), rect)
+            })
+            .collect();
+        Some((l.tooltip, hwnd, std::mem::replace(&mut l.tools, tools.len()), tools))
+    })
+    .flatten();
+    if let Some((tooltip, owner, old, tools)) = tools {
+        ui::set_tools(tooltip, owner, old, &tools);
     }
     render(idx);
 }
@@ -990,10 +1052,13 @@ fn render(idx: usize) {
                         let under = RECT { left: x, top: y, right: x + size, bottom: y + size + s(5) };
                         super::indicator::running(&mut cv, &f.look, &c, Edge::Bottom, under, d);
                     }
-                    // Two lines reserved for the name, as in the original.
+                    // Two lines reserved for the name, as in the original. The
+                    // wrapping is worked out here: GDI would clip a long name
+                    // mid-letter instead of ending it with an ellipsis.
                     let trc =
                         RECT { left: rc.left + s(4), top: y + size + s(4), right: rc.right - s(4), bottom: rc.bottom };
-                    cv.text(&p.text, trc, f.small, c.text, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+                    let name = l.labels.get(i).filter(|s| !s.is_empty()).unwrap_or(&p.text);
+                    cv.text(name, trc, f.small, c.text, DT_CENTER | DT_WORDBREAK);
                 }
                 Elem::Row(id) => {
                     if super::running::is_running(id) {
@@ -1055,6 +1120,14 @@ fn render(idx: usize) {
                 }
             }
         }
+        // Where a dragged app would land among these tiles.
+        if let Some(rc) = DRAG
+            .with(|d| d.borrow().as_ref().and_then(|d| d.insert.as_ref().filter(|i| i.level == idx).map(|i| i.caret)))
+        {
+            let (cw, ch) = (ui::rect_w(&rc) as f32, ui::rect_h(&rc) as f32);
+            cv.fill_round_rect(rc.left as f32, rc.top as f32, cw, ch, cw.min(ch) / 2.0, c.accent);
+        }
+
         // A thin scroll indicator for a long All list.
         let (total, visible) = l.rows;
         if let View::All { first_row } = l.view
@@ -2005,6 +2078,63 @@ fn sub_at(pt: POINT) -> Option<(usize, usize, u64)> {
     }
 }
 
+/// Where an app held at the screen point `pt` would be dropped among the
+/// tiles of the category flyout under it: in front of the tile whose half
+/// the pointer is in, or last. Nothing for the All list, a folder, or a
+/// smart category (which fills itself).
+fn insert_at(pt: POINT) -> Option<Insert> {
+    with(|f| {
+        let dpi = f.dpi;
+        let s = |v: i32| scale(v, dpi);
+        let (level, l) = f
+            .levels
+            .iter()
+            .enumerate()
+            .find(|(_, l)| pt.x >= l.win.left && pt.x < l.win.right && pt.y >= l.win.top && pt.y < l.win.bottom)?;
+        let View::Category(id) = l.view else { return None };
+        if app::is_smart(id) {
+            return None;
+        }
+        let tiles: Vec<(RECT, &str)> = l
+            .elems
+            .iter()
+            .filter_map(|p| match &p.elem {
+                Elem::Tile(app) => Some((p.rect, app.as_str())),
+                _ => None,
+            })
+            .collect();
+        let (first, _) = *tiles.first()?;
+        let (x, y) = (pt.x - l.win.left, pt.y - l.win.top);
+        // A side bar's flyout is one column of tiles, stacked downwards;
+        // otherwise they fill across in rows.
+        let column = tiles.iter().all(|(r, _)| r.left == first.left);
+        // The nearest tile, counting the other axis heavily so the row (or
+        // column) the pointer is in wins.
+        let near = (0..tiles.len()).min_by_key(|i| {
+            let r = tiles[*i].0;
+            let dx = (x - (r.left + r.right) / 2).abs();
+            let dy = (y - (r.top + r.bottom) / 2).abs();
+            if column { dy + dx / 4 } else { dx + dy * 4 }
+        })?;
+        let rc = tiles[near].0;
+        let past = if column { y > (rc.top + rc.bottom) / 2 } else { x > (rc.left + rc.right) / 2 };
+        let at = near + usize::from(past);
+        let before = tiles.get(at).map(|(_, app)| (*app).to_string());
+        // The caret sits in the gap the app would go into.
+        let (r, end) = (tiles.get(at).map_or(rc, |(r, _)| *r), at >= tiles.len());
+        let (gap, thick) = (s(1), s(3));
+        let caret = if column {
+            let top = if end { r.bottom + gap } else { r.top - gap - thick };
+            RECT { left: r.left + s(4), top, right: r.right - s(4), bottom: top + thick }
+        } else {
+            let left = if end { r.right + gap } else { r.left - gap - thick };
+            RECT { left, top: r.top + s(4), right: left + thick, bottom: r.bottom - s(4) }
+        };
+        Some(Insert { level, before, caret })
+    })
+    .flatten()
+}
+
 /// The pointer moved with an app held: start dragging once it has gone far
 /// enough, then show where it would land. Returns whether a drag is under way.
 fn drag_moved() -> bool {
@@ -2062,13 +2192,28 @@ fn drag_moved() -> bool {
     super::dragimage::move_to(pt);
     let on_bar = strip::app_drag_over(Some(pt));
     let target = if on_bar { None } else { sub_at(pt).map(|(l, i, _)| (l, i)) };
-    let before = DRAG.with(|d| d.borrow_mut().as_mut().map(|d| std::mem::replace(&mut d.target, target))).flatten();
-    if before != target {
-        for (l, _) in before.into_iter().chain(target) {
+    // Not over a subcategory to be filed in: it can be dropped between the
+    // tiles instead, which rearranges them.
+    let insert = (!on_bar && target.is_none()).then(|| insert_at(pt)).flatten();
+    let (was_target, was_insert) = DRAG
+        .with(|d| {
+            d.borrow_mut()
+                .as_mut()
+                .map(|d| (std::mem::replace(&mut d.target, target), std::mem::replace(&mut d.insert, insert.clone())))
+        })
+        .unwrap_or((None, None));
+    if was_target != target {
+        for (l, _) in was_target.into_iter().chain(target) {
             render(l);
         }
     }
-    let cursor = if on_bar || target.is_some() { IDC_ARROW } else { IDC_NO };
+    if was_insert != insert {
+        let levels: Vec<usize> = was_insert.iter().chain(insert.iter()).map(|i| i.level).collect();
+        for l in levels {
+            render(l);
+        }
+    }
+    let cursor = if on_bar || target.is_some() || insert.is_some() { IDC_ARROW } else { IDC_NO };
     unsafe {
         let _ = SetCursor(LoadCursorW(None, cursor).ok());
     }
@@ -2098,6 +2243,19 @@ fn drag_released(idx: usize, x: i32, y: i32) {
         let _ = GetCursorPos(&mut pt);
     }
     let sub = sub_at(pt).map(|(_, _, id)| id);
+    // Dropped between the tiles of a category flyout: it moves there (or
+    // joins that category), and the flyouts stay open to show it.
+    if sub.is_none()
+        && let Some(ins) = d.insert
+        && let Some(cat) = level_category(ins.level)
+    {
+        strip::app_drag_over(None);
+        if app::with(|s| crate::tree::insert_app_at(&mut s.cfg.categories, cat, &d.app_id, ins.before.as_deref())) {
+            app::save();
+        }
+        refresh();
+        return;
+    }
     close();
     if strip::app_drop(pt, &d.app_id) {
         return;
@@ -2110,16 +2268,16 @@ fn drag_released(idx: usize, x: i32, y: i32) {
 
 /// Esc during a drag: put everything back; letting go then does nothing.
 fn cancel_drag() -> bool {
-    let target = DRAG.with(|d| {
+    let marks = DRAG.with(|d| {
         let mut d = d.borrow_mut();
         let d = d.as_mut().filter(|d| d.active && !d.cancelled)?;
         d.cancelled = true;
-        Some(d.target.take())
+        Some((d.target.take(), d.insert.take()))
     });
-    let Some(target) = target else { return false };
+    let Some((target, insert)) = marks else { return false };
     super::dragimage::hide();
     strip::app_drag_over(None);
-    if let Some((l, _)) = target {
+    for l in target.map(|(l, _)| l).into_iter().chain(insert.map(|i| i.level)) {
         render(l);
     }
     true
@@ -2132,7 +2290,7 @@ fn end_drag() {
     if d.active {
         super::dragimage::hide();
         strip::app_drag_over(None);
-        if let Some((l, _)) = d.target {
+        for l in d.target.map(|(l, _)| l).into_iter().chain(d.insert.map(|i| i.level)) {
             render(l);
         }
     }
@@ -2141,6 +2299,15 @@ fn end_drag() {
             let _ = ReleaseCapture();
         }
     }
+}
+
+/// The category a level shows, if it shows one.
+fn level_category(level: usize) -> Option<u64> {
+    with(|f| match f.levels.get(level)?.view {
+        View::Category(id) => Some(id),
+        _ => None,
+    })
+    .flatten()
 }
 
 fn base_or(level: usize) -> HWND {
@@ -2317,6 +2484,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                         start,
                         active: false,
                         target: None,
+                        insert: None,
                         cancelled: false,
                     })
                 });

@@ -205,6 +205,48 @@ pub fn image_list(size: i32, grow: i32) -> windows::Win32::UI::Controls::HIMAGEL
     }
 }
 
+/// Creates a tooltip control owned by `owner`, which it subclasses to catch
+/// the pointer resting on one of its tools (see [`set_tools`]).
+pub fn tooltip_for(owner: HWND) -> HWND {
+    use windows::Win32::UI::Controls::{TTS_ALWAYSTIP, TTS_NOPREFIX};
+    child_popup(owner, "tooltips_class32", WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX))
+}
+
+/// Replaces the `old` tools of a tooltip control with one per (text, owner
+/// client rectangle) pair. Returns how many there are now, to pass back as
+/// `old` next time.
+pub fn set_tools(tooltip: HWND, owner: HWND, old: usize, tools: &[(String, RECT)]) -> usize {
+    use windows::Win32::UI::Controls::{TTF_SUBCLASS, TTM_ADDTOOLW, TTM_DELTOOLW, TTTOOLINFOW};
+    if tooltip.is_invalid() {
+        return 0;
+    }
+    unsafe {
+        for id in 0..old {
+            let ti = TTTOOLINFOW {
+                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+                hwnd: owner,
+                uId: id + 1,
+                ..Default::default()
+            };
+            SendMessageW(tooltip, TTM_DELTOOLW, Some(WPARAM(0)), Some(LPARAM(&ti as *const _ as isize)));
+        }
+        for (id, (text, rect)) in tools.iter().enumerate() {
+            let mut text = wide(text);
+            let ti = TTTOOLINFOW {
+                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+                uFlags: TTF_SUBCLASS,
+                hwnd: owner,
+                uId: id + 1,
+                rect: *rect,
+                lpszText: windows::core::PWSTR(text.as_mut_ptr()),
+                ..Default::default()
+            };
+            SendMessageW(tooltip, TTM_ADDTOOLW, Some(WPARAM(0)), Some(LPARAM(&ti as *const _ as isize)));
+        }
+    }
+    tools.len()
+}
+
 /// Creates an owned top-level popup of a system class (e.g. a tooltip window).
 pub fn child_popup(owner: HWND, class: &str, style: WINDOW_STYLE) -> HWND {
     use windows::Win32::UI::WindowsAndMessaging::{CW_USEDEFAULT, WS_EX_TOPMOST, WS_POPUP};
