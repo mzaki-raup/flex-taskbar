@@ -325,7 +325,12 @@ original FlexTaskbar:
   Windows are matched to apps by their AppUserModelID (Store apps, Chrome and
   Edge web apps) or by the program they run, which the app list reads from
   each Start Menu shortcut. A web app's window counts only for that web app,
-  not for the browser. Windows tells FlexTaskbar when windows open and close
+  not for the browser; an app known only by the program it starts still
+  matches that program's window even when the window carries an id of its
+  own. A few of Windows' own apps are listed under an id their windows don't
+  carry at all — File Explorer is `Microsoft.Windows.Explorer` in the app
+  list, but its windows are plain `explorer.exe` windows — and are matched by
+  their program instead. Windows tells FlexTaskbar when windows open and close
   (it registers for the same notifications the taskbar gets), so the marks
   follow without any polling.
 
