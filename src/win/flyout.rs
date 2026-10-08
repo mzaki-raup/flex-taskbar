@@ -2190,6 +2190,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         {
             r
         }
+        (super::access::WM_APP_ACC_TREE, _) => super::access::tree_message(super::access::Source::Flyout, hwnd),
         (super::access::WM_APP_ACC_PRESS, Some(idx)) => {
             // A screen reader pressed it: as if clicked.
             activate(idx, wparam.0);

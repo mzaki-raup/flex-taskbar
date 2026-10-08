@@ -128,8 +128,8 @@ pub fn ask(owner: HWND, title: &str, label: &str, initial: &str) -> Option<Strin
         } else {
             orc = ui::work_area_at_cursor();
         }
-        let left = orc.left + (ui::rect_w(&orc) - ww) / 2;
-        let top = orc.top + (ui::rect_h(&orc) - wh) / 3;
+        let (left, top) =
+            ui::keep_on_screen(orc.left + (ui::rect_w(&orc) - ww) / 2, orc.top + (ui::rect_h(&orc) - wh) / 3, ww, wh);
         let _ = SetWindowPos(hwnd, None, left, top, ww, wh, SWP_NOZORDER);
         STATE.with(|st| *st.borrow_mut() = Some((edit, None)));
         let _ = EnableWindow(owner, false);

@@ -169,6 +169,24 @@ pub fn work_area_at_cursor() -> RECT {
     }
 }
 
+/// Moves a `w`×`h` window at `x`,`y` back inside the work area of the monitor
+/// it lands on. A dialog placed over its owner would otherwise hang off the
+/// screen when that owner is the bar sitting against an edge, taking its
+/// buttons with it.
+pub fn keep_on_screen(x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
+    unsafe {
+        let centre = POINT { x: x + w / 2, y: y + h / 2 };
+        let mon = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(mon, &mut mi);
+        let wa = mi.rcWork;
+        // A window too big for the work area starts at its top left corner.
+        let x = x.min(wa.right - w).max(wa.left);
+        let y = y.min(wa.bottom - h).max(wa.top);
+        (x, y)
+    }
+}
+
 /// "No image" for list and tree view items: index 0 of every image list made
 /// by [`image_list`] is a transparent blank. (-1 would be I_IMAGECALLBACK, and
 /// tree views don't honour I_IMAGENONE.)

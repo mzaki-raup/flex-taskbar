@@ -9,20 +9,34 @@
 //! Nothing is kept: every call asks the bar or the flyout for its buttons as
 //! they are now, so it can never be out of date. A screen reader's "press"
 //! is posted back to the window, so it runs like a click, outside the call.
+//!
+//! Windows serves these calls on an RPC worker thread, not the thread that
+//! owns the window, so the answer is fetched with [`WM_APP_ACC_TREE`]: the
+//! window's own thread builds the list and hands it back. The bar and the
+//! flyouts keep their state in thread-locals, which that worker thread cannot
+//! see — asking it directly there would describe every window as empty.
 
 use windows::Win32::Foundation::{E_INVALIDARG, E_NOTIMPL, HWND, LPARAM, LRESULT, RECT, S_FALSE, WPARAM};
 use windows::Win32::System::Com::{DISPATCH_FLAGS, DISPPARAMS, EXCEPINFO, IDispatch, IDispatch_Impl, ITypeInfo};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::Variant::{VARIANT, VT_I4};
 use windows::Win32::UI::Accessibility::{
     CreateStdAccessibleObject, IAccessible, IAccessible_Impl, LresultFromObject, NAVDIR_FIRSTCHILD, NAVDIR_LASTCHILD,
     NAVDIR_NEXT, NAVDIR_PREVIOUS, NotifyWinEvent,
 };
-use windows::Win32::UI::WindowsAndMessaging::{EVENT_OBJECT_FOCUS, OBJID_CLIENT, OBJID_WINDOW, PostMessageW, WM_APP};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EVENT_OBJECT_FOCUS, GetWindowThreadProcessId, OBJID_CLIENT, OBJID_WINDOW, PostMessageW, SMTO_ABORTIFHUNG,
+    SendMessageTimeoutW, WM_APP,
+};
 use windows::core::{BSTR, GUID, Interface, PCWSTR, Result, implement};
 
 /// Posted to the window when a screen reader presses child `wparam`
 /// (counted from 0).
 pub const WM_APP_ACC_PRESS: u32 = WM_APP + 31;
+
+/// Sent to the window to build its [`Tree`] on the thread that owns it. The
+/// window answers with a `Box::into_raw(Box<Tree>)`, which the sender owns.
+pub const WM_APP_ACC_TREE: u32 = WM_APP + 32;
 
 /// One button, tile, row or label, as a screen reader sees it.
 pub struct Element {
@@ -53,11 +67,55 @@ pub enum Source {
     Flyout,
 }
 
-fn tree(source: Source, hwnd: HWND) -> Tree {
+/// The window's buttons as they are now. Only call this on the thread that
+/// owns `hwnd`; everywhere else goes through [`tree`].
+pub fn build_tree(source: Source, hwnd: HWND) -> Tree {
     match source {
         Source::Bar => super::strip::accessible(),
         Source::Flyout => super::flyout::accessible(hwnd),
     }
+}
+
+/// The window's buttons, asked for on the thread that owns it.
+fn tree(source: Source, hwnd: HWND) -> Tree {
+    let owner = unsafe { GetWindowThreadProcessId(hwnd, None) };
+    if owner == unsafe { GetCurrentThreadId() } {
+        return build_tree(source, hwnd);
+    }
+    let mut answer = 0usize;
+    // A timeout rather than a plain send: a hung UI thread must not hang the
+    // screen reader with it.
+    let sent = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_APP_ACC_TREE,
+            WPARAM(0),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            ACC_TREE_TIMEOUT_MS,
+            Some(&mut answer),
+        )
+    };
+    if sent.0 == 0 || answer == 0 {
+        return empty_tree(source);
+    }
+    *unsafe { Box::from_raw(answer as *mut Tree) }
+}
+
+const ACC_TREE_TIMEOUT_MS: u32 = 2_000;
+
+/// What to say when the window's own thread can't answer.
+fn empty_tree(source: Source) -> Tree {
+    use windows::Win32::UI::Accessibility::{ROLE_SYSTEM_PANE, ROLE_SYSTEM_TOOLBAR};
+    match source {
+        Source::Bar => Tree { name: "FlexTaskbar".into(), role: ROLE_SYSTEM_TOOLBAR, children: Vec::new() },
+        Source::Flyout => Tree { name: "Flyout".into(), role: ROLE_SYSTEM_PANE, children: Vec::new() },
+    }
+}
+
+/// `WM_APP_ACC_TREE`, on the window's own thread: the tree, for the sender to own.
+pub fn tree_message(source: Source, hwnd: HWND) -> LRESULT {
+    LRESULT(Box::into_raw(Box::new(build_tree(source, hwnd))) as isize)
 }
 
 /// `WM_GETOBJECT`: the window's `IAccessible`, when that is what is asked for.

@@ -67,8 +67,8 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
         let mut orc = RECT::default();
         let _ = GetWindowRect(owner, &mut orc);
         let (w, h) = (s(560), s(330));
-        let x = orc.left + (ui::rect_w(&orc) - w) / 2;
-        let y = orc.top + (ui::rect_h(&orc) - h) / 3;
+        let (x, y) =
+            ui::keep_on_screen(orc.left + (ui::rect_w(&orc) - w) / 2, orc.top + (ui::rect_h(&orc) - h) / 3, w, h);
         match CreateWindowExW(
             WS_EX_DLGMODALFRAME,
             PCWSTR(class.as_ptr()),
@@ -196,8 +196,8 @@ pub fn edit(owner: HWND, initial: &CustomApp, title: &str) -> Option<CustomApp> 
         let (w, h) = (ui::rect_w(&outer), ui::rect_h(&outer));
         let mut orc = RECT::default();
         let _ = GetWindowRect(owner, &mut orc);
-        let x = orc.left + (ui::rect_w(&orc) - w) / 2;
-        let top = orc.top + (ui::rect_h(&orc) - h) / 3;
+        let (x, top) =
+            ui::keep_on_screen(orc.left + (ui::rect_w(&orc) - w) / 2, orc.top + (ui::rect_h(&orc) - h) / 3, w, h);
         let _ = SetWindowPos(hwnd, None, x, top, w, h, SWP_NOZORDER);
     }
 

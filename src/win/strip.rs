@@ -1554,6 +1554,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_GETOBJECT if let Some(r) = super::access::get_object(hwnd, super::access::Source::Bar, wparam, lparam) => r,
+        super::access::WM_APP_ACC_TREE => super::access::tree_message(super::access::Source::Bar, hwnd),
         super::access::WM_APP_ACC_PRESS => {
             // A screen reader pressed a button: as if clicked.
             let hit = STRIP.with(|s| s.borrow().as_ref().and_then(|s| accessible_hits(s).get(wparam.0).copied()));

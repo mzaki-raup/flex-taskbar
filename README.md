@@ -26,11 +26,13 @@ bar sits next to it, on the same edge, and it can be turned off.
 - Fully local: no telemetry, no network access of any kind.
 
 > **Status — please read.** This is a complete rewrite of the earlier .NET 8 / WPF
-> version, which is still in the git history. It builds for Windows, and its
-> core logic has unit tests. The UI was exercised under Wine (see
-> [What has been tested](#what-has-been-tested)), but **it has not yet been run on
-> a real Windows machine**. Treat it as a first release candidate. If something
-> misbehaves, `data\crash.log` next to the exe is the first place to look.
+> version, which is still in the git history. It builds for Windows, its core
+> logic has unit tests, and it has now been **run and exercised on Windows 11**
+> (see [What has been tested](#what-has-been-tested)) as well as under Wine.
+> Treat it as a release candidate: the Windows run covered the whole flow and
+> found two bugs, both fixed, but it was one machine, at one screen size, with
+> one set of apps. If something misbehaves, `data\crash.log` next to the exe is
+> the first place to look.
 
 ## Screenshots
 
@@ -58,24 +60,24 @@ top or bottom bar and vertical strips from a side bar.
 |---|---|
 | ![Development open: Editors, Terminals and Tools subcategory tiles, two app tiles](screenshots/tiles.png) | ![Development, then Tools above it, then Debugging above that](screenshots/subcategory.png) |
 | **All: every app, labelled Store app, Chrome or Edge web app** | **Light theme, rounded floating dock** |
-| ![All apps list with Calculator and Terminal labelled Store app, Outlook Edge web app and YouTube Chrome web app](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
+| ![All apps list with Calculator, Calendar and Camera labelled Store app, ChatGPT and Claude labelled Chrome web app, and chrome-debug labelled npm](screenshots/all-apps.png) | ![Light theme, bar fitted to its icons with rounded corners and a gap from the screen edge, with two flyout levels open](screenshots/light-dock.png) |
 | **Drag an icon to rearrange the bar** | **Arrange the bar (from Manage or right-click)** |
-| ![Notepad being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: a Buttons card with the bar's buttons in order and move buttons beside them](screenshots/arrange.png) |
+| ![Notepad++ being dragged to the front of the bar, the others making room](screenshots/drag.png) | ![Arrange the bar window: a Buttons card with the bar's buttons in order and move buttons beside them](screenshots/arrange.png) |
 | **Appearance window** | **Flyouts with their own corners and border** |
 | ![Appearance window: General, Category flyouts, Bar and Category indicator cards in two columns, with Reset to defaults and Close in the command bar](screenshots/appearance.png) | ![Flyouts with 12 px corners and a 2 px red border over a light floating dock](screenshots/flyout-style.png) |
-| **Right-click: the full menu** | **All, sorted by category with the System category hidden** |
-| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | ![All apps showing 12 of 15 apps under Development, Games and Not in a category headings, with Sort and Show buttons](screenshots/all-sorted.png) |
+| **Right-click: the full menu** | **All, by category, with desktop programs, package tools and the System category hidden** |
+| ![Full menu with recents, categories, all apps and commands](screenshots/menu.png) | ![All apps showing 75 of 420 apps under Development, Graphics, Games and Not in a category headings, with Sort and Show buttons](screenshots/all-sorted.png) |
 | **Search** | **Custom app dialog** |
 | ![Search window listing apps with their category paths](screenshots/search.png) | ![New custom app dialog: a page title, an App card with name, target, arguments and start-in fields, and OK and Cancel in the command bar](screenshots/custom-app.png) |
 
 ![Manage window: a page title, cards for categories, the apps in the selected category and all apps, cards for startup and bar, app list and hotkey options, and a command bar along the bottom](screenshots/manage.png)
 
-These were captured under Wine on Linux, using a demo setup: Wine's built-in
-programs filed into example categories, with custom icons. On Windows you see
-your own apps with their real icons, in Windows' own control styling. Most were
-taken without a compositor, where translucent parts of the bar blend against
-black; on Windows they show the desktop behind them. The flyout shadows were
-captured with a compositor (xcompmgr), as they look on Windows.
+These are from a scripted run on Windows 11 (1920×1080, 100% scaling), using a
+demo setup: programs that were already installed, filed into example
+categories. The icons, the control styling, the menus, the translucency and the
+shadows are Windows' own. The plain gradient behind the bar is a backdrop the
+script puts up so the shots show the app rather than whatever happened to be on
+the desktop.
 
 ## Features
 
@@ -317,7 +319,7 @@ original FlexTaskbar:
   (it registers for the same notifications the taskbar gets), so the marks
   follow without any polling.
 
-  ![Notepad open: a line under its bar icon (like Windows 11), or a dot (like macOS)](screenshots/running-marks.png)
+  ![Notepad++ and Calculator open: a line under each bar icon (like Windows 11), or a dot (like macOS)](screenshots/running-marks.png)
 - **Rearrange by dragging.** Press on a category or app icon and drag it along
   the bar; the others make room, and it stays where you let go. Categories
   and apps can be mixed in any order. Let go away from the bar to cancel.
@@ -348,7 +350,7 @@ original FlexTaskbar:
   Pinning, unpinning, dragging and *Arrange the bar* all change the bar in
   use. The bar starts as *Main*.
 
-  ![The Bar submenu: the bars Main and Gaming (ticked), Next bar, New empty bar…, New bar copying this one…, Rename, Delete, and Show on this bar with Development](screenshots/bars.png)
+  ![The Bar submenu: the bars Main and Gaming (ticked), Next bar, New empty bar…, New bar copying this one…, Rename this bar…, Delete this bar, and Show on this bar](screenshots/bars.png)
 - **Screen space.** By default the bar reserves its space like the taskbar
   does, so maximized windows stop above it. You can turn that off in the Manage
   window, and then the bar floats on top instead.
@@ -766,20 +768,22 @@ supervisor process is separate and small, and isn't counted.
 
 ### Measured numbers
 
-These were **measured under Wine 9 on Linux, not on Windows**, with 16 apps
-in 7 categories, so take them as a rough guide; Windows' own numbers will
-differ (Wine doesn't report private bytes, GDI/USER objects or handles, so
-those lines are left out there):
+Both columns come from *Diagnostics…* on the machine named. The two runs are
+**not** like for like: the Wine run had 16 apps in 7 categories, the Windows
+run had the machine's own 420 apps in 9 categories, which is most of the
+difference in memory. Wine doesn't report private bytes, GDI/USER objects or
+handles, so those lines are blank there.
 
-| | Wine 9 (1280×800, 96 DPI) |
-|---|---|
-| Memory (working set) after start | 33.5 MB |
-| Memory after opening flyouts 16 times | 33.9 MB (peak 39.1 MB) |
-| CPU while idle | 20 ms over 64 s (about 0.03 % of one core) |
-| Drawing the bar | 4.0 ms on average, 10.3 ms at most (836 draws, mostly hover animation frames) |
-| Drawing a flyout | 7.9 ms on average, 25.2 ms at most (37 draws; animation frames aren't redrawn) |
+| | Wine 9 (1280×800, 96 DPI, 16 apps) | Windows 11 (1920×1080, 96 DPI, 420 apps) |
+|---|---|---|
+| Memory (working set) after start | 33.5 MB | 56.0 MB (19.1 MB private) |
+| Memory after opening flyouts 16 times | 33.9 MB (peak 39.1 MB) | 59.7 MB (peak 63.8 MB) |
+| CPU while idle | 20 ms over 64 s (about 0.03 % of one core) | 31 ms over 90 s (about 0.03 % of one core) |
+| Drawing the bar | 4.0 ms on average, 10.3 ms at most (836 draws, mostly hover animation frames) | 1.6 ms on average, 6.1 ms at most (802 draws) |
+| Drawing a flyout | 7.9 ms on average, 25.2 ms at most (37 draws; animation frames aren't redrawn) | 2.7 ms on average, 6.3 ms at most (33 draws) |
+| GDI / USER objects, handles | — | 468 / 17, 575 handles |
 
-Run *Diagnostics…* on your PC for real Windows numbers.
+Run *Diagnostics…* on your own PC for numbers from your app list.
 
 ## What has been tested
 
@@ -1032,32 +1036,61 @@ The 114 unit tests cover:
   running copy
 - restart after the launcher process was killed, and the crash-loop stop after
   5 kills
-- the screenshots and the GIF above come from a scripted run of this flow
 
-**Not yet verified**, because Wine can't show it, so expect rough edges here:
-- the Apps folder scan with real Store apps and Chrome/Edge web apps (under
-  Wine their labels and search were checked with those apps' real parsing
-  names, seeded into the app cache)
-- shell app icons
-- *Windows default* theme following a live light/dark switch
-- the dark style of push buttons and list selections in the settings
-  windows
-- translucency over the desktop (Wine has no compositor)
-- high-DPI scaling
-- *Start with Windows*
-- hang detection
-- tray behaviour with the real Windows taskbar
-- dragging files onto the strip or the Manage window
-- running apps with Windows' own window notifications, and matching Store
-  apps and Chrome/Edge web apps by AppUserModelID
-- high contrast: Wine can't turn a high-contrast theme on, so only the
-  colours worked out for it (in the unit tests) are checked
-- a real screen reader (Narrator, NVDA) reading the bar and flyouts; a
-  test client checked what they would be told (see above)
-- the strip next to the real Windows taskbar: reserving screen space beside
-  it on each edge, *Next to the Windows taskbar* following a taskbar on the
-  top or side, and hiding for full-screen apps. Wine has no Windows taskbar,
-  so there *Next to the Windows taskbar* means the bottom.
+**Manually, on Windows 11** (25H2, build 26200, 1920×1080, one monitor), driven by a script
+that works the bar through Windows' own accessibility interface and reads back
+what it sees. This is where the screenshots and the GIFs above come from. It
+covered the things Wine could not show:
+
+- the Apps folder scan on a real machine: 420 apps, with Store apps, Chrome
+  web apps and winget/npm/Scoop tools each labelled, and their real shell
+  icons on the bar, in the flyouts, in *All* and in search
+- translucency over the desktop, the flyout shadows, and the rounded corners
+  as DWM draws them
+- the settings windows in Windows' own control styling, light and dark,
+  including the push buttons and tree selection Wine could not style
+- *Windows default* theme following a live light/dark switch: the bar
+  repaints on the change message, without a restart
+- high contrast turned on and off while running: the bar and its buttons
+  follow the high-contrast colours and stay complete
+- high-DPI: the display set to 150%, where the bar reports 144 DPI and comes
+  back 72 pixels tall with everything scaled and sharp
+- *Start with Windows*: the per-user `Run` value written pointing at this exe,
+  and removed again when turned off
+- the bar beside the real Windows taskbar, reserving its space (the desktop
+  work area shrinks by the bar's height and is given back when it exits) and
+  getting out of the way of a full-screen window
+- a file dropped on the bar being pinned
+- running apps through Windows' own window notifications, including a Store
+  app (Calculator) launched from the bar and matched back by its
+  AppUserModelID, with the Line and Dot marks
+- the supervisor: restarting the worker after it was killed, noticing a
+  frozen UI thread (every thread suspended) and replacing it, and stopping
+  after five crashes in two minutes with a message
+- Narrator running against the bar, and an MSAA client reading the bar as a
+  toolbar with every button named, placed and pressable
+
+**Found and fixed during that run:**
+- the bar and the flyouts told screen readers they had *no* buttons at all.
+  Windows serves `IAccessible` calls on an RPC worker thread, and the bar
+  keeps its state in thread-locals that thread cannot see. The window is now
+  asked for its list on its own thread, so Narrator and NVDA see the buttons.
+  Wine dispatched those calls in-thread, which is why it passed there.
+- the *Link* dialog (and the rename prompt) opened centred on their owner
+  with no regard for the screen, so with the bar on the bottom edge the
+  dialog hung off the bottom and its OK and Cancel buttons were unreachable.
+  Both are now kept inside the monitor's work area.
+
+**Still not verified:**
+- a Windows taskbar on the top or a side: *Next to the Windows taskbar* was
+  only seen against a bottom taskbar
+- matching Chrome/Edge *web apps* back to their windows by AppUserModelID —
+  only a Store app was launched and matched; the code path is the same
+- a real drag from Explorer onto the bar or the Manage window: the drop
+  handler was exercised with a real `HDROP`, but not the shell's drag source
+- importing old .NET settings (no previous install on the machine)
+- more than one monitor, and mixed DPI between monitors
+- NVDA and JAWS (only Narrator was run)
 
 ## Building
 
