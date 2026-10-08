@@ -1389,7 +1389,8 @@ src/win/update.rs    checking for a release, downloading and swapping it in
 src/win/theme.rs     light/dark support (menus, search window)
 src/win/ui.rs        small Win32 helpers
 src/win/panel.rs     the settings windows' look: page title, cards, command bar
-assets/              icon, manifest, resource script
+build.rs             generates the resource script: icon, manifest, version
+assets/              icon, manifest, app picture
 ```
 
 ## Roadmap
