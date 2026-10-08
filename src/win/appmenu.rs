@@ -331,3 +331,34 @@ fn open_file(path: &Path) {
         super::ui::warn(None, &msg);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reads two real apps' jump lists in one process, the way the bar does
+    /// when its menu is opened twice. Each app must get its own files: the
+    /// shell's document list is asked for afresh every time, and an id left
+    /// over from the last call would show one app's files under another.
+    ///
+    /// Needs a real desktop with jump-list data, so it is not run by default:
+    /// `cargo test -- --ignored two_apps`.
+    #[test]
+    #[ignore = "needs a desktop with jump-list data"]
+    fn two_apps_get_their_own_recent_files() {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        }
+        let notepad = recent_files("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App", MAX_RECENT);
+        let code = recent_files("Microsoft.VisualStudioCode", MAX_RECENT);
+        let names = |v: &[Recent]| v.iter().map(|r| r.label.clone()).collect::<Vec<_>>();
+        println!("notepad ({}): {:?}", notepad.len(), names(&notepad));
+        println!("code    ({}): {:?}", code.len(), names(&code));
+        if !notepad.is_empty() && !code.is_empty() {
+            assert_ne!(names(&notepad), names(&code), "each app must get its own list");
+        }
+        // Asking twice for the same app gives the same answer.
+        let again = recent_files("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App", MAX_RECENT);
+        assert_eq!(names(&notepad), names(&again), "asking again changed the answer");
+    }
+}

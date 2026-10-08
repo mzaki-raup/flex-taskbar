@@ -13,7 +13,8 @@ Done: dark settings windows, keyboard control of the flyouts, running-app
 indicators, auto-hide, settings backup and restore, closing animations, a
 hotkey per category, saved looks (theme presets), pinned folders, the
 Diagnostics report, dragging apps out of flyouts, smart categories, several
-bars, accessibility and multi-monitor. Every 🟢 and 🟡 item is done.
+bars, accessibility, multi-monitor, and jump lists and quick actions.
+Every 🟢 and 🟡 item is done.
 
 Suggested next: **Checks on real Windows** (🔴). *Diagnostics…* can now
 collect real numbers there, and Narrator and high contrast need checking
@@ -43,11 +44,12 @@ on a real PC. After that, the remaining 🔴 items below.
   bar and leaves the others alone. The choosing and add/remove logic is unit
   tested; two screens at once still need a real multi-monitor PC (see the
   README's *Still not verified*).
-- [ ] **Jump lists and quick actions** · 🔴
-  Right-click an app for its recent files (Windows jump lists), *Open file
-  location*, *Run as administrator* and *Uninstall*. Jump lists come
-  through undocumented or COM-heavy APIs, so this needs care and real
-  Windows.
+- [x] **Jump lists and quick actions** · 🔴
+  Right-click an app, on the bar or in a flyout, for the files it was last
+  used on (its Windows jump list, read through `IApplicationDocumentLists`)
+  and for *Open file location*, *Run as administrator* and *Uninstall*. The
+  actions are whatever the shell reports for that app, by canonical verb, so
+  each app offers only what Windows can really do with it.
 
 ## Organising
 

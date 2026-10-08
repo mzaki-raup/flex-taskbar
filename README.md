@@ -370,6 +370,24 @@ FlexTaskbar:
 - **Right-click** an icon to move it left or right, unpin it (an app) or hide
   it from this bar (a category), arrange the bar, manage categories or change
   the appearance; right-click anywhere else for the full menu.
+- **Recent files and quick actions** on an app's right-click menu, on the bar
+  and on a tile or row in any flyout:
+  - the files the app was last used on — its **Windows jump list**, the same
+    list the taskbar shows — at most ten, newest first. Click one to open it.
+    Long names are shortened in the middle so the kind of file still shows.
+  - ***Open file location***, ***Run as administrator*** and ***Uninstall***.
+
+  Neither part is guessed. The files come from the app's own jump list
+  (`IApplicationDocumentLists`), and the actions are whatever **Windows itself
+  offers** for that app, asked for by canonical verb and carried out through
+  the shell — so a Store app, which has no file on disk, shows no *Open file
+  location*, and *Settings*, which can't be removed, shows no *Uninstall*. An
+  app with neither files nor actions adds nothing to its menu. Apps found only
+  as a file on disk (the Start Menu fallback, and apps added with *Link*) have
+  no jump list of their own, so they show only the actions.
+
+  Carrying an action out happens on a background thread, so an uninstaller or
+  a UAC prompt never holds up the bar.
 - **Several bars** ("Work", "Gaming"…). Each has its own pinned apps and
   order, and can leave out some top-level categories. Use the *Bar* submenu
   in the full menu (tray icon, or right-click an empty part of the bar):
@@ -873,7 +891,7 @@ Run *Diagnostics…* on your own PC for numbers from your app list.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 159 unit tests cover:
+The 171 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -906,6 +924,12 @@ The 159 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- an app's recent files and quick actions: every action found from the verb
+  the shell reports whatever its capitals (`runas` and `RunAs` are the same
+  action), verbs we don't offer ignored, the menu's shape (recent files alone,
+  actions alone, one separator only where there is something on both sides,
+  and the ten-file limit), and shortening a long file name in the middle so
+  its extension still shows, never splitting a character
 - which monitors carry a bar: the main screen wherever Windows lists it (and
   when it flags none), every screen in screen order, one screen by name, a
   chosen screen that has been detached falling back to the main one (and
@@ -1153,6 +1177,14 @@ covered the things Wine could not show:
   work area shrinks by the bar's height and is given back when it exits) and
   getting out of the way of a full-screen window
 - a file dropped on the bar being pinned
+- an app's right-click menu on the bar, for a Store app and a desktop program
+  side by side: *Notepad* listing the ten files from its own jump list with
+  *Run as administrator* and *Uninstall* but **no** *Open file location*
+  (it has no file on disk), and *Visual Studio Code* listing its one recent
+  file with all three actions. *Open file location* opened Explorer on the
+  app's folder, and clicking the recent file opened it in its default program.
+  A live test (`cargo test -- --ignored two_apps`) reads two real apps' jump
+  lists in one process and checks each gets its own files.
 - the *Screens* setting on a one-monitor machine: *Main screen only*, *Every
   screen* and the screen picked by name each giving exactly one bar, docked and
   reserving its space; a name that is not attached (`\\.\DISPLAY9` in the
@@ -1239,6 +1271,7 @@ src/config.rs        config model + atomic save / backup recovery   (tested)
 src/tree.rs          nested category operations                       (tested)
 src/search.rs        search ranking                                   (tested)
 src/striplayout.rs   icon strip layout and hit testing                (tested)
+src/jumplist.rs      an app's menu: its verbs, shape and names          (tested)
 src/monitors.rs      which monitors carry a bar, and the settings list (tested)
 src/migrate.rs       import from the .NET version                     (tested)
 src/win/mod.rs       process model, single instance, command forwarding
@@ -1269,6 +1302,7 @@ src/win/dragimage.rs the icon following the pointer while dragging an app out
 src/win/access.rs    screen readers: the bar and flyouts as MSAA objects
 src/win/diagnostics.rs  Diagnostics…: memory, CPU, objects, draw times
 src/win/running.rs   following open windows (shell notifications), switching
+src/win/appmenu.rs   an app's jump list and the quick actions Windows offers
 src/win/monitors.rs  asking Windows which monitors are attached, and where
 src/win/strip.rs     the bars: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
