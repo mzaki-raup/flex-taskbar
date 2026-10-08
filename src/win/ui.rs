@@ -205,6 +205,56 @@ pub fn image_list(size: i32, grow: i32) -> windows::Win32::UI::Controls::HIMAGEL
     }
 }
 
+/// One of the buttons [`choose`] offers.
+pub struct Choice<'a> {
+    pub id: i32,
+    pub label: &'a str,
+    /// The smaller line under the label.
+    pub note: &'a str,
+}
+
+/// Asks the user to pick one of `choices`, as Windows' own task dialog
+/// (the one Windows Update and Explorer use): a heading, the detail, and a
+/// labelled button per choice rather than Yes/No/Cancel. Returns the id of
+/// the button pressed, or `None` if the dialog was closed or couldn't be
+/// shown.
+pub fn choose(owner: Option<HWND>, title: &str, heading: &str, detail: &str, choices: &[Choice]) -> Option<i32> {
+    use windows::Win32::UI::Controls::{
+        TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TD_INFORMATION_ICON, TDF_ALLOW_DIALOG_CANCELLATION,
+        TDF_POSITION_RELATIVE_TO_WINDOW, TDF_SIZE_TO_CONTENT, TDF_USE_COMMAND_LINKS, TaskDialogIndirect,
+    };
+    // The text each button shows: its label, then its note on a second line.
+    let labels: Vec<Vec<u16>> = choices
+        .iter()
+        .map(|c| if c.note.is_empty() { wide(c.label) } else { wide(&format!("{}\n{}", c.label, c.note)) })
+        .collect();
+    let buttons: Vec<TASKDIALOG_BUTTON> = choices
+        .iter()
+        .zip(&labels)
+        .map(|(c, text)| TASKDIALOG_BUTTON { nButtonID: c.id, pszButtonText: PCWSTR(text.as_ptr()) })
+        .collect();
+    let (title, heading, detail) = (wide(title), wide(heading), wide(detail));
+    let config = TASKDIALOGCONFIG {
+        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+        hwndParent: owner.unwrap_or_default(),
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION
+            | TDF_USE_COMMAND_LINKS
+            | TDF_SIZE_TO_CONTENT
+            | TDF_POSITION_RELATIVE_TO_WINDOW,
+        pszWindowTitle: PCWSTR(title.as_ptr()),
+        pszMainInstruction: PCWSTR(heading.as_ptr()),
+        pszContent: PCWSTR(detail.as_ptr()),
+        cButtons: buttons.len() as u32,
+        pButtons: buttons.as_ptr(),
+        nDefaultButton: choices.first().map(|c| c.id).unwrap_or(0),
+        Anonymous1: windows::Win32::UI::Controls::TASKDIALOGCONFIG_0 { pszMainIcon: TD_INFORMATION_ICON },
+        ..Default::default()
+    };
+    let mut pressed = 0i32;
+    unsafe { TaskDialogIndirect(&config, Some(&mut pressed), None, None) }.ok()?;
+    choices.iter().any(|c| c.id == pressed).then_some(pressed)
+}
+
 /// Creates a tooltip control owned by `owner`, which it subclasses to catch
 /// the pointer resting on one of its tools (see [`set_tools`]).
 pub fn tooltip_for(owner: HWND) -> HWND {

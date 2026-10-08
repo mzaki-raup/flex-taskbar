@@ -233,6 +233,10 @@ pub struct Config {
     /// When the automatic update check last ran (Unix seconds), so it runs
     /// about once a day rather than on every start.
     pub last_update_check: u64,
+    /// A release the user chose to skip (`2.0.2`): it is never offered by
+    /// itself again, though *Check for updates…* still reports it. Anything
+    /// newer is offered as usual.
+    pub skipped_update: String,
     pub next_id: u64,
 }
 
@@ -253,6 +257,7 @@ impl Default for Config {
             first_seen: BTreeMap::new(),
             launches: BTreeMap::new(),
             last_update_check: 0,
+            skipped_update: String::new(),
             next_id: 1,
         }
     }
