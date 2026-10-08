@@ -102,7 +102,7 @@ impl Catalog {
                 file_hint: file_hint(&c.target),
                 kind: appkind::classify_custom(&c.target, &c.args),
                 source: Source::Custom,
-                keys: running::app_keys(None, Some(&super::launch::expand(c.target.trim()))),
+                keys: running::target_keys(&super::launch::expand(c.target.trim()), &c.args),
                 folder: {
                     let target = std::path::PathBuf::from(super::launch::expand(c.target.trim()));
                     // A share that is offline counts as not a folder for now
