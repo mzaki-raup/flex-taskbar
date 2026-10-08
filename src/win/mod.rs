@@ -4,6 +4,7 @@ mod access;
 mod app;
 mod appdialog;
 mod appearancewin;
+mod appmenu;
 mod arrangewin;
 mod autostart;
 mod backupwin;

@@ -1725,9 +1725,21 @@ fn activate(idx: usize, i: usize) {
 fn row_menu(app_id: &str) {
     const PIN: usize = 1;
     const UNPIN: usize = 2;
+    /// The app's recent files and quick actions take ids from here up.
+    const EXTRAS: usize = 100;
     let pinned = app::with(|s| s.cfg.pinned.iter().any(|p| p == app_id));
     let (id, text) = if pinned { (UNPIN, "Unpin from strip") } else { (PIN, "Pin to strip") };
-    let chosen = popup(&[(id, text.to_string(), false)]);
+    let mut items = vec![(id, text.to_string(), false)];
+    // The app's recent files and what Windows can do with it.
+    let extras = super::appmenu::extras(app_id, EXTRAS);
+    if !extras.is_empty() {
+        items.push((0, String::new(), false));
+        items.extend(extras.rows.iter().map(|(id, text)| (*id, text.clone(), false)));
+    }
+    let chosen = popup(&items);
+    if extras.chosen(chosen) {
+        return;
+    }
     match chosen {
         PIN => {
             app::with(|s| s.cfg.pin(app_id));

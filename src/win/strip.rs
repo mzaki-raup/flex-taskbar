@@ -1586,7 +1586,14 @@ fn context_menu(hit: Option<Hit>) {
     const HIDE: usize = 6;
     const ARRANGE: usize = 7;
     const HIDE_CATEGORY: usize = 8;
+    /// The app's recent files and quick actions take ids from here up.
+    const EXTRAS: usize = 100;
     let key = key_of(&item);
+    // Asking the shell what an app offers takes a moment, so only for apps.
+    let extras = match &item {
+        Item::App(id) => super::appmenu::extras(id, EXTRAS),
+        Item::Category(_) => super::appmenu::Extras::none(),
+    };
     let (can_left, can_right) = app::with(|s| {
         let keys = s.cfg.bar_keys();
         let pos = keys.iter().position(|k| *k == key).unwrap_or(0);
@@ -1608,6 +1615,20 @@ fn context_menu(hit: Option<Hit>) {
             Item::App(_) => add(UNPIN, "Unpin from strip", true),
             // Only off this bar: it stays in the menus and on other bars.
             Item::Category(_) => add(HIDE_CATEGORY, "Hide from this bar", true),
+        }
+        // The app's recent files and what Windows can do with it.
+        if !extras.is_empty() {
+            let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+            pos += 1;
+            for (id, text) in &extras.rows {
+                if *id == 0 {
+                    let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+                } else {
+                    let t = wide(text);
+                    let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_STRING, *id, PCWSTR(t.as_ptr()));
+                }
+                pos += 1;
+            }
         }
         let _ = InsertMenuW(menu, pos, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
         pos += 1;
@@ -1643,6 +1664,9 @@ fn context_menu(hit: Option<Hit>) {
         let _ = DestroyMenu(menu);
         id
     };
+    if extras.chosen(chosen) {
+        return;
+    }
     match chosen {
         LEFT | RIGHT => {
             let delta = if chosen == LEFT { -1 } else { 1 };

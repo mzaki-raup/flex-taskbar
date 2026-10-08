@@ -11,6 +11,7 @@ mod config;
 mod flyanim;
 mod flykeys;
 mod folders;
+mod jumplist;
 mod looks;
 mod migrate;
 mod monitors;
