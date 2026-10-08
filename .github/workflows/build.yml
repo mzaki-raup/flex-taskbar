@@ -8,9 +8,16 @@ name: Build
 # can't authenticate against (forgejo#2809), and they would need Node on the
 # runner. Cloning the repository by hand is a few lines and has neither
 # problem.
+# Not on `main`: a release pushes the merge and the tag seconds apart, which
+# started this workflow and the release one at the same time. With one
+# runner they share a working copy, and each starts by emptying it — the
+# build on `main` died in the middle of its tests while the release was
+# checking out. Every change reaches `main` through a branch this has
+# already checked, and the release workflow runs the same checks on the tag,
+# so nothing goes unchecked. Build `main` on demand with workflow_dispatch.
 on:
   push:
-    branches: ['**']
+    branches: ['**', '!main']
     tags-ignore: ['v*']
   pull_request:
   workflow_dispatch:

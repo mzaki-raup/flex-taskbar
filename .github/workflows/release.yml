@@ -99,20 +99,15 @@ jobs:
       - name: Publish the release
         env:
           # Forgejo/Gitea hand the workflow a token with write access to this
-          # repository; the API below is their /api/v1, not GitHub's. That
-          # token belongs to no one, so the release shows as published by
-          # "Ghost". Add a RELEASE_TOKEN secret — a personal access token of
-          # the account the releases should come from, with write access to
-          # this repository — and it is published by that account instead.
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          RUN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # repository; the API below is their /api/v1, not GitHub's. Who the
+          # release is shown as coming from does not depend on this token:
+          # the forge matches the tag's own author email to an account, so a
+          # tag made with an email that account doesn't own is published by
+          # "Ghost".
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $token = if ($env:RELEASE_TOKEN) { $env:RELEASE_TOKEN } else { $env:RUN_TOKEN }
-          if (-not $env:RELEASE_TOKEN) {
-            Write-Host "No RELEASE_TOKEN secret: the release will be attributed to Ghost."
-          }
           $api = "${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
-          $headers = @{ Authorization = "token $token" }
+          $headers = @{ Authorization = "token $env:TOKEN" }
           $body = @{
             tag_name   = "${{ github.ref_name }}"
             name       = "FlexTaskbar ${{ steps.version.outputs.version }}"
