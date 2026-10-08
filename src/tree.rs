@@ -188,6 +188,25 @@ pub fn move_app(cats: &mut [Category], cat_id: u64, app_id: &str, delta: isize) 
     true
 }
 
+/// Moves the app to just before `before` in the category (to the end when
+/// that is `None`), adding it if it isn't there yet. Dragging a tile to a new
+/// place in a flyout lands here.
+pub fn insert_app_at(cats: &mut [Category], cat_id: u64, app_id: &str, before: Option<&str>) -> bool {
+    if before == Some(app_id) {
+        // Dropped on itself: it stays where it is.
+        return false;
+    }
+    let Some(cat) = hand_made(cats, cat_id) else { return false };
+    let was = cat.apps.clone();
+    cat.apps.retain(|a| a != app_id);
+    let at = match before {
+        Some(b) => cat.apps.iter().position(|a| a == b).unwrap_or(cat.apps.len()),
+        None => cat.apps.len(),
+    };
+    cat.apps.insert(at, app_id.to_string());
+    cat.apps != was
+}
+
 /// Appends the app to the category unless it's already there.
 pub fn add_app(cats: &mut [Category], cat_id: u64, app_id: &str) -> bool {
     let Some(cat) = hand_made(cats, cat_id) else { return false };
@@ -381,5 +400,41 @@ mod tests {
         add_app(&mut cats, 1, "code");
         assert_eq!(subtree_apps(&cats[0]), vec!["code".to_string(), "vim".to_string()]);
         assert!(subtree_apps(&cats[1]).is_empty());
+    }
+
+    #[test]
+    fn insert_app_at_reorders_within_a_category() {
+        let mut cats = vec![Category { id: 1, apps: vec!["a".into(), "b".into(), "c".into()], ..Default::default() }];
+        assert!(insert_app_at(&mut cats, 1, "c", Some("a")));
+        assert_eq!(cats[0].apps, ["c", "a", "b"]);
+        assert!(insert_app_at(&mut cats, 1, "c", None));
+        assert_eq!(cats[0].apps, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn insert_app_at_adds_an_app_from_elsewhere() {
+        let mut cats = vec![Category { id: 1, apps: vec!["a".into(), "b".into()], ..Default::default() }];
+        assert!(insert_app_at(&mut cats, 1, "new", Some("b")));
+        assert_eq!(cats[0].apps, ["a", "new", "b"]);
+    }
+
+    #[test]
+    fn insert_app_at_in_place_changes_nothing() {
+        let mut cats = vec![Category { id: 1, apps: vec!["a".into(), "b".into()], ..Default::default() }];
+        assert!(!insert_app_at(&mut cats, 1, "a", Some("b")));
+        assert!(!insert_app_at(&mut cats, 1, "a", Some("a")));
+        assert_eq!(cats[0].apps, ["a", "b"]);
+    }
+
+    #[test]
+    fn insert_app_at_leaves_a_smart_category_alone() {
+        let mut cats = vec![Category {
+            id: 1,
+            apps: vec!["a".into(), "b".into()],
+            smart: Some(crate::smart::Smart::MostUsed { count: 5 }),
+            ..Default::default()
+        }];
+        assert!(!insert_app_at(&mut cats, 1, "b", Some("a")));
+        assert_eq!(cats[0].apps, ["a", "b"]);
     }
 }

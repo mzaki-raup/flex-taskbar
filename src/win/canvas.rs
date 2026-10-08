@@ -14,8 +14,8 @@ use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_NOPREFIX,
     DT_SINGLELINE, DeleteDC, DeleteObject, DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
-    FONT_QUALITY, FW_NORMAL, FW_SEMIBOLD, GdiFlush, GetDC, GetDIBits, HBITMAP, HDC, HFONT, HGDIOBJ, ReleaseDC,
-    SelectObject, SetBkMode, SetDIBitsToDevice, SetTextColor, TRANSPARENT,
+    FONT_QUALITY, FW_NORMAL, FW_SEMIBOLD, GdiFlush, GetDC, GetDIBits, GetTextExtentPoint32W, HBITMAP, HDC, HFONT,
+    HGDIOBJ, ReleaseDC, SelectObject, SetBkMode, SetDIBitsToDevice, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{ULW_ALPHA, UpdateLayeredWindow};
 use windows::core::PCWSTR;
@@ -326,6 +326,75 @@ fn text_mask(text: &str, w: i32, h: i32, font: HFONT, flags: DRAW_TEXT_FORMAT) -
         let _ = DeleteDC(mem);
         Some(mask)
     }
+}
+
+/// Breaks `text` into at most `max_lines` lines of at most `width` pixels,
+/// splitting words that don't fit on a line of their own and ending with an
+/// ellipsis when something had to be left out. GDI does this itself only for
+/// single lines (`DT_END_ELLIPSIS` with `DT_WORDBREAK` just clips), so a long
+/// app name would otherwise be cut off mid-letter.
+pub fn wrap(text: &str, font: HFONT, width: i32, max_lines: usize) -> String {
+    if width <= 0 || max_lines == 0 || text.trim().is_empty() {
+        return String::new();
+    }
+    unsafe {
+        let mem = CreateCompatibleDC(None);
+        let old = SelectObject(mem, HGDIOBJ(font.0));
+        let fits = |s: &str| line_width(mem, s) <= width;
+        let mut lines: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        for word in text.split_whitespace() {
+            if !cur.is_empty() {
+                let joined = format!("{cur} {word}");
+                if fits(&joined) {
+                    cur = joined;
+                    continue;
+                }
+                lines.push(std::mem::take(&mut cur));
+            }
+            if fits(word) {
+                cur = word.to_string();
+                continue;
+            }
+            // A word wider than a line of its own: break it where it runs out.
+            for ch in word.chars() {
+                let mut candidate = cur.clone();
+                candidate.push(ch);
+                if cur.is_empty() || fits(&candidate) {
+                    cur = candidate;
+                } else {
+                    lines.push(std::mem::replace(&mut cur, ch.to_string()));
+                }
+            }
+        }
+        if !cur.is_empty() {
+            lines.push(cur);
+        }
+        let left_out = lines.len() > max_lines;
+        lines.truncate(max_lines);
+        if left_out && let Some(last) = lines.last_mut() {
+            let mut s = std::mem::take(last);
+            while !s.is_empty() && !fits(&format!("{}…", s.trim_end())) {
+                s.pop();
+            }
+            s = s.trim_end().to_string();
+            s.push('…');
+            *last = s;
+        }
+        SelectObject(mem, old);
+        let _ = DeleteDC(mem);
+        lines.join("\n")
+    }
+}
+
+/// Width of one line of text in whatever font `dc` has selected.
+fn line_width(dc: HDC, text: &str) -> i32 {
+    let u: Vec<u16> = text.encode_utf16().collect();
+    let mut size = SIZE::default();
+    unsafe {
+        let _ = GetTextExtentPoint32W(dc, &u, &mut size);
+    }
+    size.cx
 }
 
 /// Width and height `text` needs in `font` on one line.

@@ -37,9 +37,6 @@ use windows::Win32::Graphics::Gdi::{
     DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, GetMonitorInfoW, HFONT, HGDIOBJ, MONITOR_DEFAULTTOPRIMARY,
     MONITORINFO, MonitorFromPoint,
 };
-use windows::Win32::UI::Controls::{
-    TTF_SUBCLASS, TTM_ADDTOOLW, TTM_DELTOOLW, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
-};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
@@ -51,14 +48,13 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, GetSystemMetrics,
     HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-    PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SendMessageW,
-    SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-    TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WINDOW_STYLE, WM_APP,
-    WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_GETOBJECT, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer,
+    SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON,
+    TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED,
+    WM_DROPFILES, WM_GETOBJECT, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_RBUTTONUP,
+    WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
-use windows::core::{PCWSTR, PWSTR, w};
+use windows::core::{PCWSTR, w};
 
 const WM_APP_APPBAR: u32 = WM_APP + 20;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -233,7 +229,7 @@ fn create() {
             Err(_) => return,
         }
     };
-    let tooltip = ui::child_popup(hwnd, "tooltips_class32", WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX));
+    let tooltip = ui::tooltip_for(hwnd);
     let dpi = ui::dpi_of(hwnd);
     STRIP.with(|s| {
         *s.borrow_mut() = Some(Strip {
@@ -550,30 +546,7 @@ fn relayout() {
         (s.tooltip, std::mem::replace(&mut s.tools, tools.len()), tools)
     });
     if let Some((tooltip, old_count, tools)) = tools {
-        unsafe {
-            for id in 0..old_count {
-                let ti = TTTOOLINFOW {
-                    cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
-                    hwnd: h,
-                    uId: id + 1,
-                    ..Default::default()
-                };
-                SendMessageW(tooltip, TTM_DELTOOLW, Some(WPARAM(0)), Some(LPARAM(&ti as *const _ as isize)));
-            }
-            for (id, (name, rect)) in tools.iter().enumerate() {
-                let mut text = wide(name);
-                let ti = TTTOOLINFOW {
-                    cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
-                    uFlags: TTF_SUBCLASS,
-                    hwnd: h,
-                    uId: id + 1,
-                    rect: *rect,
-                    lpszText: PWSTR(text.as_mut_ptr()),
-                    ..Default::default()
-                };
-                SendMessageW(tooltip, TTM_ADDTOOLW, Some(WPARAM(0)), Some(LPARAM(&ti as *const _ as isize)));
-            }
-        }
+        ui::set_tools(tooltip, h, old_count, &tools);
     }
     render();
 }
