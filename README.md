@@ -88,6 +88,8 @@ bar, a category opens as a flyout (below).
 
 **How deep.** Every level of subcategories opens another flyout, so the nesting
 depth follows the screen: as many levels as fit their flyouts, between 3 and 7.
+With bars on several screens the smallest answer wins, so the limit holds
+wherever a flyout opens.
 A level counts as two rows of tiles above or below a top or bottom bar, or one
 column beside a side bar. For example, a 1920×1080 screen with the bar at the
 bottom allows 5 levels (a root category plus 4 levels of subcategories),
@@ -125,8 +127,28 @@ How it behaves:
 
 ![The Manage window: a smart category "Package manager tools" that fills itself, its Smart… menu open on Apps of a kind](screenshots/smart-categories.png)
 
-**The bar** is docked against an edge of the primary monitor, laid out like the
-original FlexTaskbar:
+**The bar** is docked against a screen edge, laid out like the original
+FlexTaskbar:
+- **Which screens.** By default there is one bar, on the main screen. *Screens*
+  in the Appearance window changes that:
+  - *Main screen only* (the default);
+  - *Every screen* — a bar on each, every one docked and reserving space on its
+    own monitor, with its own icons at that monitor's DPI;
+  - or one named screen (*Screen 2 — 2560 × 1440*, and so on), listing the
+    monitors attached at the moment the window opened.
+
+  All the bars look the same and show the same categories and pinned apps:
+  there is one set of settings, not one per screen. Only one bar's flyouts are
+  open at a time — the bar you are pointing at, or on the screen the pointer
+  is on when you press a hotkey. Dragging one bar to another edge moves them
+  all, since *Position* is one setting.
+
+  Attaching or detaching a monitor adds or removes its bar by itself, and the
+  other bars are left alone (they keep their icons and don't flicker). A chosen
+  screen that is detached falls back to the main screen, so you are never left
+  without a bar; attach it again and the bar goes back to it. Windows reuses
+  display names (`\\.\DISPLAY2`), so a *different* monitor plugged into the
+  same slot inherits the choice.
 - **Any edge.** By default it sits next to the Windows taskbar, on the same
   edge. To move it, press on an empty spot of the bar and drag it towards
   another edge of the screen: it docks there as soon as the pointer is nearest
@@ -851,7 +873,7 @@ Run *Diagnostics…* on your own PC for numbers from your app list.
 
 **Automated, on every build.** CI builds the release exe on a Windows runner
 (MSVC) and runs `cargo fmt --check`, `clippy -D warnings` and the tests there.
-The 114 unit tests cover:
+The 159 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -884,6 +906,14 @@ The 114 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- which monitors carry a bar: the main screen wherever Windows lists it (and
+  when it flags none), every screen in screen order, one screen by name, a
+  chosen screen that has been detached falling back to the main one (and
+  reading as *Main screen only* in the settings), no screens meaning no bars,
+  the settings list and every option round-tripping to the setting it means,
+  and what changes when monitors come and go: a screen in both lists keeps the
+  bar it has, only a detached screen's bar goes, and nothing happens when
+  neither the screens nor the setting changed
 - several bars: one bar to begin with (and older configs reading as one),
   new empty bars and copies (unique names), switching back and forth with
   each keeping its pins, order and hidden categories, the next bar
@@ -1123,6 +1153,12 @@ covered the things Wine could not show:
   work area shrinks by the bar's height and is given back when it exits) and
   getting out of the way of a full-screen window
 - a file dropped on the bar being pinned
+- the *Screens* setting on a one-monitor machine: *Main screen only*, *Every
+  screen* and the screen picked by name each giving exactly one bar, docked and
+  reserving its space; a name that is not attached (`\\.\DISPLAY9` in the
+  settings file) falling back to the main screen rather than leaving no bar;
+  and switching between all three in the Appearance window, with the bar
+  rebuilt and the setting saved each time
 - running apps through Windows' own window notifications, including a Store
   app (Calculator) launched from the bar and matched back by its
   AppUserModelID, with the Line and Dot marks
@@ -1144,6 +1180,13 @@ covered the things Wine could not show:
   Both are now kept inside the monitor's work area.
 
 **Still not verified:**
+- *two or more monitors*, and mixed DPI between them. The machine has one
+  screen, so what could not be exercised is: two bars at once, each docked
+  and reserving space on its own monitor; the pointer moving between them and
+  the right bar's flyouts opening; a hotkey opening the bar on the screen the
+  pointer is on; and a monitor being attached or detached while running. The
+  choosing and add/remove logic is covered by unit tests, and the single-bar
+  path is the same code
 - a Windows taskbar on the top or a side: *Next to the Windows taskbar* was
   only seen against a bottom taskbar
 - matching Chrome/Edge *web apps* back to their windows by AppUserModelID —
@@ -1151,7 +1194,6 @@ covered the things Wine could not show:
 - a real drag from Explorer onto the bar or the Manage window: the drop
   handler was exercised with a real `HDROP`, but not the shell's drag source
 - importing old .NET settings (no previous install on the machine)
-- more than one monitor, and mixed DPI between monitors
 - NVDA and JAWS (only Narrator was run)
 
 ## Building
@@ -1197,6 +1239,7 @@ src/config.rs        config model + atomic save / backup recovery   (tested)
 src/tree.rs          nested category operations                       (tested)
 src/search.rs        search ranking                                   (tested)
 src/striplayout.rs   icon strip layout and hit testing                (tested)
+src/monitors.rs      which monitors carry a bar, and the settings list (tested)
 src/migrate.rs       import from the .NET version                     (tested)
 src/win/mod.rs       process model, single instance, command forwarding
 src/win/supervisor.rs  crash/hang restart
@@ -1226,7 +1269,8 @@ src/win/dragimage.rs the icon following the pointer while dragging an app out
 src/win/access.rs    screen readers: the bar and flyouts as MSAA objects
 src/win/diagnostics.rs  Diagnostics…: memory, CPU, objects, draw times
 src/win/running.rs   following open windows (shell notifications), switching
-src/win/strip.rs     the bar: AppBar docking, drawing, hover and clicks
+src/win/monitors.rs  asking Windows which monitors are attached, and where
+src/win/strip.rs     the bars: AppBar docking, drawing, hover and clicks
 src/win/flyout.rs    category and All flyouts
 src/win/indicator.rs the mark on category icons (styles, own picture)
 src/win/canvas.rs    anti-aliased drawing into layered windows

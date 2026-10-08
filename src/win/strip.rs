@@ -1,6 +1,5 @@
-//! The icon strip: a bar docked against an edge of the primary monitor — by
-//! default the Windows taskbar's, next to it — styled after the original
-//! FlexTaskbar bar:
+//! The icon strip: a bar docked against a screen edge — by default the
+//! Windows taskbar's, next to it — styled after the original FlexTaskbar bar:
 //!
 //! - start (left, or top on a side edge): **All** (every app, as a list);
 //! - centre: the root categories (each with an arrow badge) and pinned apps;
@@ -17,6 +16,13 @@
 //!
 //! By default it reserves its screen space as an AppBar, so maximized windows
 //! stop above it, and it hides while a full-screen app is in front.
+//!
+//! There is one bar per monitor the settings ask for (`Settings::strip_monitors`
+//! — the main screen, every screen, or one chosen screen). Each is its own
+//! window, docked and reserving space on its own monitor, and each keeps its
+//! own DPI, icons and hover state. "The bar" elsewhere in the code means the
+//! *active* one: the bar a message last arrived at, which is the one the
+//! flyouts, the keyboard and screen readers follow.
 
 use super::app;
 use super::canvas::{self, Canvas};
@@ -78,6 +84,11 @@ pub enum Item {
 struct Strip {
     hwnd: HWND,
     tooltip: HWND,
+    /// The monitor this bar is docked to: Windows' device name, and the
+    /// monitor and work rectangles last seen for it.
+    device: String,
+    mon: RECT,
+    work: RECT,
     items: Vec<Item>,
     names: Vec<String>,
     layout: BarLayout,
@@ -128,16 +139,117 @@ struct Strip {
 }
 
 thread_local! {
-    static STRIP: RefCell<Option<Strip>> = const { RefCell::new(None) };
+    /// One bar per monitor, in the order `monitors::chosen` gave them.
+    static STRIPS: RefCell<Vec<Strip>> = const { RefCell::new(Vec::new()) };
+    /// The active bar: the one a message last arrived at. Flyouts, the
+    /// keyboard and screen readers all follow it.
+    static ACTIVE: Cell<usize> = const { Cell::new(0) };
     static REPOSITIONING: Cell<bool> = const { Cell::new(false) };
+    /// A display change is already on its way to the main window.
+    static DISPLAY_PENDING: Cell<bool> = const { Cell::new(false) };
 }
 
+fn count() -> usize {
+    STRIPS.with(|s| s.borrow().len())
+}
+
+/// A monitor was attached, detached or rearranged, so the set of bars may
+/// need to change. Every bar gets the message and Windows sends several as a
+/// topology change settles, so the work is asked for once and done from the
+/// main window — a bar must not be destroyed from inside its own window proc.
+fn display_changed() {
+    if DISPLAY_PENDING.with(|p| p.get()) {
+        return;
+    }
+    let posted = unsafe { PostMessageW(Some(app::main_hwnd()), app::WM_APP_DISPLAY, WPARAM(0), LPARAM(0)) }.is_ok();
+    // Only wait for a message that is really coming, so a failed post can't
+    // leave later display changes ignored for good.
+    DISPLAY_PENDING.with(|p| p.set(posted));
+    if !posted {
+        reposition();
+    }
+}
+
+/// The main window got round to the display change.
+pub fn display_settled() {
+    DISPLAY_PENDING.with(|p| p.set(false));
+    apply_settings();
+}
+
+/// The active bar's index, kept inside the list in case bars went away since
+/// it was set.
+fn active() -> usize {
+    let n = count();
+    if n == 0 { 0 } else { ACTIVE.with(|a| a.get()).min(n - 1) }
+}
+
+fn index_of(h: HWND) -> Option<usize> {
+    STRIPS.with(|s| s.borrow().iter().position(|st| st.hwnd == h))
+}
+
+/// Makes the bar at `h` the active one. Called as each message arrives, so
+/// everything that follows works on the bar the user is dealing with.
+fn activate(h: HWND) {
+    if let Some(i) = index_of(h) {
+        ACTIVE.with(|a| a.set(i));
+    }
+}
+
+/// Makes the bar on the screen under the pointer active, so a hotkey opens
+/// the bar the user is looking at. Falls back to leaving the active one be.
+pub fn activate_at_cursor() {
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    let found = STRIPS.with(|s| {
+        s.borrow()
+            .iter()
+            .position(|st| pt.x >= st.mon.left && pt.x < st.mon.right && pt.y >= st.mon.top && pt.y < st.mon.bottom)
+    });
+    if let Some(i) = found {
+        ACTIVE.with(|a| a.set(i));
+    }
+}
+
+/// The active bar's window.
 fn hwnd() -> Option<HWND> {
-    STRIP.with(|s| s.borrow().as_ref().map(|s| s.hwnd))
+    read(|s| s.hwnd)
 }
 
+/// The active bar, to change.
 fn with<R>(f: impl FnOnce(&mut Strip) -> R) -> Option<R> {
-    STRIP.with(|s| s.borrow_mut().as_mut().map(f))
+    with_at(active(), f)
+}
+
+fn with_at<R>(i: usize, f: impl FnOnce(&mut Strip) -> R) -> Option<R> {
+    STRIPS.with(|s| s.borrow_mut().get_mut(i).map(f))
+}
+
+/// The active bar, to read.
+fn read<R>(f: impl FnOnce(&Strip) -> R) -> Option<R> {
+    read_at(active(), f)
+}
+
+fn read_at<R>(i: usize, f: impl FnOnce(&Strip) -> R) -> Option<R> {
+    STRIPS.with(|s| s.borrow().get(i).map(f))
+}
+
+/// The active bar, if it can be read without waiting. Screen readers ask at
+/// any moment, including while the bars are being rebuilt.
+fn try_read<R>(f: impl FnOnce(&Strip) -> R) -> Option<R> {
+    STRIPS.with(|s| s.try_borrow().ok()?.get(active()).map(f))
+}
+
+/// Runs something for every bar, with the one it is working on made active so
+/// the per-bar code below needs no changes.
+fn for_each(mut f: impl FnMut(usize)) {
+    let was = active();
+    for i in 0..count() {
+        ACTIVE.with(|a| a.set(i));
+        f(i);
+    }
+    ACTIVE.with(|a| a.set(was.min(count().saturating_sub(1))));
 }
 
 /// The appearance settings and the colours they resolve to right now.
@@ -159,41 +271,65 @@ pub fn current_look() -> (Appearance, Colors) {
 
 // ---------------------------------------------------------------- lifecycle
 
-/// Creates or removes the strip to match the settings.
+/// Creates and removes bars so there is exactly one on each monitor the
+/// settings ask for. Also called when monitors are attached or detached.
 pub fn apply_settings() {
-    let show = app::with(|s| s.cfg.settings.show_strip);
-    match (show, hwnd().is_some()) {
-        (true, false) => create(),
-        (false, true) => destroy(),
-        (true, true) => apply_appearance(),
-        (false, false) => {}
+    let (show, want_monitors) = app::with(|s| (s.cfg.settings.show_strip, s.cfg.settings.strip_monitors.clone()));
+    let want = if show { super::monitors::chosen(&want_monitors) } else { Vec::new() };
+
+    let have: Vec<String> = STRIPS.with(|s| s.borrow().iter().map(|st| st.device.clone()).collect());
+    let (drop, add) = crate::monitors::plan(&have, &want);
+
+    // A screen in both lists keeps the bar it has, so attaching or detaching
+    // one screen leaves the others alone.
+    if !drop.is_empty() {
+        flyout::close();
+        let dropped: Vec<Strip> =
+            STRIPS.with(|s| s.borrow_mut().extract_if(.., |st| drop.contains(&st.device)).collect());
+        for st in dropped {
+            discard(st);
+        }
+    }
+    for screen in want.iter().filter(|s| add.contains(&s.device)) {
+        create_on(screen);
+    }
+    // Bars stay in screen order, so "Screen 2" means the same bar every time.
+    STRIPS.with(|s| {
+        let mut b = s.borrow_mut();
+        b.sort_by_key(|st| want.iter().position(|w| w.device == st.device).unwrap_or(usize::MAX));
+    });
+    if count() > 0 {
+        apply_appearance();
     }
 }
 
 /// The appearance (or bar height / reservation) changed: rebuild everything.
 pub fn apply_appearance() {
-    if hwnd().is_none() {
+    if count() == 0 {
         return;
     }
     flyout::close();
     let (look, colors) = current_look();
-    with(|s| {
-        if s.look.icon_size != look.icon_size {
-            s.icons.clear();
-        }
-        if look.auto_hide == AutoHide::Off {
-            // Turned off: back in view at once.
-            s.hide = 0.0;
-            s.hide_target = 0.0;
-        }
-        s.look = look;
-        s.colors = colors;
+    for_each(|i| {
+        with_at(i, |s| {
+            if s.look.icon_size != look.icon_size {
+                s.icons.clear();
+            }
+            if look.auto_hide == AutoHide::Off {
+                // Turned off: back in view at once.
+                s.hide = 0.0;
+                s.hide_target = 0.0;
+            }
+            s.look = look.clone();
+            s.colors = colors;
+        });
+        reposition();
     });
-    reposition();
     schedule_hide();
 }
 
-fn create() {
+/// Puts a bar on one monitor. The window class is registered once and shared.
+fn create_on(screen: &crate::monitors::Screen) {
     let class = wide("FlexTaskbar.Strip");
     let (look, colors) = current_look();
     let hwnd = unsafe {
@@ -209,8 +345,8 @@ fn create() {
             ..Default::default()
         };
         RegisterClassW(&wc);
-        // Start on the primary monitor so the window gets that monitor's DPI.
-        let wa = primary_monitor().1;
+        // Start on its own monitor so the window gets that monitor's DPI.
+        let wa = super::monitors::to_rect(screen.work);
         match CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_ACCEPTFILES | WS_EX_LAYERED,
             PCWSTR(class.as_ptr()),
@@ -231,53 +367,72 @@ fn create() {
     };
     let tooltip = ui::tooltip_for(hwnd);
     let dpi = ui::dpi_of(hwnd);
-    STRIP.with(|s| {
-        *s.borrow_mut() = Some(Strip {
-            hwnd,
-            tooltip,
-            items: Vec::new(),
-            names: Vec::new(),
-            layout: striplayout::bar_layout(0, &empty_metrics(), 0, false),
-            icons: HashMap::new(),
-            look,
-            colors,
-            font: canvas::font(scale(13, dpi), false),
-            dpi,
-            win: RECT::default(),
-            hover: None,
-            open: None,
-            tracking_leave: false,
-            reserved: false,
-            edge: Edge::Bottom,
-            tools: 0,
-            press: None,
-            drag: None,
-            incoming: None,
-            bar_press: None,
-            moving: false,
-            anim_levels: Vec::new(),
-            anim_pointer: None,
-            anim_enter: None,
-            anim_last: std::time::Instant::now(),
-            anim_running: false,
-            frame: None,
-            hide: 0.0,
-            hide_target: 0.0,
-            hide_last: std::time::Instant::now(),
-            menu_up: false,
-        })
+    let strip = Strip {
+        hwnd,
+        tooltip,
+        device: screen.device.clone(),
+        mon: super::monitors::to_rect(screen.bounds),
+        work: super::monitors::to_rect(screen.work),
+        items: Vec::new(),
+        names: Vec::new(),
+        layout: striplayout::bar_layout(0, &empty_metrics(), 0, false),
+        icons: HashMap::new(),
+        look,
+        colors,
+        font: canvas::font(scale(13, dpi), false),
+        dpi,
+        win: RECT::default(),
+        hover: None,
+        open: None,
+        tracking_leave: false,
+        reserved: false,
+        edge: Edge::Bottom,
+        tools: 0,
+        press: None,
+        drag: None,
+        incoming: None,
+        bar_press: None,
+        moving: false,
+        anim_levels: Vec::new(),
+        anim_pointer: None,
+        anim_enter: None,
+        anim_last: std::time::Instant::now(),
+        anim_running: false,
+        frame: None,
+        hide: 0.0,
+        hide_target: 0.0,
+        hide_last: std::time::Instant::now(),
+        menu_up: false,
+    };
+    let index = STRIPS.with(|s| {
+        let mut b = s.borrow_mut();
+        b.push(strip);
+        b.len() - 1
     });
+    // The new bar is the one the next few steps work on.
+    ACTIVE.with(|a| a.set(index));
     unsafe {
         DragAcceptFiles(hwnd, true);
         let mut abd = appbar_data(hwnd);
         SHAppBarMessage(ABM_NEW, &mut abd);
     }
-    refresh();
+    refresh_at(index);
     reposition();
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }
     schedule_hide();
+}
+
+/// Takes one bar off the screen: its reserved space back, its window and
+/// font gone.
+fn discard(s: Strip) {
+    unsafe {
+        let mut abd = appbar_data(s.hwnd);
+        SHAppBarMessage(ABM_REMOVE, &mut abd);
+        let _ = DestroyWindow(s.hwnd);
+        let _ = DeleteObject(HGDIOBJ(s.font.0));
+    }
 }
 
 // ---------------------------------------------------------------- auto-hide
@@ -289,14 +444,17 @@ fn auto_hide_on() -> bool {
 /// The pointer left the bar (or a flyout or menu closed): hide after the
 /// delay, if auto-hide is on.
 fn schedule_hide() {
-    let Some((h, delay)) =
-        with(|s| (s.look.auto_hide != AutoHide::Off).then_some((s.hwnd, s.look.auto_hide_delay_ms))).flatten()
-    else {
-        return;
-    };
-    unsafe {
-        SetTimer(Some(h), TIMER_HIDE_DELAY, delay.clamp(1, 3000), None);
-    }
+    for_each(|i| {
+        let Some((h, delay)) =
+            read_at(i, |s| (s.look.auto_hide != AutoHide::Off).then_some((s.hwnd, s.look.auto_hide_delay_ms)))
+                .flatten()
+        else {
+            return;
+        };
+        unsafe {
+            SetTimer(Some(h), TIMER_HIDE_DELAY, delay.clamp(1, 3000), None);
+        }
+    });
 }
 
 /// Brings an auto-hidden bar back (the pointer reached it, or a flyout is
@@ -360,9 +518,11 @@ fn hide_frame(h: HWND) {
 
 /// Shows the last drawing where auto-hide has the bar right now.
 fn present_frame() {
-    STRIP.with(|cell| {
-        let b = cell.borrow();
-        let Some(s) = b.as_ref() else { return };
+    present_frame_at(active());
+}
+
+fn present_frame_at(index: usize) {
+    read_at(index, |s| {
         let Some(pix) = &s.frame else { return };
         let across = if s.edge.vertical() { ui::rect_w(&s.win) } else { ui::rect_h(&s.win) };
         let reveal = scale(autohide::REVEAL_DIP, s.dpi);
@@ -371,42 +531,44 @@ fn present_frame() {
     });
 }
 
-/// Removes the strip, releasing its reserved screen space.
+/// Removes every bar, releasing the screen space they reserved.
 pub fn destroy() {
     flyout::close();
-    let taken = STRIP.with(|s| s.borrow_mut().take());
-    if let Some(s) = taken {
-        unsafe {
-            let mut abd = appbar_data(s.hwnd);
-            SHAppBarMessage(ABM_REMOVE, &mut abd);
-            let _ = DestroyWindow(s.hwnd);
-            let _ = DeleteObject(HGDIOBJ(s.font.0));
-        }
+    let taken: Vec<Strip> = STRIPS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    for s in taken {
+        discard(s);
     }
+    ACTIVE.with(|a| a.set(0));
 }
 
 /// Explorer restarted: its AppBar list is gone, so register again.
 pub fn shell_restarted() {
-    if let Some(h) = hwnd() {
-        unsafe {
-            let mut abd = appbar_data(h);
-            SHAppBarMessage(ABM_NEW, &mut abd);
+    for_each(|i| {
+        if let Some(h) = read_at(i, |s| s.hwnd) {
+            unsafe {
+                let mut abd = appbar_data(h);
+                SHAppBarMessage(ABM_NEW, &mut abd);
+            }
+            reposition();
         }
-        reposition();
-    }
+    });
 }
 
 pub fn theme_changed() {
     let (_, colors) = current_look();
-    if with(|s| s.colors = colors).is_some() {
-        render();
-    }
+    for_each(|i| {
+        if with_at(i, |s| s.colors = colors).is_some() {
+            render();
+        }
+    });
     flyout::close();
 }
 
 /// An icon was replaced (custom icon picked or reset).
 pub fn icon_changed(key: &str) {
-    with(|s| s.icons.remove(key));
+    for_each(|i| {
+        with_at(i, |s| s.icons.remove(key));
+    });
     flyout::icon_changed(key);
     refresh();
 }
@@ -416,7 +578,14 @@ pub fn icon_changed(key: &str) {
 /// Rebuilds the buttons from the configuration (root categories, then pinned
 /// apps that still exist).
 pub fn refresh() {
-    if hwnd().is_none() {
+    for_each(refresh_at);
+    flyout::refresh();
+}
+
+/// Rebuilds one bar's buttons. Each bar loads its own icons: monitors can
+/// differ in DPI, and the icons are drawn at that bar's size.
+fn refresh_at(index: usize) {
+    if read_at(index, |_| ()).is_none() {
         return;
     }
     let (items, names, sources) = app::with(|s| {
@@ -436,7 +605,7 @@ pub fn refresh() {
         let sources: Vec<_> = items.iter().map(|it| (key_of(it), app::icon_source_for(s, &key_of(it)))).collect();
         (items, names, sources)
     });
-    let (size, missing) = with(|st| {
+    let (size, missing) = with_at(index, |st| {
         // Loaded larger than shown, so magnified icons stay sharp.
         let size = scale(st.look.icon_size as i32 * 3 / 2, st.dpi);
         let missing: Vec<_> = sources.into_iter().filter(|(k, _)| !st.icons.contains_key(k)).collect();
@@ -446,13 +615,12 @@ pub fn refresh() {
     // A handful of icons, from Windows' own icon cache.
     let loaded: Vec<_> =
         missing.into_iter().map(|(k, src)| (k, src.and_then(|src| canvas::icon_pixmap(&src, size)))).collect();
-    with(|st| {
+    with_at(index, |st| {
         st.icons.extend(loaded);
         st.items = items;
         st.names = names;
     });
-    relayout();
-    flyout::refresh();
+    relayout_at(index);
 }
 
 pub fn key_of(item: &Item) -> String {
@@ -527,8 +695,12 @@ fn slot_rect(s: &Strip, slot: Slot) -> RECT {
 }
 
 fn relayout() {
-    let Some(h) = hwnd() else { return };
-    let tools = with(|s| {
+    relayout_at(active());
+}
+
+fn relayout_at(index: usize) {
+    let Some(h) = read_at(index, |s| s.hwnd) else { return };
+    let tools = with_at(index, |s| {
         let len = length(s);
         s.layout = striplayout::bar_layout(len, &metrics(s), s.items.len(), s.look.dock_width == DockWidth::Fit);
         let mut tools: Vec<(String, Slot)> = vec![
@@ -548,14 +720,12 @@ fn relayout() {
     if let Some((tooltip, old_count, tools)) = tools {
         ui::set_tools(tooltip, h, old_count, &tools);
     }
-    render();
+    render_at(index);
 }
 
 /// The button under a client-area point.
 fn hit_at(x: i32, y: i32) -> Option<Hit> {
-    STRIP.with(|s| {
-        let b = s.borrow();
-        let s = b.as_ref()?;
+    read(|s| {
         let m = margin(s);
         let a = across(s, x, y);
         if a < m || a >= m + thickness(s) {
@@ -563,6 +733,7 @@ fn hit_at(x: i32, y: i32) -> Option<Hit> {
         }
         striplayout::hit(&s.layout, along(s, x, y) - m)
     })
+    .flatten()
 }
 
 fn slot_of(s: &Strip, hit: Hit) -> Option<Slot> {
@@ -575,9 +746,7 @@ fn slot_of(s: &Strip, hit: Hit) -> Option<Slot> {
 
 /// Screen rectangle of a button (flyouts open from it).
 pub fn button_rect(hit: Hit) -> Option<RECT> {
-    STRIP.with(|s| {
-        let b = s.borrow();
-        let s = b.as_ref()?;
+    read(|s| {
         let rc = slot_rect(s, slot_of(s, hit)?);
         Some(RECT {
             left: s.win.left + rc.left,
@@ -586,6 +755,7 @@ pub fn button_rect(hit: Hit) -> Option<RECT> {
             bottom: s.win.top + rc.bottom,
         })
     })
+    .flatten()
 }
 
 /// The strip's DPI (96 if it isn't shown).
@@ -593,20 +763,24 @@ pub fn dpi() -> u32 {
     with(|s| s.dpi).unwrap_or(96)
 }
 
-/// How deep categories may nest so every level of flyouts fits on the
-/// primary monitor, given where the bar is (see `striplayout::max_levels`).
+/// How deep categories may nest so every level of flyouts fits, given where
+/// the bar is (see `striplayout::max_levels`). With bars on several screens
+/// the smallest answer wins, so the limit holds on every one of them.
 pub fn max_levels() -> usize {
-    let (mon, _) = primary_monitor();
-    let (edge, dpi, height) = {
-        let st = with(|s| (s.edge, s.dpi));
-        let (setting, height) = app::with(|s| (s.cfg.settings.strip_edge, s.cfg.settings.strip_height));
-        match st {
-            Some((edge, dpi)) => (edge, dpi, height),
-            None => (setting.resolve(Edge::Bottom), 96, height),
-        }
+    let height = app::with(|s| s.cfg.settings.strip_height);
+    let bars: Vec<(Edge, u32, RECT)> = STRIPS.with(|s| s.borrow().iter().map(|st| (st.edge, st.dpi, st.mon)).collect());
+    let levels = |(edge, dpi, mon): (Edge, u32, RECT)| {
+        let bar = scale(height.clamp(24, 96) as i32, dpi);
+        striplayout::max_levels(edge, (ui::rect_w(&mon), ui::rect_h(&mon)), bar, dpi)
     };
-    let bar = scale(height.clamp(24, 96) as i32, dpi);
-    striplayout::max_levels(edge, (ui::rect_w(&mon), ui::rect_h(&mon)), bar, dpi)
+    match bars.into_iter().map(levels).min() {
+        Some(n) => n,
+        // No bar yet: answer for one on the main screen, as the settings ask.
+        None => {
+            let setting = app::with(|s| s.cfg.settings.strip_edge);
+            levels((setting.resolve(Edge::Bottom), 96, primary_monitor().0))
+        }
+    }
 }
 
 /// The *All* button.
@@ -644,7 +818,7 @@ fn open_flyout(opens: Opens, hit: Hit) {
 /// The buttons that open a flyout, in bar order: *All*, then each category
 /// and pinned folder.
 pub fn flyout_buttons() -> Vec<(Hit, Opens)> {
-    let items: Vec<Item> = STRIP.with(|s| s.borrow().as_ref().map(|s| s.items.clone()).unwrap_or_default());
+    let items: Vec<Item> = read(|s| s.items.clone()).unwrap_or_default();
     let mut v = vec![(all_button(), Opens::All)];
     for (i, item) in items.iter().enumerate() {
         if let Some(o) = opens_of(item) {
@@ -661,7 +835,7 @@ pub fn edge() -> Edge {
 
 pub fn item(hit: Hit) -> Option<Item> {
     match hit {
-        Hit::Item(i) => STRIP.with(|s| s.borrow().as_ref().and_then(|s| s.items.get(i).cloned())),
+        Hit::Item(i) => read(|s| s.items.get(i).cloned()).flatten(),
         _ => None,
     }
 }
@@ -703,66 +877,62 @@ pub fn accessible() -> super::access::Tree {
         ROLE_SYSTEM_BUTTONMENU, ROLE_SYSTEM_PUSHBUTTON, ROLE_SYSTEM_TOOLBAR, STATE_SYSTEM_HASPOPUP,
     };
     use windows::Win32::UI::WindowsAndMessaging::{STATE_SYSTEM_EXPANDED, STATE_SYSTEM_HOTTRACKED};
-    let children = STRIP
-        .with(|cell| {
-            // Asked while the bar is being changed: nothing to say this moment.
-            let b = cell.try_borrow().ok()?;
-            let s = b.as_ref()?;
-            let children = accessible_hits(s)
-                .into_iter()
-                .filter_map(|hit| {
-                    let rc = slot_rect(s, slot_of(s, hit)?);
-                    let (name, popup, description) = match hit {
-                        Hit::Left(_) => ("All apps".to_string(), true, String::new()),
-                        Hit::Item(i) => match s.items.get(i)? {
-                            Item::Category(_) => (s.names[i].clone(), true, "Category".to_string()),
-                            Item::App(id) => {
-                                let folder = app::try_with(|s| s.catalog.get(id).is_some_and(|a| a.folder.is_some()))
-                                    .unwrap_or(false);
-                                let running = super::running::is_running(id);
-                                let what = if folder {
-                                    "Folder"
-                                } else if running {
-                                    "Running"
-                                } else {
-                                    ""
-                                };
-                                (s.names[i].clone(), folder, what.to_string())
-                            }
-                        },
-                        Hit::Right(RIGHT_LINK) => {
-                            ("Link: add an app, file, website or web app".into(), false, String::new())
+    // Asked while the bars are being changed: nothing to say this moment.
+    let children = try_read(|s| {
+        accessible_hits(s)
+            .into_iter()
+            .filter_map(|hit| {
+                let rc = slot_rect(s, slot_of(s, hit)?);
+                let (name, popup, description) = match hit {
+                    Hit::Left(_) => ("All apps".to_string(), true, String::new()),
+                    Hit::Item(i) => match s.items.get(i)? {
+                        Item::Category(_) => (s.names[i].clone(), true, "Category".to_string()),
+                        Item::App(id) => {
+                            let folder = app::try_with(|s| s.catalog.get(id).is_some_and(|a| a.folder.is_some()))
+                                .unwrap_or(false);
+                            let running = super::running::is_running(id);
+                            let what = if folder {
+                                "Folder"
+                            } else if running {
+                                "Running"
+                            } else {
+                                ""
+                            };
+                            (s.names[i].clone(), folder, what.to_string())
                         }
-                        Hit::Right(_) => ("Settings".into(), false, String::new()),
-                    };
-                    let mut state = 0;
-                    if popup {
-                        state |= STATE_SYSTEM_HASPOPUP;
+                    },
+                    Hit::Right(RIGHT_LINK) => {
+                        ("Link: add an app, file, website or web app".into(), false, String::new())
                     }
-                    if s.open == Some(hit) {
-                        state |= STATE_SYSTEM_EXPANDED;
-                    }
-                    if s.hover == Some(hit) {
-                        state |= STATE_SYSTEM_HOTTRACKED;
-                    }
-                    Some(super::access::Element {
-                        name,
-                        role: if popup { ROLE_SYSTEM_BUTTONMENU } else { ROLE_SYSTEM_PUSHBUTTON },
-                        state,
-                        rect: RECT {
-                            left: s.win.left + rc.left,
-                            top: s.win.top + rc.top,
-                            right: s.win.left + rc.right,
-                            bottom: s.win.top + rc.bottom,
-                        },
-                        action: "Open",
-                        description,
-                    })
+                    Hit::Right(_) => ("Settings".into(), false, String::new()),
+                };
+                let mut state = 0;
+                if popup {
+                    state |= STATE_SYSTEM_HASPOPUP;
+                }
+                if s.open == Some(hit) {
+                    state |= STATE_SYSTEM_EXPANDED;
+                }
+                if s.hover == Some(hit) {
+                    state |= STATE_SYSTEM_HOTTRACKED;
+                }
+                Some(super::access::Element {
+                    name,
+                    role: if popup { ROLE_SYSTEM_BUTTONMENU } else { ROLE_SYSTEM_PUSHBUTTON },
+                    state,
+                    rect: RECT {
+                        left: s.win.left + rc.left,
+                        top: s.win.top + rc.top,
+                        right: s.win.left + rc.right,
+                        bottom: s.win.top + rc.bottom,
+                    },
+                    action: "Open",
+                    description,
                 })
-                .collect();
-            Some(children)
-        })
-        .unwrap_or_default();
+            })
+            .collect()
+    })
+    .unwrap_or_default();
     super::access::Tree { name: "FlexTaskbar".into(), role: ROLE_SYSTEM_TOOLBAR, children }
 }
 
@@ -818,9 +988,12 @@ fn taskbar_edge(h: HWND) -> Edge {
     }
 }
 
-/// Docks the strip against its edge of the primary monitor.
+/// Docks the active bar against its edge of its own monitor. The monitor it
+/// sits on is looked up afresh, so a screen that moved or changed resolution
+/// is followed; a screen that went away leaves the bar where it was until
+/// `apply_settings` removes it.
 fn reposition() {
-    let Some(h) = hwnd() else { return };
+    let Some((h, device)) = read(|s| (s.hwnd, s.device.clone())) else { return };
     if REPOSITIONING.with(|r| r.replace(true)) {
         return; // our own ABM_SETPOS can notify us again
     }
@@ -831,7 +1004,14 @@ fn reposition() {
     let margin_dip = with(|s| s.look.margin).unwrap_or(0) as i32;
     // The window is the bar plus its floating margin on every side.
     let thickness = scale(size_dip as i32, dpi) + 2 * scale(margin_dip, dpi);
-    let (monitor, work) = primary_monitor();
+    let (monitor, work) = match super::monitors::all().into_iter().find(|s| s.device == device) {
+        Some(screen) => (super::monitors::to_rect(screen.bounds), super::monitors::to_rect(screen.work)),
+        None => read(|s| (s.mon, s.work)).unwrap_or_else(primary_monitor),
+    };
+    with(|s| {
+        s.mon = monitor;
+        s.work = work;
+    });
     let mut abd = appbar_data(h);
     let edge = setting.resolve(taskbar_edge(h));
 
@@ -856,7 +1036,16 @@ fn reposition() {
                 SHAppBarMessage(ABM_NEW, &mut abd);
             }
         }
-        let (_, work) = if was_reserved { primary_monitor() } else { (monitor, work) };
+        let work = if was_reserved {
+            // The space just handed back isn't in `work` yet: ask again.
+            super::monitors::all()
+                .into_iter()
+                .find(|s| s.device == device)
+                .map(|s| super::monitors::to_rect(s.work))
+                .unwrap_or(work)
+        } else {
+            work
+        };
         // Auto-hiding: at the screen's own edge (over the Windows taskbar
         // while shown), so hiding leaves just a line at the very edge.
         band(if auto_hide_on() { monitor } else { work }, edge, thickness)
@@ -1023,12 +1212,13 @@ fn move_bar() {
     unsafe {
         let _ = GetCursorPos(&mut pt);
     }
-    let mon = primary_monitor().0;
+    let mon = read(|s| s.mon).unwrap_or_else(|| primary_monitor().0);
     let edge = striplayout::edge_for_point((mon.left, mon.top, mon.right, mon.bottom), pt.x, pt.y);
     if with(|s| s.edge != edge).unwrap_or(false) {
         flyout::close();
+        // One edge setting for every bar, so they all move together.
         app::with(|s| s.cfg.settings.strip_edge = crate::config::StripEdge::fixed(edge));
-        reposition();
+        for_each(|_| reposition());
     }
 }
 
@@ -1103,10 +1293,12 @@ fn anim_pointer(hwnd: HWND, pos: Option<i32>, entered: Option<usize>) {
 // ---------------------------------------------------------------- drawing
 
 fn render() {
+    render_at(active());
+}
+
+fn render_at(index: usize) {
     let started = std::time::Instant::now();
-    let drawn = STRIP.with(|cell| {
-        let b = cell.borrow();
-        let s = b.as_ref()?;
+    let drawn = read_at(index, |s| {
         let (w, h) = (ui::rect_w(&s.win), ui::rect_h(&s.win));
         let mut cv = Canvas::new(w, h)?;
         let d = s.dpi;
@@ -1300,10 +1492,11 @@ fn render() {
         cv.gear(gx, gy, scale(8, d) as f32, c.text);
 
         Some(cv.pix)
-    });
+    })
+    .flatten();
     if let Some(pix) = drawn {
-        with(|s| s.frame = Some(pix));
-        present_frame();
+        with_at(index, |s| s.frame = Some(pix));
+        present_frame_at(index);
         super::diagnostics::bar_drawn(started);
     }
 }
@@ -1524,13 +1717,16 @@ fn mouse_xy(lparam: LPARAM) -> (i32, i32) {
 }
 
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // Everything below works on "the bar", which means the one this message
+    // came to.
+    activate(hwnd);
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_GETOBJECT if let Some(r) = super::access::get_object(hwnd, super::access::Source::Bar, wparam, lparam) => r,
         super::access::WM_APP_ACC_TREE => super::access::tree_message(super::access::Source::Bar, hwnd),
         super::access::WM_APP_ACC_PRESS => {
             // A screen reader pressed a button: as if clicked.
-            let hit = STRIP.with(|s| s.borrow().as_ref().and_then(|s| accessible_hits(s).get(wparam.0).copied()));
+            let hit = read(|s| accessible_hits(s).get(wparam.0).copied()).flatten();
             if let Some(hit) = hit {
                 click(hit);
             }
@@ -1765,8 +1961,15 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
-        WM_DISPLAYCHANGE | WM_DPICHANGED => {
+        WM_DPICHANGED => {
             reposition();
+            LRESULT(0)
+        }
+        WM_DISPLAYCHANGE => {
+            // A monitor was attached, detached or rearranged: there may now be
+            // one bar too many or too few. Each bar gets this message, so only
+            // the first one through does the work.
+            display_changed();
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },

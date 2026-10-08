@@ -13,6 +13,7 @@ mod flykeys;
 mod folders;
 mod looks;
 mod migrate;
+mod monitors;
 mod perf;
 mod pkgsources;
 mod release;
