@@ -506,7 +506,7 @@ pub fn perform(action: menu::Action) {
         menu::Action::ToggleStrip => set_strip(None),
         menu::Action::OpenDataFolder => open_data_folder(),
         menu::Action::Diagnostics => super::diagnostics::show(),
-        menu::Action::CheckForUpdates => super::update::check(true),
+        menu::Action::CheckForUpdates => super::update::check(super::update::Asked::FromMenu),
         menu::Action::SwitchBar(name) => switch_bar(&name),
         menu::Action::NextBar => next_bar(),
         menu::Action::NewBar { copy } => new_bar(copy),
