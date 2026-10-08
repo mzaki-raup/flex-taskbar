@@ -399,6 +399,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
+        WM_NOTIFY if let Some(r) = panel::custom_draw(lparam) => r,
         WM_NOTIFY => {
             let hdr = unsafe { &*(lparam.0 as *const NMHDR) };
             if hdr.idFrom == LIST as usize {

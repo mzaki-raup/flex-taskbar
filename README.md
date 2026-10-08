@@ -661,15 +661,24 @@ FlexTaskbar can replace itself with a newer release.
 - **Where it looks.** The releases published for the repository it was built
   from, over HTTPS. *Check for updates…* at the bottom of the menu (it shows
   the running version beside it) looks now and reports whatever it finds; by
-  itself the app looks **once a
-  day**, in the background, and only says something when there is a newer
-  version (a tray notification). Nothing is sent but the request: no identifier,
-  no settings, no app list. Turn the daily check off with
-  `"check_for_updates": false` under `settings`.
+  itself the app looks **once a day**, in the background, and only says
+  something when there is a newer version it hasn't been told to skip.
+  Nothing is sent but the request: no identifier, no settings, no app list.
+  Turn the daily check off with `"check_for_updates": false` under
+  `settings`.
 - **What it checks.** A release counts only if its tag is a plain version
   (`v2.0.1`), it isn't a draft or a pre-release, and it has `FlexTaskbar.exe`
   attached. The newest such release wins, and only if it is newer than the
   running version.
+- **What you are asked.** A release is never installed behind your back.
+  FlexTaskbar shows what is available, with the release notes, and three
+  choices:
+  - **Update now** — download it, check it and restart (below);
+  - **Not now** — nothing happens, and the daily check offers it again;
+  - **Skip this version** — that release is never offered by itself again
+    (remembered as `skipped_update` in `config.json`). Anything newer is
+    offered as usual, and *Check for updates…* still reports it when you
+    ask for it.
 - **Installing.** With your go-ahead the program is downloaded to
   `data\update\` and its SHA-256 compared with the `SHA256SUMS.txt` published
   beside it. Only if they match is anything replaced. A release published

@@ -13,17 +13,26 @@ use super::canvas::{self, Canvas};
 use crate::appearance::Rgba;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateSolidBrush, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, EndPaint, HBRUSH, HDC, HFONT,
-    InvalidateRect, MapWindowPoints, PAINTSTRUCT, SetBkColor, SetTextColor,
+    BeginPaint, CreateSolidBrush, DT_CALCRECT, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
+    DrawTextW, EndPaint, FillRect, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, MapWindowPoints, PAINTSTRUCT,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+};
+use windows::Win32::Graphics::Gdi::{
+    DFC_BUTTON, DFCS_BUTTONCHECK, DFCS_CHECKED, DFCS_INACTIVE, DrawFocusRect, DrawFrameControl,
 };
 use windows::Win32::Graphics::Gdi::{RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RedrawWindow};
 use windows::Win32::UI::Controls::{
-    LVM_SETBKCOLOR, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, SetWindowTheme, TVM_SETBKCOLOR, TVM_SETTEXTCOLOR,
+    BP_CHECKBOX, CBS_CHECKEDDISABLED, CBS_CHECKEDHOT, CBS_CHECKEDNORMAL, CBS_CHECKEDPRESSED, CBS_UNCHECKEDDISABLED,
+    CBS_UNCHECKEDHOT, CBS_UNCHECKEDNORMAL, CBS_UNCHECKEDPRESSED, CDDS_PREPAINT, CDIS_DISABLED, CDIS_FOCUS, CDIS_HOT,
+    CDIS_SELECTED, CDRF_DODEFAULT, CDRF_SKIPDEFAULT, CloseThemeData, DrawThemeBackground, GetThemePartSize,
+    LVM_SETBKCOLOR, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, NM_CUSTOMDRAW, NMCUSTOMDRAW, NMHDR, OpenThemeData,
+    SetWindowTheme, TS_TRUE, TVM_SETBKCOLOR, TVM_SETTEXTCOLOR,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GetClassNameW, GetClientRect, GetWindowRect, SendMessageW,
+    BM_GETCHECK, EnumChildWindows, GWL_STYLE, GetClassNameW, GetClientRect, GetParent, GetWindowLongW, GetWindowRect,
+    GetWindowTextW, SendMessageW, WM_GETFONT,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -319,6 +328,140 @@ pub fn color(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     }
 }
 
+/// Check-box styles (`BS_CHECKBOX`, `BS_AUTOCHECKBOX` and the 3-state ones).
+const CHECK_BOX_STYLES: [u32; 4] = [2, 3, 5, 6];
+
+/// `WM_NOTIFY`: draws a check box, so that its label is in the card's text
+/// colour. A check box draws its own label in whatever colour its visual
+/// style says, ignoring the one `color` sets on the device context — on a
+/// dark card that is near-black on near-black. Asking for no visual style
+/// doesn't help either: the name has to be a space to take, and the box
+/// then loses its modern look. So the box glyph is drawn from the style it
+/// has and the label is drawn here.
+///
+/// Returns `None` for any other notification, which the window handles
+/// itself.
+pub fn custom_draw(lparam: LPARAM) -> Option<LRESULT> {
+    let header = unsafe { (lparam.0 as *const NMHDR).as_ref() }?;
+    if header.code != NM_CUSTOMDRAW {
+        return None;
+    }
+    let control = header.hwndFrom;
+    let style = unsafe { GetWindowLongW(control, GWL_STYLE) } as u32;
+    if !CHECK_BOX_STYLES.contains(&(style & 0xF)) {
+        return None;
+    }
+    let cd = unsafe { (lparam.0 as *const NMCUSTOMDRAW).as_ref() }?;
+    if cd.dwDrawStage != CDDS_PREPAINT {
+        return Some(LRESULT(CDRF_DODEFAULT as isize));
+    }
+    draw_check_box(control, cd);
+    Some(LRESULT(CDRF_SKIPDEFAULT as isize))
+}
+
+fn draw_check_box(control: HWND, cd: &NMCUSTOMDRAW) {
+    let (hdc, rc) = (cd.hdc, cd.rc);
+    let state = cd.uItemState;
+    let disabled = state.contains(CDIS_DISABLED);
+    let checked = unsafe { SendMessageW(control, BM_GETCHECK, None, None) }.0 != 0;
+    let k = colours();
+
+    // The background it sits on, as `color` works it out.
+    let parent = unsafe { GetParent(control) }.unwrap_or_default();
+    let bg = background_under(parent, control);
+    unsafe {
+        FillRect(hdc, &rc, brush(bg));
+    }
+
+    // The box itself, in whatever style the control has (see `theme_control`).
+    let height = rc.bottom - rc.top;
+    let mut size = SIZE { cx: 13, cy: 13 };
+    let theme = unsafe { OpenThemeData(Some(control), w!("Button")) };
+    let part = BP_CHECKBOX.0;
+    let glyph = match (checked, disabled, state.contains(CDIS_SELECTED), state.contains(CDIS_HOT)) {
+        (true, true, _, _) => CBS_CHECKEDDISABLED,
+        (true, _, true, _) => CBS_CHECKEDPRESSED,
+        (true, _, _, true) => CBS_CHECKEDHOT,
+        (true, ..) => CBS_CHECKEDNORMAL,
+        (false, true, _, _) => CBS_UNCHECKEDDISABLED,
+        (false, _, true, _) => CBS_UNCHECKEDPRESSED,
+        (false, _, _, true) => CBS_UNCHECKEDHOT,
+        (false, ..) => CBS_UNCHECKEDNORMAL,
+    };
+    if !theme.is_invalid()
+        && let Ok(s) = unsafe { GetThemePartSize(theme, Some(hdc), part, glyph.0, None, TS_TRUE) }
+    {
+        size = s;
+    }
+    let top = rc.top + (height - size.cy).max(0) / 2;
+    let box_rc = RECT { left: rc.left, top, right: rc.left + size.cx, bottom: top + size.cy };
+    unsafe {
+        if theme.is_invalid() {
+            // No visual style (a classic theme): Windows' own frame control.
+            let mut flags = DFCS_BUTTONCHECK;
+            if checked {
+                flags |= DFCS_CHECKED;
+            }
+            if disabled {
+                flags |= DFCS_INACTIVE;
+            }
+            let mut r = box_rc;
+            let _ = DrawFrameControl(hdc, &mut r, DFC_BUTTON, flags);
+        } else {
+            let _ = DrawThemeBackground(theme, hdc, part, glyph.0, &box_rc, None);
+            let _ = CloseThemeData(theme);
+        }
+    }
+
+    // The label, in the colour the card wants.
+    let mut text = [0u16; 256];
+    let n = unsafe { GetWindowTextW(control, &mut text) } as usize;
+    let gap = size.cx / 4 + 3;
+    let mut text_rc = RECT { left: box_rc.right + gap, ..rc };
+    let font = HFONT(unsafe { SendMessageW(control, WM_GETFONT, None, None) }.0 as *mut _);
+    unsafe {
+        let old = (!font.is_invalid()).then(|| SelectObject(hdc, HGDIOBJ(font.0)));
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, colorref(if disabled { k.subtle } else { k.text }));
+        DrawTextW(hdc, &mut text[..n], &mut text_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        // The keyboard focus, when Windows is showing focus cues.
+        if state.contains(CDIS_FOCUS) {
+            let mut focus = text_rc;
+            let _ = DrawTextW(hdc, &mut text[..n], &mut focus, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+            let focus = RECT { top: rc.top, bottom: rc.bottom, right: focus.right + 2, left: focus.left - 2 };
+            let _ = DrawFocusRect(hdc, &focus);
+        }
+        if let Some(old) = old {
+            SelectObject(hdc, old);
+        }
+    }
+}
+
+/// Which background a control sits on: 0 the page, 1 a card, 2 the command
+/// bar (the same lookup [`color`] makes).
+fn background_under(parent: HWND, control: HWND) -> usize {
+    let mut r = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(control, &mut r);
+        let mut pts = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+        MapWindowPoints(None, Some(parent), &mut pts);
+        r = RECT { left: pts[0].x, top: pts[0].y, right: pts[1].x, bottom: pts[1].y };
+    }
+    let centre = POINT { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 };
+    PAGES.with(|p| {
+        let p = p.borrow();
+        let Some(st) = p.get(&(parent.0 as isize)) else { return 0 };
+        let inside = |c: &RECT| centre.x >= c.left && centre.x < c.right && centre.y >= c.top && centre.y < c.bottom;
+        if st.page.cards.iter().any(|c| inside(&c.rect)) {
+            1
+        } else if st.page.footer.is_some_and(|f| centre.y >= f) {
+            2
+        } else {
+            0
+        }
+    })
+}
+
 /// `WM_CTLCOLOREDIT` / `WM_CTLCOLORLISTBOX`: text boxes and the lists of
 /// combo boxes, in the field colour.
 pub fn field_color(wparam: WPARAM) -> LRESULT {
@@ -364,10 +507,9 @@ fn theme_control(h: HWND, dark: bool) {
         }
     };
     match class.as_str() {
-        // Check boxes included: a themed one draws its own label and ignores
-        // the colour `color` sets, so it needs the dark theme to be legible
-        // on a dark card. (Asking for no theme at all with an empty name
-        // doesn't take: the box stays themed and its label stays black.)
+        // Check boxes keep the theme for their box glyph; their label is
+        // drawn by `custom_draw`, because the control draws it in the
+        // theme's own colour whatever the parent asks for.
         "button" => theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" })),
         "combobox" | "edit" => theme(Some(if dark { "DarkMode_CFD" } else { "Explorer" })),
         "syslistview32" => {

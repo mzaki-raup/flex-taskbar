@@ -5,6 +5,12 @@
 //! comes back to the UI thread as [`WM_APP_UPDATE`](super::app::WM_APP_UPDATE)
 //! so dialogs and the swap happen where every other window does.
 //!
+//! What the user sees: *Check for updates…* in the menu looks now and says
+//! what it finds; by itself the app looks once a day and only speaks up when
+//! there is something newer. Either way the release is offered as a choice
+//! between installing it, leaving it for now, and skipping that release for
+//! good (remembered as `skipped_update`, so only something newer asks again).
+//!
 //! Installing is deliberately dull:
 //!
 //! 1. the program is downloaded to `data\update\`;
@@ -104,49 +110,88 @@ pub fn event(event: Event) {
 fn checked(manual: bool, result: Result<Option<Update>, String>) {
     let running = Version::running();
     match result {
-        Err(e) if manual => ui::warn(None, &format!("FlexTaskbar couldn't check for updates.\n\n{e}")),
+        Err(e) if manual => ui::warn(
+            None,
+            &format!(
+                "FlexTaskbar couldn't check for updates.
+
+{e}"
+            ),
+        ),
         // A background check that failed (no network, the forge is down) says
         // nothing: it tries again tomorrow.
         Err(_) => {}
         Ok(None) if manual => ui::info(None, &format!("FlexTaskbar {running} is the newest version.")),
         Ok(None) => {}
+        // Asked for: always offer, even a release that was skipped before.
         Ok(Some(update)) if manual => offer(update),
-        Ok(Some(update)) => app::balloon(
-            &format!(
-                "FlexTaskbar {} is available (you have {running}). Use \"Check for updates…\" to install it.",
-                update.version
-            ),
-            false,
-        ),
+        // Found by itself: offer it, unless it is the one they skipped.
+        Ok(Some(update)) if !skipped(&update) => offer(update),
+        Ok(Some(_)) => {}
     }
 }
 
-/// Tells the user what is available and starts the download if they want it.
+/// Whether this is the release the user chose to skip.
+fn skipped(update: &Update) -> bool {
+    app::with(|s| Version::parse(&s.cfg.skipped_update) == Some(update.version))
+}
+
+/// Remembers that this release was skipped, so it isn't offered again by
+/// itself. Anything newer still is.
+fn skip(update: &Update) {
+    app::with(|s| s.cfg.skipped_update = update.version.to_string());
+    app::save();
+}
+
+const UPDATE_NOW: i32 = 101;
+const NOT_NOW: i32 = 102;
+const SKIP: i32 = 103;
+const RELEASE_PAGE: i32 = 104;
+
+/// Tells the user what is available and lets them install it, leave it for
+/// now, or skip this release for good.
 fn offer(update: Update) {
     let running = Version::running();
+    let heading = format!("FlexTaskbar {} is available", update.version);
     let notes = first_lines(&update.notes, 12);
     if update.sums.is_none() {
-        // Nothing to check the download against: don't install it silently,
-        // just take them to the release.
-        let text = format!(
-            "FlexTaskbar {} is available (you have {running}), but it was published without \
-             a {} file, so this copy can't check what it downloads.\n\n{notes}\n\nOpen the release page?",
-            update.version,
+        // Nothing to check the download against: never install it, just
+        // offer to show them the release.
+        let detail = format!(
+            "You have {running}. This release was published without a {} file, so this copy can't check what it              downloads and won't install it by itself.
+
+{notes}",
             release::SUMS_ASSET
         );
-        if ui::confirm(None, &text) {
-            app::open_link(&update.page);
+        let choices = [
+            ui::Choice { id: RELEASE_PAGE, label: "Open the release page", note: "Download and replace it yourself" },
+            ui::Choice { id: NOT_NOW, label: "Not now", note: "" },
+            ui::Choice { id: SKIP, label: "Skip this version", note: "Don't mention this release again" },
+        ];
+        match ui::choose(None, "FlexTaskbar", &heading, &detail, &choices) {
+            Some(RELEASE_PAGE) => app::open_link(&update.page),
+            Some(SKIP) => skip(&update),
+            _ => {}
         }
         return;
     }
     let size = (update.exe.size as f64 / (1024.0 * 1024.0)).max(0.1);
-    let text = format!(
-        "FlexTaskbar {} is available (you have {running}).\n\n{notes}\n\n\
-         Download it ({size:.1} MB) and restart FlexTaskbar to use it?",
-        update.version
+    let detail = format!(
+        "You have {running}.
+
+{notes}"
     );
-    if !ui::confirm(None, &text) {
-        return;
+    let download_note = format!("Downloads {size:.1} MB, checks it, and restarts FlexTaskbar");
+    let choices = [
+        ui::Choice { id: UPDATE_NOW, label: "Update now", note: &download_note },
+        ui::Choice { id: NOT_NOW, label: "Not now", note: "Asked again tomorrow" },
+        ui::Choice { id: SKIP, label: "Skip this version", note: "Don't mention this release again" },
+    ];
+    match ui::choose(None, "FlexTaskbar", &heading, &detail, &choices) {
+        Some(UPDATE_NOW) => {}
+        Some(SKIP) => return skip(&update),
+        // Closed, left for now, or the dialog couldn't be shown.
+        _ => return,
     }
     app::balloon(&format!("Downloading FlexTaskbar {}…", update.version), false);
     thread(move || {

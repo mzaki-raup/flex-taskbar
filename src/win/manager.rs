@@ -1794,6 +1794,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             }
             LRESULT(0)
         }
+        WM_NOTIFY if let Some(r) = panel::custom_draw(lparam) => r,
         WM_NOTIFY => unsafe { on_notify(hwnd, msg, wparam, lparam) },
         WM_DROPFILES => {
             on_drop(hwnd, HDROP(wparam.0 as *mut _));

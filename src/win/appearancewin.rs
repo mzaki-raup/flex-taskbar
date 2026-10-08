@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BS_PUSHBUTTON, CreateWindowExW, DefWindowProcW, DestroyWindow, IsIconic, KillTimer, RegisterClassW, SW_RESTORE,
     SW_SHOW, SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, WINDOW_EX_STYLE,
     WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DESTROY, WM_ERASEBKGND, WM_HSCROLL, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW, WS_CAPTION, WS_CHILD,
+    WM_DESTROY, WM_ERASEBKGND, WM_HSCROLL, WM_NOTIFY, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW, WS_CAPTION, WS_CHILD,
     WS_CLIPCHILDREN, WS_MINIMIZEBOX, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{PCWSTR, w};
@@ -982,6 +982,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_PAINT => panel::paint(hwnd),
         WM_ERASEBKGND => LRESULT(1),
+        WM_NOTIFY if let Some(r) = panel::custom_draw(lparam) => r,
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => panel::color(hwnd, wparam, lparam),
         WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => panel::field_color(wparam),
         WM_CLOSE => {
