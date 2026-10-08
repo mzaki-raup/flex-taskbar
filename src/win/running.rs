@@ -114,7 +114,7 @@ pub fn refresh() {
     }
     let own = std::process::id();
     let mut seen: Vec<u32> = Vec::new();
-    let mut windows: Vec<(isize, Vec<String>)> = Vec::new();
+    let mut windows: Vec<(isize, running::WindowKeys)> = Vec::new();
     for h in list {
         if !is_task_window(h) {
             continue;

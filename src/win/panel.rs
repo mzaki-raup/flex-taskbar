@@ -23,7 +23,7 @@ use windows::Win32::UI::Controls::{
     LVM_SETBKCOLOR, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, SetWindowTheme, TVM_SETBKCOLOR, TVM_SETTEXTCOLOR,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GWL_STYLE, GetClassNameW, GetClientRect, GetWindowLongW, GetWindowRect, SendMessageW,
+    EnumChildWindows, GetClassNameW, GetClientRect, GetWindowRect, SendMessageW,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -354,7 +354,6 @@ fn theme_control(h: HWND, dark: bool) {
     let mut buf = [0u16; 64];
     let n = unsafe { GetClassNameW(h, &mut buf) } as usize;
     let class = String::from_utf16_lossy(&buf[..n]).to_ascii_lowercase();
-    let style = unsafe { GetWindowLongW(h, GWL_STYLE) } as u32 & 0xF;
     let k = colours();
     // The visual-styles class names Windows uses for its own dark windows
     // (Explorer, the file dialogs). Unknown names are harmless.
@@ -365,16 +364,11 @@ fn theme_control(h: HWND, dark: bool) {
         }
     };
     match class.as_str() {
-        "button" => {
-            const BS_CHECKBOX_KINDS: [u32; 4] = [2, 3, 5, 6]; // check boxes and 3-state boxes
-            if BS_CHECKBOX_KINDS.contains(&style) {
-                // A themed check box ignores the text colour, so in dark mode
-                // it is drawn unthemed (its label then follows `color`).
-                if dark { theme(Some("")) } else { theme(Some("Explorer")) }
-            } else {
-                theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" }));
-            }
-        }
+        // Check boxes included: a themed one draws its own label and ignores
+        // the colour `color` sets, so it needs the dark theme to be legible
+        // on a dark card. (Asking for no theme at all with an empty name
+        // doesn't take: the box stays themed and its label stays black.)
+        "button" => theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" })),
         "combobox" | "edit" => theme(Some(if dark { "DarkMode_CFD" } else { "Explorer" })),
         "syslistview32" => {
             theme(Some(if dark { "DarkMode_Explorer" } else { "Explorer" }));
