@@ -5,7 +5,10 @@ fn main() {
     println!("cargo:rerun-if-changed=assets/app.manifest");
     println!("cargo:rerun-if-changed=assets/app.ico");
     // The version block below is built from the package version, so a release
-    // that changes only Cargo.toml still rebuilds the resource.
+    // that changes nothing but Cargo.toml still rebuilds the resource. Watch
+    // the file itself: `rerun-if-env-changed=CARGO_PKG_VERSION` is not enough
+    // on its own, and a stale resource would claim the wrong version.
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
 
     // Only Windows builds get the icon + manifest resource. The manifest is not

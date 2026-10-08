@@ -99,6 +99,10 @@ const CAT_HOTKEY_SET: u16 = 80;
 const CAT_SMART: u16 = 81;
 const LBL_HK_NEXT: u16 = 82;
 const HK_NEXT: u16 = 83;
+/// The version this copy is, and how the search for a newer one went.
+const LBL_VERSION: u16 = 84;
+/// Looks for an update, or installs the one already found.
+const UPDATE: u16 = 85;
 
 const EN_CHANGE: u16 = 0x0300;
 /// Posted to ourselves after a rename so the label updates once the edit commits.
@@ -220,6 +224,7 @@ fn create() {
         };
 
         controls.insert(LBL_CATS, label("", LBL_CATS));
+        controls.insert(LBL_VERSION, label("", LBL_VERSION));
         controls.insert(LBL_APPS, label("Apps in this category", LBL_APPS));
         controls.insert(LBL_ALL, label("Select apps, then add or pin them", LBL_ALL));
 
@@ -295,6 +300,8 @@ fn create() {
             ("New custom app…", CUSTOM_NEW),
             ("Edit…", CUSTOM_EDIT),
             ("Delete", CUSTOM_DELETE),
+            // Its text follows what the last check found (see `show_version`).
+            ("Check for updates", UPDATE),
         ] {
             controls.insert(id, button(text, id));
         }
@@ -527,6 +534,11 @@ fn layout() {
     place(PACKAGE_APPS, ix[1], line(1), inner_w, bh);
     row(&[RESCAN, IMPORT], ix[1], line(2), inner_w);
     row(&[BACKUP, RESTORE], ix[1], line(3), inner_w);
+    // Which version this is, and whether there is a newer one, on the row
+    // under the settings: the label on the left, its button at the end.
+    let update_w = widths(&[UPDATE]).iter().sum::<i32>().clamp(s(110), inner_w);
+    place(LBL_VERSION, ix[1], line(4) + s(6), (inner_w - update_w - gap).max(0), lh);
+    place(UPDATE, ix[1] + inner_w - update_w, line(4), update_w, bh);
     let lw = s(70);
     place(LBL_HK_SEARCH, ix[2], line(0) + s(5), lw, lh);
     place(HK_SEARCH, ix[2] + lw, line(0) + s(2), inner_w - lw, s(24));
@@ -1550,12 +1562,31 @@ fn load_settings() {
         }
         let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctl(STRIP_RESERVE), show);
     }
+    show_version();
 }
 
 /// The strip was shown/hidden from elsewhere (tray menu, strip context menu).
 pub fn settings_changed() {
     if hwnd().is_some() {
         load_settings();
+    }
+}
+
+/// A check for updates started or finished (`win::update`): show where it got
+/// to, if this window is open.
+pub fn update_state_changed() {
+    if hwnd().is_some() {
+        show_version();
+    }
+}
+
+/// Writes the version line and what the button beside it offers to do.
+fn show_version() {
+    let state = super::update::state();
+    ui::set_text(ctl(LBL_VERSION), &crate::release::version_line(crate::release::Version::running(), state));
+    ui::set_text(ctl(UPDATE), state.action());
+    unsafe {
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctl(UPDATE), state.enabled());
     }
 }
 
@@ -1798,6 +1829,14 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     app::with(|s| s.cfg.settings.reserve_space = reserve);
                     app::save();
                     super::strip::apply_settings();
+                }
+                UPDATE => {
+                    // A release the last check already found is offered
+                    // straight away; otherwise go and look.
+                    if !super::update::state().offers_update() || !super::update::offer_found() {
+                        super::update::check(super::update::Asked::FromWindow);
+                    }
+                    show_version();
                 }
                 CUSTOM_NEW => new_custom_app(hwnd, CustomApp::default()),
                 CUSTOM_EDIT => edit_custom_app(hwnd),

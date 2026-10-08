@@ -26,7 +26,8 @@
 use super::app;
 use super::paths;
 use super::ui;
-use crate::release::{self, Update, Version};
+use crate::release::{self, Update, UpdateState, Version};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 /// Where this copy looks for its own releases. A different build (or a fork)
@@ -42,11 +43,37 @@ const MAX_EXE: usize = 128 << 20;
 /// The name the running program is renamed to while it is replaced.
 const OLD_EXE: &str = "FlexTaskbar.old.exe";
 
+/// Who wanted the check, which decides what it says when there is nothing to
+/// report. A release that is found is always offered, however it was asked
+/// for — bar one the user has skipped, which only an explicit ask re-offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    /// The daily look, by itself. Says nothing unless there is something new.
+    Quietly,
+    /// *Check for updates…* in the menu: reports whatever it finds, including
+    /// "you already have the newest", because nothing else would.
+    FromMenu,
+    /// The button in the Manage window, which sits beside a line that reports
+    /// the outcome itself — so no dialog for a result that line already gives.
+    FromWindow,
+}
+
+impl Asked {
+    /// Whether the user asked for this one, as opposed to the daily look.
+    fn by_hand(self) -> bool {
+        self != Asked::Quietly
+    }
+
+    /// Whether to put up a dialog for an outcome that isn't an update.
+    fn reports_nothing_new(self) -> bool {
+        self == Asked::FromMenu
+    }
+}
+
 /// What a helper thread has finished doing, handled on the UI thread.
 pub enum Event {
-    /// A check finished. `manual` tells a quiet background check from the one
-    /// the user asked for, which says so even when there is nothing new.
-    Checked { manual: bool, result: Result<Option<Update>, String> },
+    /// A check finished, and who asked for it.
+    Checked { asked: Asked, result: Result<Option<Update>, String> },
     /// A download finished: the file it was written to, verified.
     Downloaded { update: Box<Update>, result: Result<PathBuf, String> },
 }
@@ -58,6 +85,37 @@ pub enum Event {
 pub fn clean_leftovers() {
     if let Some(dir) = paths::get().exe.parent() {
         let _ = std::fs::remove_file(dir.join(OLD_EXE));
+    }
+}
+
+thread_local! {
+    /// How the last look for a newer release went, and what it found. The
+    /// Manage window shows this, and can offer the release again without
+    /// going back to the forge.
+    static STATE: RefCell<(UpdateState, Option<Update>)> = const { RefCell::new((UpdateState::Unknown, None)) };
+}
+
+/// How the search for a newer release is going, for the Manage window.
+pub fn state() -> UpdateState {
+    STATE.with(|s| s.borrow().0)
+}
+
+fn set_state(now: UpdateState, found: Option<Update>) {
+    STATE.with(|s| *s.borrow_mut() = (now, found));
+    // The Manage window shows it, when it is open.
+    super::manager::update_state_changed();
+}
+
+/// Offers the release the last check found, without asking the forge again.
+/// Returns whether there was one to offer.
+pub fn offer_found() -> bool {
+    let found = STATE.with(|s| s.borrow().1.clone());
+    match found {
+        Some(update) => {
+            offer(update);
+            true
+        }
+        None => false,
     }
 }
 
@@ -79,13 +137,14 @@ pub fn check_in_background() {
     });
     if due {
         app::save();
-        check(false);
+        check(Asked::Quietly);
     }
 }
 
-/// Asks the forge for its releases. `manual` is the user having picked
-/// *Check for updates…*, which reports whatever it finds.
-pub fn check(manual: bool) {
+/// Asks the forge for its releases. What it says when it finds nothing new
+/// depends on who asked (see [`Asked`]).
+pub fn check(asked: Asked) {
+    set_state(UpdateState::Checking, None);
     let feed = app::with(|s| {
         let feed = s.cfg.settings.update_feed.trim();
         if feed.is_empty() { RELEASES_API.to_string() } else { feed.to_string() }
@@ -95,22 +154,28 @@ pub fn check(manual: bool) {
             let text = String::from_utf8(body).map_err(|_| "the answer wasn't text".to_string())?;
             Ok(release::newer_than(&text, Version::running()))
         });
-        Event::Checked { manual, result }
+        Event::Checked { asked, result }
     });
 }
 
 /// A check or a download finished (UI thread).
 pub fn event(event: Event) {
     match event {
-        Event::Checked { manual, result } => checked(manual, result),
+        Event::Checked { asked, result } => checked(asked, result),
         Event::Downloaded { update, result } => downloaded(*update, result),
     }
 }
 
-fn checked(manual: bool, result: Result<Option<Update>, String>) {
+fn checked(asked: Asked, result: Result<Option<Update>, String>) {
     let running = Version::running();
+    // Remember how it went, whoever asked: the Manage window shows it.
+    match &result {
+        Err(_) => set_state(UpdateState::Failed, None),
+        Ok(None) => set_state(UpdateState::UpToDate, None),
+        Ok(Some(update)) => set_state(UpdateState::Available(update.version), Some(update.clone())),
+    }
     match result {
-        Err(e) if manual => ui::warn(
+        Err(e) if asked.by_hand() => ui::warn(
             None,
             &format!(
                 "FlexTaskbar couldn't check for updates.
@@ -121,10 +186,14 @@ fn checked(manual: bool, result: Result<Option<Update>, String>) {
         // A background check that failed (no network, the forge is down) says
         // nothing: it tries again tomorrow.
         Err(_) => {}
-        Ok(None) if manual => ui::info(None, &format!("FlexTaskbar {running} is the newest version.")),
+        // The Manage window's own line already says this, so only the menu
+        // puts up a dialog for it.
+        Ok(None) if asked.reports_nothing_new() => {
+            ui::info(None, &format!("FlexTaskbar {running} is the newest version."))
+        }
         Ok(None) => {}
         // Asked for: always offer, even a release that was skipped before.
-        Ok(Some(update)) if manual => offer(update),
+        Ok(Some(update)) if asked.by_hand() => offer(update),
         // Found by itself: offer it, unless it is the one they skipped.
         Ok(Some(update)) if !skipped(&update) => offer(update),
         Ok(Some(_)) => {}

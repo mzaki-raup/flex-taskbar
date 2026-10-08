@@ -47,6 +47,65 @@ impl std::fmt::Display for Version {
     }
 }
 
+/// Where the app has got to in looking for a newer release. The Manage window
+/// shows this beside the running version, so someone can see whether they are
+/// up to date without going to the menu (see `win::manager`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpdateState {
+    /// Nothing has been looked for yet in this run.
+    #[default]
+    Unknown,
+    /// A check is on its way.
+    Checking,
+    /// Checked, and this copy is the newest there is.
+    UpToDate,
+    /// A newer release is published.
+    Available(Version),
+    /// The last check couldn't reach the forge — no network, or it is down.
+    Failed,
+}
+
+impl UpdateState {
+    /// What to say beside the version. Empty before anything has been looked
+    /// for: an unasked-for "unknown" tells nobody anything.
+    pub fn note(self) -> String {
+        match self {
+            UpdateState::Unknown => String::new(),
+            UpdateState::Checking => "checking for updates…".into(),
+            UpdateState::UpToDate => "up to date".into(),
+            UpdateState::Available(v) => format!("{v} is available"),
+            UpdateState::Failed => "couldn't check for updates".into(),
+        }
+    }
+
+    /// What the button beside it offers to do.
+    pub fn action(self) -> &'static str {
+        match self {
+            UpdateState::Checking => "Checking…",
+            UpdateState::Available(_) => "Update…",
+            _ => "Check for updates",
+        }
+    }
+
+    /// Whether that button does anything. Only while a check is already
+    /// running does it not: there is nothing useful to ask for twice.
+    pub fn enabled(self) -> bool {
+        self != UpdateState::Checking
+    }
+
+    /// Whether pressing it installs rather than looks.
+    pub fn offers_update(self) -> bool {
+        matches!(self, UpdateState::Available(_))
+    }
+}
+
+/// The line the Manage window shows: the running version, and how the search
+/// for a newer one is going.
+pub fn version_line(running: Version, state: UpdateState) -> String {
+    let note = state.note();
+    if note.is_empty() { format!("FlexTaskbar {running}") } else { format!("FlexTaskbar {running} — {note}") }
+}
+
 /// A file attached to a release.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
@@ -151,6 +210,49 @@ mod tests {
 
     fn v(major: u32, minor: u32, patch: u32) -> Version {
         Version { major, minor, patch }
+    }
+
+    #[test]
+    fn the_version_line_says_nothing_until_something_has_been_looked_for() {
+        let v = Version { major: 2, minor: 1, patch: 1 };
+        assert_eq!(version_line(v, UpdateState::Unknown), "FlexTaskbar 2.1.1");
+    }
+
+    #[test]
+    fn the_version_line_says_how_the_search_went() {
+        let v = Version { major: 2, minor: 1, patch: 1 };
+        let newer = Version { major: 2, minor: 2, patch: 0 };
+        assert_eq!(version_line(v, UpdateState::UpToDate), "FlexTaskbar 2.1.1 — up to date");
+        assert_eq!(version_line(v, UpdateState::Available(newer)), "FlexTaskbar 2.1.1 — 2.2.0 is available");
+        assert_eq!(version_line(v, UpdateState::Checking), "FlexTaskbar 2.1.1 — checking for updates…");
+        assert_eq!(version_line(v, UpdateState::Failed), "FlexTaskbar 2.1.1 — couldn't check for updates");
+    }
+
+    #[test]
+    fn the_button_offers_to_install_only_when_there_is_something_to_install() {
+        let newer = Version { major: 2, minor: 2, patch: 0 };
+        assert_eq!(UpdateState::Available(newer).action(), "Update…");
+        assert!(UpdateState::Available(newer).offers_update());
+        for other in [UpdateState::Unknown, UpdateState::UpToDate, UpdateState::Failed] {
+            assert_eq!(other.action(), "Check for updates", "{other:?}");
+            assert!(!other.offers_update(), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn the_button_is_dead_only_while_a_check_is_running() {
+        assert!(!UpdateState::Checking.enabled());
+        assert_eq!(UpdateState::Checking.action(), "Checking…");
+        let newer = Version { major: 2, minor: 2, patch: 0 };
+        for other in [UpdateState::Unknown, UpdateState::UpToDate, UpdateState::Failed, UpdateState::Available(newer)] {
+            assert!(other.enabled(), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn a_failed_check_is_not_mistaken_for_being_up_to_date() {
+        assert_ne!(UpdateState::Failed.note(), UpdateState::UpToDate.note());
+        assert!(!UpdateState::Failed.offers_update());
     }
 
     #[test]

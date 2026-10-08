@@ -724,6 +724,16 @@ If `config.json` is ever damaged, FlexTaskbar keeps the damaged file as
 
 FlexTaskbar can replace itself with a newer release.
 
+- **Which version you have, and whether there is a newer one.** The Manage
+  window's *Apps and settings* card ends with a line saying so — e.g.
+  *FlexTaskbar 2.1.0 — up to date*, or *FlexTaskbar 2.1.0 — 2.2.0 is
+  available* — with a button beside it. The button reads *Check for updates*
+  until a newer release is known and *Update…* once one is, which installs it
+  without asking the forge again. While a check is running the line says so
+  and the button is greyed. A check started from here reports through that
+  line rather than a dialog; one that finds an update still offers it.
+
+  ![The Manage window's version line: FlexTaskbar 2.1.0, up to date, with a Check for updates button](screenshots/version-line.png)
 - **Where it looks.** The releases published for the repository it was built
   from, over HTTPS. *Check for updates…* at the bottom of the menu (it shows
   the running version beside it) looks now and reports whatever it finds; by
@@ -933,7 +943,7 @@ It needs a desktop to draw on. Where there isn't one — a runner started as a
 Windows **service** runs in session 0 and has none — the script exits 2 and
 CI reports a skip rather than a failure. For the smoke test to actually run,
 the runner has to be started as a logged-in user.
-The 180 unit tests cover:
+The 185 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -966,6 +976,11 @@ The 180 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- the version line in the Manage window: what it says at each stage (nothing
+  looked for yet, checking, up to date, a version available, the check
+  failed), what its button then offers to do (check, install, or nothing
+  while a check is running), and that a failed check is never mistaken for
+  being up to date
 - the Windows 11 backdrop: each kind asking DWM for its own (`DWMSBT_*`),
   the bar's own fill going when one is on, the floating margin and *Fit to
   icons* not applying, *Fade* auto-hide becoming *Slide*, the background
