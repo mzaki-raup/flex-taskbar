@@ -7,7 +7,7 @@
 #     powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1
 #     powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1 -Exe path\to\FlexTaskbar.exe
 #
-# The app runs from a copy in a temporary folder with its own `data\`, so a
+# The app runs from a copy in a temporary folder with its own `FlexTaskbarData\`, so a
 # FlexTaskbar already installed is left alone — and it is stopped again at the
 # end whatever happens.
 #
@@ -200,7 +200,7 @@ try {
     Check "it gives the screen space back when it exits" `
         (($returned.Bottom - $returned.Top) -ge ($after.Bottom - $after.Top)) `
         "work area still $($returned.Bottom - $returned.Top) tall"
-    Check "it leaves no crash log" (-not (Test-Path (Join-Path $dir "data\crash.log")))
+    Check "it leaves no crash log" (-not (Test-Path (Join-Path $dir "FlexTaskbarData\crash.log")))
 }
 finally {
     & $copy --exit 2>$null | Out-Null
