@@ -46,8 +46,10 @@ can't be. That trade is described under *Look*.
   chosen screen. Each bar is docked and reserves space on its own monitor,
   at that monitor's DPI; attaching or detaching a screen adds or removes its
   bar and leaves the others alone. The choosing and add/remove logic is unit
-  tested; two screens at once still need a real multi-monitor PC (see the
-  README's *Still not verified*).
+  tested, and two screens at different scalings have now been seen working on
+  a real PC: a bar on each, docked and reserving space on its own monitor, at
+  its own DPI. Only attaching or detaching a screen while running is still
+  unseen (see the README's *Still not verified*).
 - [x] **Jump lists and quick actions** · 🔴
   Right-click an app, on the bar or in a flyout, for the files it was last
   used on (its Windows jump list, read through `IApplicationDocumentLists`)

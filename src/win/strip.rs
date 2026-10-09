@@ -38,6 +38,7 @@ use crate::striplayout::{self, BarLayout, Edge, Hit, Metrics, Slot};
 use resvg::tiny_skia::Pixmap;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, EndPaint, FillRect,
@@ -132,7 +133,9 @@ struct Strip {
     /// The frame timer is running (re-arming it would delay the next frame).
     anim_running: bool,
     /// The last drawing, moved or faded while auto-hiding without redrawing.
-    frame: Option<Pixmap>,
+    /// Behind an `Rc` so it can be taken out of the list before being put on
+    /// screen: see `present_frame_at` for why that matters.
+    frame: Option<Rc<Pixmap>>,
     /// Auto-hide: how hidden the bar is (0 shown, 1 hidden), where it is
     /// heading, and the time of the last frame.
     hide: f32,
@@ -341,7 +344,7 @@ pub fn apply_appearance() {
             s.look = look.clone();
             s.colors = colors;
         });
-        reposition();
+        reposition_at(i);
     });
     schedule_hide();
 }
@@ -469,8 +472,8 @@ fn discard(s: Strip) {
 
 // ---------------------------------------------------------------- auto-hide
 
-fn auto_hide_on() -> bool {
-    with(|s| s.look.auto_hide != AutoHide::Off).unwrap_or(false)
+fn auto_hide_on_at(index: usize) -> bool {
+    read_at(index, |s| s.look.auto_hide != AutoHide::Off).unwrap_or(false)
 }
 
 /// The pointer left the bar (or a flyout or menu closed): hide after the
@@ -553,12 +556,30 @@ fn present_frame() {
     present_frame_at(active());
 }
 
+/// Puts a bar's last drawing on screen.
+///
+/// Everything it needs is copied out of the list first and the borrow let go
+/// before any of it is drawn. `UpdateLayeredWindow` and `SetWindowPos` both
+/// send messages to windows on this thread and wait for them, so a window
+/// proc runs *inside* those calls — and with a bar on each screen, putting one
+/// on screen lands in the other one's proc, which asks the list for the bar it
+/// belongs to. Holding the borrow across the call made that a panic, and the
+/// app died on startup with the second monitor attached.
 fn present_frame_at(index: usize) {
-    read_at(index, |s| {
-        let Some(pix) = &s.frame else { return };
+    let Some(what) = read_at(index, |s| {
         let across = if s.edge.vertical() { ui::rect_w(&s.win) } else { ui::rect_h(&s.win) };
         let reveal = scale(autohide::REVEAL_DIP, s.dpi);
         let ((dx, dy), alpha) = autohide::placement(s.look.auto_hide, s.hide, s.edge, across, reveal);
+        // The picture is shared, not copied: an `Rc` costs a counter, where
+        // cloning the pixmap would cost the whole bar every frame.
+        (s.frame.clone(), s.hwnd, s.win, s.backdrop, (dx, dy), alpha)
+    }) else {
+        return;
+    };
+    let (frame, hwnd, win, backdrop, (dx, dy), alpha) = what;
+    let Some(pix) = frame else { return };
+    {
+        let s = Placed { hwnd, win, backdrop };
         if s.backdrop.on() {
             // A window with a backdrop isn't layered, so the picture can't be
             // moved or faded as it is put on screen: the window itself moves,
@@ -578,9 +599,17 @@ fn present_frame_at(index: usize) {
                 let _ = InvalidateRect(Some(s.hwnd), None, false);
             }
         } else {
-            canvas::present_pixmap_alpha(pix, s.hwnd, s.win.left + dx, s.win.top + dy, alpha);
+            canvas::present_pixmap_alpha(&pix, s.hwnd, s.win.left + dx, s.win.top + dy, alpha);
         }
-    });
+    }
+}
+
+/// Where a bar is and how it is drawn, copied out of the list so it can be
+/// used after the borrow has been let go.
+struct Placed {
+    hwnd: HWND,
+    win: RECT,
+    backdrop: Backdrop,
 }
 
 /// Draws the last picture into a bar that has a backdrop: an ordinary window,
@@ -601,11 +630,12 @@ fn on_paint(hwnd: HWND) {
             FillRect(hdc, &ps.rcPaint, black);
             let _ = DeleteObject(HGDIOBJ(black.0));
         }
-        read_at(index, |s| {
-            if let Some(pix) = &s.frame {
-                canvas::paint_pixmap(pix, hdc, 0, 0);
-            }
-        });
+        // The picture comes out of the list before it is drawn, for the same
+        // reason as in `present_frame_at`.
+        let frame = read_at(index, |s| s.frame.clone()).flatten();
+        if let Some(pix) = frame {
+            canvas::paint_pixmap(&pix, hdc, 0, 0);
+        }
         let _ = EndPaint(hwnd, &ps);
     }
 }
@@ -628,7 +658,7 @@ pub fn shell_restarted() {
                 let mut abd = appbar_data(h);
                 SHAppBarMessage(ABM_NEW, &mut abd);
             }
-            reposition();
+            reposition_at(i);
         }
     });
 }
@@ -771,10 +801,6 @@ fn slot_rect(s: &Strip, slot: Slot) -> RECT {
     } else {
         RECT { left: m + slot.x, top: m, right: m + slot.right(), bottom: m + t }
     }
-}
-
-fn relayout() {
-    relayout_at(active());
 }
 
 fn relayout_at(index: usize) {
@@ -1072,7 +1098,19 @@ fn taskbar_edge(h: HWND) -> Edge {
 /// is followed; a screen that went away leaves the bar where it was until
 /// `apply_settings` removes it.
 fn reposition() {
-    let Some((h, device)) = read(|s| (s.hwnd, s.device.clone())) else { return };
+    reposition_at(active());
+}
+
+/// Docks one bar against its edge of its own monitor.
+///
+/// Everything here names the bar by index rather than working on "the active
+/// one". The AppBar messages below send messages to other windows on this
+/// thread and wait for them, so a window proc runs inside them — and a proc
+/// makes its own bar the active one. Reading the active bar after that point
+/// would be reading a different bar, and writing to it would put this bar's
+/// place and size on another screen's.
+fn reposition_at(index: usize) {
+    let Some((h, device)) = read_at(index, |s| (s.hwnd, s.device.clone())) else { return };
     if REPOSITIONING.with(|r| r.replace(true)) {
         return; // our own ABM_SETPOS can notify us again
     }
@@ -1080,14 +1118,14 @@ fn reposition() {
         (s.cfg.settings.strip_height.clamp(24, 96), s.cfg.settings.reserve_space, s.cfg.settings.strip_edge)
     });
     let dpi = ui::dpi_of(h);
-    let margin_dip = with(|s| s.look.margin).unwrap_or(0) as i32;
+    let margin_dip = read_at(index, |s| s.look.margin).unwrap_or(0) as i32;
     // The window is the bar plus its floating margin on every side.
     let thickness = scale(size_dip as i32, dpi) + 2 * scale(margin_dip, dpi);
     let (monitor, work) = match super::monitors::all().into_iter().find(|s| s.device == device) {
         Some(screen) => (super::monitors::to_rect(screen.bounds), super::monitors::to_rect(screen.work)),
-        None => read(|s| (s.mon, s.work)).unwrap_or_else(primary_monitor),
+        None => read_at(index, |s| (s.mon, s.work)).unwrap_or_else(primary_monitor),
     };
-    with(|s| {
+    with_at(index, |s| {
         s.mon = monitor;
         s.work = work;
     });
@@ -1095,8 +1133,8 @@ fn reposition() {
     let edge = setting.resolve(taskbar_edge(h));
 
     // An auto-hiding bar doesn't keep screen space: windows go under it.
-    let reserve = reserve && !auto_hide_on();
-    let was_reserved = with(|s| std::mem::replace(&mut s.reserved, reserve)).unwrap_or(false);
+    let reserve = reserve && !auto_hide_on_at(index);
+    let was_reserved = with_at(index, |s| std::mem::replace(&mut s.reserved, reserve)).unwrap_or(false);
     let rect = if reserve {
         abd.uEdge = abe(edge);
         abd.rc = band(monitor, edge, thickness);
@@ -1127,9 +1165,9 @@ fn reposition() {
         };
         // Auto-hiding: at the screen's own edge (over the Windows taskbar
         // while shown), so hiding leaves just a line at the very edge.
-        band(if auto_hide_on() { monitor } else { work }, edge, thickness)
+        band(if auto_hide_on_at(index) { monitor } else { work }, edge, thickness)
     };
-    let dpi_changed = with(|s| {
+    let dpi_changed = with_at(index, |s| {
         s.edge = edge;
         s.win = rect;
         let changed = std::mem::replace(&mut s.dpi, dpi) != dpi;
@@ -1155,11 +1193,12 @@ fn reposition() {
         );
     }
     REPOSITIONING.with(|r| r.set(false));
-    let icons_missing = with(|s| s.icons.is_empty() && !s.items.is_empty()).unwrap_or(false);
+    let icons_missing = read_at(index, |s| s.icons.is_empty() && !s.items.is_empty()).unwrap_or(false);
     if dpi_changed || icons_missing {
-        refresh();
+        refresh_at(index);
+        flyout::refresh();
     } else {
-        relayout();
+        relayout_at(index);
     }
 }
 
@@ -1297,7 +1336,7 @@ fn move_bar() {
         flyout::close();
         // One edge setting for every bar, so they all move together.
         app::with(|s| s.cfg.settings.strip_edge = crate::config::StripEdge::fixed(edge));
-        for_each(|_| reposition());
+        for_each(reposition_at);
     }
 }
 
@@ -1574,7 +1613,7 @@ fn render_at(index: usize) {
     })
     .flatten();
     if let Some(pix) = drawn {
-        with_at(index, |s| s.frame = Some(pix));
+        with_at(index, |s| s.frame = Some(Rc::new(pix)));
         present_frame_at(index);
         super::diagnostics::bar_drawn(started);
     }
@@ -2054,7 +2093,11 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         }
         WM_APP_APPBAR => {
             match wparam.0 as u32 {
-                ABN_POSCHANGED | ABN_STATECHANGE => reposition(),
+                ABN_POSCHANGED | ABN_STATECHANGE => {
+                    if let Some(i) = index_of(hwnd) {
+                        reposition_at(i);
+                    }
+                }
                 ABN_FULLSCREENAPP => unsafe {
                     // Get out of the way of games and full-screen video.
                     flyout::close();
@@ -2071,7 +2114,9 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
         // DWM paints the backdrop; filling the background would cover it.
         WM_ERASEBKGND if read(|s| s.backdrop.on()).unwrap_or(false) => LRESULT(1),
         WM_DPICHANGED => {
-            reposition();
+            if let Some(i) = index_of(hwnd) {
+                reposition_at(i);
+            }
             LRESULT(0)
         }
         WM_DISPLAYCHANGE => {
