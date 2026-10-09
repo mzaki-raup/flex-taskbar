@@ -686,6 +686,7 @@ FlexTaskbarData\
   icons\                copies of the custom icons and indicator picture you picked
   update\               a downloaded update, until it is put in place
   crash.log             restarts and problems, newest last
+  starts.log            the last 8 starts, for the Diagnostics report
 ```
 
 To move or back up your setup, copy the folder, or use **Back up settings…**
@@ -935,6 +936,27 @@ Ctrl+C copies the message, and the same text is saved to
 collected unless something is drawn, and nothing leaves the PC. The
 supervisor process is separate and small, and isn't counted.
 
+**Did it start by itself?** The report ends with when this copy started and
+the eight before it, each said as how long after Windows itself started — so
+a start within a few minutes of a boot reads *at logon*, and a later one
+doesn't. Under them is what *Start with Windows* is actually set to:
+
+```
+This copy started 2 min ago - at logon, 38 s after Windows started
+Started before that:
+  1 d 3 h ago - at logon, 41 s after Windows started
+Start with Windows: on, and set to start this copy
+```
+
+This is the one question nothing else can answer afterwards. Windows keeps no
+record of having run a startup entry, and a copy that never started leaves no
+trace at all — so if the bar isn't there after a reboot, there is otherwise
+nothing to look at. It also catches the trap this app is prone to, being
+portable: the entry can be **on but naming a copy somewhere else**, in which
+case the line says so plainly and that other copy is the one Windows starts.
+The starts are kept in `FlexTaskbarData\starts.log`, eight lines of two
+numbers; deleting it loses nothing but the history.
+
 ### Measured numbers
 
 Both columns come from *Diagnostics…* on the machine named. The two runs are
@@ -986,7 +1008,7 @@ logged in — so this is a genuine trade rather than one being simply better.
 Pick the user session when you want the desktop checks; pick the service when
 you want builds to happen while nobody is at the machine.
 
-The 200 unit tests cover:
+The 206 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -1019,6 +1041,11 @@ The 200 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- the record of starts behind the Diagnostics report: a start soon after
+  Windows counts as being at logon and a much later one doesn't (including
+  exactly on the boundary), a start surviving being written and read back,
+  damaged lines being dropped without losing the rest, only the newest being
+  kept, and the report saying which of the two a start was
 - which program opens a folder: the one `file_manager` names winning over any
   found, one it names that has since been uninstalled falling back to looking
   rather than doing nothing, the order the usual places are tried in (a
