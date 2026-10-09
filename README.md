@@ -214,7 +214,11 @@ FlexTaskbar:
 
   ![The seven indicator styles on the bar's category icons](screenshots/indicators.png)
 - **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
-  path and pins it to the bar. ⚙ opens the Manage window.
+  path and pins it to the bar. ⚙ **opens the Manage window, and closes it
+  again** if it is already open — the same thing its *Close* button does, so
+  the gear puts it away without going to the window to do it. Only the gear
+  works that way: the tray menu, the bar's context menu and `--manage` all
+  mean "show it", and closing one that was already up would be a surprise.
 - **Category flyouts.** Resting the pointer on a category opens a flyout beside
   it, on the screen side: above a bottom bar, below a top bar, to the right of
   a left bar and to the left of a right bar:
@@ -399,6 +403,13 @@ FlexTaskbar:
   - the files the app was last used on — its **Windows jump list**, the same
     list the taskbar shows — at most ten, newest first. Click one to open it.
     Long names are shortened in the middle so the kind of file still shows.
+  - ***Run***, when the app already has a window open — a click switches to
+    that window rather than starting anything, so this is how to ask for
+    another copy without holding Shift. It sits directly above *Run as
+    administrator*, and isn't there at all when the app isn't running. Whether
+    a second copy actually appears is the app's own business: a desktop
+    program like PuTTY opens another window, while a Store app such as Notepad
+    brings its existing one forward instead.
   - ***Open file location***, ***Run as administrator*** and ***Uninstall***.
 
   Neither part is guessed. The files come from the app's own jump list
@@ -842,6 +853,22 @@ These can be edited in `FlexTaskbarData\config.json` while FlexTaskbar is not ru
 | `hover_delay_ms` | `100` | How long the pointer rests on a category before its flyout opens |
 | `check_for_updates` | `true` | Look for a newer release once a day (see *Updating*) |
 | `update_feed` | `""` | Where to look, if not the releases of the repository this was built from |
+| `file_manager` | `""` | The program *Open data folder* opens a folder with. Empty: look for Eden Explorer, then fall back to Windows Explorer |
+
+**Opening a folder.** *Open data folder* in the Manage window opens the data
+folder in [Eden Explorer](https://git.zacx.net/owner/eden-explorer) when it is
+installed, and in Windows Explorer when it isn't. Eden Explorer keeps a single
+window and opens each folder handed to it as a **tab**, so this adds a tab to
+the window already open rather than putting another window on the pile.
+
+It is found without being configured: beside FlexTaskbar's own folder (the two
+are usually installed as siblings — `C:\Apps\flex-taskbar` next to
+`C:\Apps\eden-explorer`), in the exe's own folder, under *Program Files*, in
+`%LOCALAPPDATA%\Programs`, and finally on the `PATH`. Set `file_manager` to an
+exe's full path to use that instead — any program that takes a folder as its
+argument will do. A `file_manager` naming a program that has since been
+uninstalled falls back to looking, and then to Windows Explorer: the button
+always opens the folder.
 
 Showing the bar, reserving its space, rescanning automatically and including
 package managers' apps are checkboxes in the Manage window (`show_strip`,
@@ -959,7 +986,7 @@ logged in — so this is a genuine trade rather than one being simply better.
 Pick the user session when you want the desktop checks; pick the service when
 you want builds to happen while nobody is at the machine.
 
-The 190 unit tests cover:
+The 200 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -992,6 +1019,14 @@ The 190 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- which program opens a folder: the one `file_manager` names winning over any
+  found, one it names that has since been uninstalled falling back to looking
+  rather than doing nothing, the order the usual places are tried in (a
+  sibling folder first), and nothing found at all meaning Windows Explorer
+- an app's menu entries: *Run* sitting directly above *Run as administrator*,
+  every action Windows knows being found from the verb it reports, and our own
+  *Run* never being matched from a verb — a shell handler reporting nothing
+  must not be read as "Run"
 - the portable folder's move from `data` to `FlexTaskbarData`: a fresh install
   taking the new name, a folder left by an older version being moved across
   with its settings (and the old one gone, so it happens once), the new folder

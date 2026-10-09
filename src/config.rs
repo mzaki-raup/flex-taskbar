@@ -104,6 +104,10 @@ pub struct Settings {
     /// was built with (`win::update::RELEASES_API`), which is where its own
     /// releases are published.
     pub update_feed: String,
+    /// The program *Open data folder* opens a folder with. Empty means look
+    /// for Eden Explorer, which opens folders as tabs, and fall back to
+    /// Windows Explorer if it isn't installed (see `crate::filemanager`).
+    pub file_manager: String,
     /// Theme, colours, transparency, border, corners and size of the strip.
     pub appearance: crate::appearance::Appearance,
 }
@@ -131,6 +135,7 @@ impl Default for Settings {
             all_apps: crate::allview::AllAppsView::default(),
             check_for_updates: true,
             update_feed: String::new(),
+            file_manager: String::new(),
             appearance: crate::appearance::Appearance::default(),
         }
     }
