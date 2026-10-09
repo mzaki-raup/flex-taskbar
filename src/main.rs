@@ -8,6 +8,7 @@ mod autohide;
 mod backup;
 mod bars;
 mod config;
+mod filemanager;
 mod flyanim;
 mod flykeys;
 mod folders;

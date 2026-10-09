@@ -1604,7 +1604,7 @@ fn click(hit: Hit) {
         }
         Hit::Right(_) => {
             flyout::close();
-            super::manager::show();
+            super::manager::toggle();
         }
         Hit::Left(_) => {}
     }

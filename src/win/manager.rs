@@ -172,6 +172,21 @@ pub fn destroy() {
     }
 }
 
+/// The gear on the bar: opens the window, or closes it if it is already open.
+/// The same press puts it away again, which is what the window's own *Close*
+/// button does — so the gear is a way to be rid of it without going to the
+/// window to do it.
+///
+/// Only the gear toggles. Everything else that opens this window (the tray
+/// menu, the bar's context menu, `--manage`) means "show it", and would be
+/// surprising if it closed one that was already up.
+pub fn toggle() {
+    match hwnd() {
+        Some(_) => destroy(),
+        None => create(),
+    }
+}
+
 fn create() {
     let class = wide("FlexTaskbar.Manager");
     unsafe {

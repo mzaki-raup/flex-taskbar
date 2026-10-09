@@ -12,27 +12,35 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     OpenFileLocation,
+    /// Start another copy of an app that is already open. This one is ours,
+    /// not Windows': there is no shell verb for "again", and a plain click
+    /// switches to the window instead of starting anything.
+    RunNew,
     RunAsAdmin,
     Uninstall,
 }
 
-/// Every action, in the order they appear in the menu.
-pub const ACTIONS: [Action; 3] = [Action::OpenFileLocation, Action::RunAsAdmin, Action::Uninstall];
+/// Every action, in the order they appear in the menu. *Run* sits directly
+/// above *Run as administrator*, so the two ways of starting it read together.
+pub const ACTIONS: [Action; 4] = [Action::OpenFileLocation, Action::RunNew, Action::RunAsAdmin, Action::Uninstall];
 
 impl Action {
-    /// The canonical verb Windows knows the action by. Canonical verbs are
-    /// not translated, so matching on them works in any language.
-    pub fn verb(self) -> &'static str {
+    /// The canonical verb Windows knows the action by, for the ones that are
+    /// Windows'. Canonical verbs are not translated, so matching on them works
+    /// in any language. `None` is ours to carry out.
+    pub fn verb(self) -> Option<&'static str> {
         match self {
-            Action::OpenFileLocation => "openfilelocation",
-            Action::RunAsAdmin => "runas",
-            Action::Uninstall => "uninstall",
+            Action::OpenFileLocation => Some("openfilelocation"),
+            Action::RunAsAdmin => Some("runas"),
+            Action::Uninstall => Some("uninstall"),
+            Action::RunNew => None,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Action::OpenFileLocation => "Open file location",
+            Action::RunNew => "Run",
             Action::RunAsAdmin => "Run as administrator",
             Action::Uninstall => "Uninstall",
         }
@@ -43,7 +51,10 @@ impl Action {
     /// app and `RunAs` for a desktop program.
     pub fn from_verb(verb: &str) -> Option<Action> {
         let verb = verb.trim();
-        ACTIONS.into_iter().find(|a| a.verb().eq_ignore_ascii_case(verb))
+        if verb.is_empty() {
+            return None;
+        }
+        ACTIONS.into_iter().find(|a| a.verb().is_some_and(|v| v.eq_ignore_ascii_case(verb)))
     }
 }
 
@@ -95,10 +106,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_action_is_found_from_the_verb_the_shell_reports() {
+    fn every_action_windows_knows_is_found_from_the_verb_it_reports() {
         for a in ACTIONS {
-            assert_eq!(Action::from_verb(a.verb()), Some(a));
+            match a.verb() {
+                Some(v) => assert_eq!(Action::from_verb(v), Some(a)),
+                // Ours, so the shell never reports it and never should.
+                None => assert_eq!(a, Action::RunNew),
+            }
         }
+    }
+
+    #[test]
+    fn run_sits_directly_above_run_as_administrator() {
+        let at = |a: Action| ACTIONS.iter().position(|x| *x == a).unwrap();
+        assert_eq!(at(Action::RunNew) + 1, at(Action::RunAsAdmin));
+    }
+
+    #[test]
+    fn our_own_action_is_never_matched_from_a_verb() {
+        // A shell handler reporting nothing must not be read as "Run".
+        for empty in ["", "   "] {
+            assert_eq!(Action::from_verb(empty), None, "{empty:?}");
+        }
+        assert_eq!(Action::RunNew.verb(), None);
     }
 
     #[test]

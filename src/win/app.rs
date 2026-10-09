@@ -626,10 +626,55 @@ pub fn restart_for_update(version: crate::release::Version) {
 }
 
 pub fn open_data_folder() {
-    let dir = wide(&paths::get().data.display().to_string());
-    unsafe {
-        ShellExecuteW(None, w!("open"), PCWSTR(dir.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    open_folder(&paths::get().data.clone());
+}
+
+/// Opens a folder in Eden Explorer when it is there — it keeps one window and
+/// opens each path handed to it as a **tab** — and in Windows Explorer when it
+/// isn't. `Settings::file_manager` names a program to use instead.
+pub fn open_folder(dir: &std::path::Path) {
+    if let Some(program) = file_manager() {
+        // The folder as its only argument: Eden Explorer's own single-instance
+        // handling turns that into a new tab in the window already open.
+        super::launch::spawn(
+            super::launch::Target::Custom {
+                target: program.display().to_string(),
+                args: format!("\"{}\"", dir.display()),
+                dir: String::new(),
+                admin: false,
+            },
+            |msg| ui::warn(None, &msg),
+        );
+        return;
     }
+    let shown = wide(&dir.display().to_string());
+    unsafe {
+        ShellExecuteW(None, w!("open"), PCWSTR(shown.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// The program to open folders with, if there is one to use.
+fn file_manager() -> Option<std::path::PathBuf> {
+    use crate::filemanager;
+    let configured = with(|s| s.cfg.settings.file_manager.clone());
+    let exe_dir = paths::get().exe.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+    let program_files: Vec<std::path::PathBuf> = ["ProgramFiles", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(|v| std::env::var_os(v).map(std::path::PathBuf::from))
+        .collect();
+    let local_programs = std::env::var_os("LOCALAPPDATA").map(|v| std::path::PathBuf::from(v).join("Programs"));
+    let mut places = filemanager::usual_places(&exe_dir, &program_files, local_programs.as_deref());
+    // Whatever the PATH turns up, after the places we know about.
+    if let Some(found) = on_path(filemanager::EDEN_EXE) {
+        places.push(found);
+    }
+    filemanager::choose(&configured, &places, |p| p.is_file())
+}
+
+/// Looks for `name` on the PATH, as the shell would.
+fn on_path(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|dir| dir.join(name)).find(|p| p.is_file())
 }
 
 // ---------------------------------------------------------------- persistence
@@ -719,13 +764,20 @@ fn is_console_program(path: &str) -> bool {
 }
 
 pub fn launch_app(id: &str) {
-    // Already open: switch to it instead (Shift+click starts another copy).
+    // Already open: switch to it instead (Shift+click, or *Run* on its menu,
+    // starts another copy).
     if super::running::switch_to(id) {
         with(|s| s.cfg.record_recent(id));
         refill_smart(false);
         save();
         return;
     }
+    launch_new_copy(id);
+}
+
+/// Starts the app whether or not one is already open — what *Run* on an app's
+/// menu does, and where a click lands when there is no window to switch to.
+pub fn launch_new_copy(id: &str) {
     let target = with(|s| {
         let entry = s.catalog.get(id)?;
         let target = match &entry.source {

@@ -59,6 +59,9 @@ enum How {
     /// Show the app's own file in Explorer, selected. Used when the shell
     /// offers no *Open file location* verb but we know where the file is.
     Select(PathBuf),
+    /// Start the app again. Ours to do: a click switches to the open window,
+    /// so this is the way to ask for another copy without holding Shift.
+    RunAgain(String),
 }
 
 /// What identifies the app to the shell.
@@ -129,6 +132,7 @@ impl Extras {
             None => match self.actions.get(i - self.recent.len()) {
                 Some((_, How::Verb(offset))) => invoke_verb(self.which.as_ref(), *offset),
                 Some((_, How::Select(path))) => show_in_explorer(path),
+                Some((_, How::RunAgain(id))) => super::app::launch_new_copy(id),
                 None => return false,
             },
         }
@@ -141,7 +145,15 @@ impl Extras {
 pub fn extras(app_id: &str, first: usize) -> Extras {
     let which = which(app_id);
     let recent = which.as_ref().and_then(Which::app_id).map(|id| recent_files(id, MAX_RECENT)).unwrap_or_default();
-    let actions = which.as_ref().map(offered).unwrap_or_default();
+    // What Windows can do with it, and what we can: *Run* belongs to an app
+    // that already has a window, whether or not the shell knows the app at
+    // all — a custom app pointing at a URL has no shell item but can still be
+    // opened again.
+    let mut actions = which.as_ref().map(offered).unwrap_or_default();
+    if super::running::is_running(app_id) {
+        actions.push((Action::RunNew, How::RunAgain(app_id.to_string())));
+    }
+    actions.sort_by_key(|(a, _)| crate::jumplist::ACTIONS.iter().position(|x| x == a).unwrap_or(usize::MAX));
 
     let kinds: Vec<Action> = actions.iter().map(|(a, _)| *a).collect();
     let mut rows = Vec::new();
@@ -246,7 +258,7 @@ fn context_menu(parsing: &str) -> Option<(IContextMenu, HMENU)> {
     }
 }
 
-/// Which quick actions Windows offers for this app, always in menu order.
+/// Which quick actions the shell reports for this app.
 fn offered(which: &Which) -> Vec<(Action, How)> {
     let mut found: Vec<(Action, How)> = Vec::new();
     if let Some((cm, menu)) = context_menu(&which.parsing_name()) {
@@ -285,7 +297,6 @@ fn offered(which: &Which) -> Vec<(Action, How)> {
     {
         found.push((Action::OpenFileLocation, How::Select(path.to_path_buf())));
     }
-    found.sort_by_key(|(a, _)| crate::jumplist::ACTIONS.iter().position(|x| x == a).unwrap_or(usize::MAX));
     found
 }
 
