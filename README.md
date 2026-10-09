@@ -1306,6 +1306,14 @@ covered the things Wine could not show:
   app's folder, and clicking the recent file opened it in its default program.
   A live test (`cargo test -- --ignored two_apps`) reads two real apps' jump
   lists in one process and checks each gets its own files.
+- **two monitors, at different scalings**: a 1920×1080 primary at 100% beside
+  a 1920×1080 secondary at 150%. *Every screen* put a bar on each, docked at
+  its own screen's bottom edge, each reserving space there (both work areas
+  shrank, and only by their own bar's height); each drawn at its own monitor's
+  DPI — 48 pixels tall at 96, 72 at 144, with the icons and text scaled to
+  match. *Main screen only* and either screen by name each gave one bar on
+  exactly that screen, switched live from the Appearance window. The bar
+  hotkey opened the flyouts on the screen the pointer was on, both ways round
 - a Chrome **web app** launched from the bar and matched back to its window by
   AppUserModelID: *Google Keep*, pinned and clicked, came up and the bar put
   the running line under it. Earlier only a Store app had been matched
@@ -1341,6 +1349,22 @@ covered the things Wine could not show:
   `tools\smoke-test.ps1` does.
 
 **Found and fixed during that run:**
+- *a bar on every screen crashed the app on startup*, the moment there was a
+  second screen to put one on. `UpdateLayeredWindow` and `SetWindowPos` send
+  messages to windows on the same thread and wait for them, so a window proc
+  runs **inside** those calls — and with two bars, putting one on screen lands
+  in the other's proc, which asks the list of bars for the one it belongs to.
+  The list was borrowed across the call, so that second ask panicked
+  (`RefCell already borrowed`) and the process died before a bar appeared.
+  Everything needed is now copied out and the borrow let go before anything is
+  drawn, and the picture is shared through an `Rc` so that costs a counter
+  rather than a copy of the bar every frame.
+- the same re-entrancy, quieter: docking a bar read and wrote "the active
+  bar", and the active bar is whichever one a message last arrived at. The
+  AppBar messages in the middle of docking let another bar's proc run, which
+  made *that* bar active — so one screen's size and position could be written
+  onto another's. Docking now names the bar it is working on by index and
+  never asks which is active.
 - the bar and the flyouts told screen readers they had *no* buttons at all.
   Windows serves `IAccessible` calls on an RPC worker thread, and the bar
   keeps its state in thread-locals that thread cannot see. The window is now
@@ -1352,13 +1376,9 @@ covered the things Wine could not show:
   Both are now kept inside the monitor's work area.
 
 **Still not verified:**
-- *two or more monitors*, and mixed DPI between them. The machine has one
-  screen, so what could not be exercised is: two bars at once, each docked
-  and reserving space on its own monitor; the pointer moving between them and
-  the right bar's flyouts opening; a hotkey opening the bar on the screen the
-  pointer is on; and a monitor being attached or detached while running. The
-  choosing and add/remove logic is covered by unit tests, and the single-bar
-  path is the same code
+- a monitor being **attached or detached while running** — the one part of
+  multi-monitor a second screen doesn't settle, since it needs one to come and
+  go. The reconciling is unit tested
 - a Windows taskbar on the top or a side: *Next to the Windows taskbar* was
   only seen against a bottom taskbar
 - a real drag from Explorer onto the bar or the Manage window: the drop
