@@ -35,6 +35,26 @@ pub fn is_enabled() -> bool {
     ok.is_ok() && from_wide(&buf).eq_ignore_ascii_case(&command())
 }
 
+/// What the Run entry actually holds, whatever it points at. `is_enabled`
+/// only says yes for *this* exe; this says what is there, so the report can
+/// tell "off" apart from "on, but pointing somewhere else".
+pub fn registered_command() -> Option<String> {
+    let mut buf = vec![0u16; 1024];
+    let mut size = (buf.len() * 2) as u32;
+    let ok = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            RUN_KEY,
+            VALUE,
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut _),
+            Some(&mut size),
+        )
+    };
+    ok.is_ok().then(|| from_wide(&buf)).filter(|s| !s.is_empty())
+}
+
 pub fn set_enabled(enabled: bool) -> Result<(), String> {
     unsafe {
         let mut key = HKEY::default();
