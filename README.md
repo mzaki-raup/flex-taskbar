@@ -31,7 +31,7 @@ bar sits next to it, on the same edge, and it can be turned off.
 > (see [What has been tested](#what-has-been-tested)) as well as under Wine.
 > Treat it as a release candidate: the Windows run covered the whole flow and
 > found two bugs, both fixed, but it was one machine, at one screen size, with
-> one set of apps. If something misbehaves, `data\crash.log` next to the exe is
+> one set of apps. If something misbehaves, `FlexTaskbarData\crash.log` next to the exe is
 > the first place to look.
 
 ## Screenshots
@@ -195,7 +195,7 @@ FlexTaskbar:
   - Both choices are saved (`settings.all_apps`).
   - **Your own picture instead of the word "All".** In the Appearance window,
     *All button picture* → *Choose…* takes any PNG, JPEG, BMP, GIF, ICO or
-    SVG file. A copy is kept in the data folder (`data\icons\`), so it
+    SVG file. A copy is kept in the data folder (`FlexTaskbarData\icons\`), so it
     travels with the portable settings and the original can be moved or
     deleted. *Use text* goes back to the word (and deletes the copy), as does
     *Reset to defaults*.
@@ -208,7 +208,7 @@ FlexTaskbar:
   (*Category indicator*): a badge with an arrow, a plain arrow, a dot, a folded
   corner, an underline, none at all, or **your own picture**. Pick *Your own
   picture* (or *Choose…*) and select any PNG, JPEG, BMP, GIF, ICO or SVG file;
-  a copy is kept in the data folder (`data\icons\`), so the original can be
+  a copy is kept in the data folder (`FlexTaskbarData\icons\`), so the original can be
   moved or deleted. *Remove* deletes the copy. The mark's size is adjustable
   too.
 
@@ -474,7 +474,7 @@ Every change shows on the bar straight away:
 | Icon size | 16–48 | 32 |
 | **Category indicator** | | |
 | Style | Badge with arrow, Arrow, Dot, Folded corner, Underline, Your own picture, None | Badge with arrow |
-| Picture | Any PNG, JPEG, BMP, GIF, ICO or SVG; copied into `data\icons\` | none |
+| Picture | Any PNG, JPEG, BMP, GIF, ICO or SVG; copied into `FlexTaskbarData\icons\` | none |
 | Size | 25–80 % of the icon | 48 % |
 | **Bar** | | |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
@@ -488,7 +488,7 @@ Every change shows on the bar straight away:
 | Bar thickness | 32–96 (its height, or its width on a side edge) | 48 |
 | Hover animation | Off, Magnify (like the macOS Dock), Lift, Bounce, Pulse | Magnify |
 | Running apps | No mark, Dot (like macOS), Line (like Windows 11) | Line |
-| All button picture | Any PNG, JPEG, BMP, GIF, ICO or SVG instead of the word; copied into `data\icons\`; *Use text* goes back | The word "All" |
+| All button picture | Any PNG, JPEG, BMP, GIF, ICO or SVG instead of the word; copied into `FlexTaskbarData\icons\`; *Use text* goes back | The word "All" |
 | **Category flyouts** | | |
 | App tiles per row | 1–12 (top and bottom bars; on a side bar a flyout is one column) | 4 |
 | Border colour | Any colour | Same as the bar |
@@ -658,11 +658,17 @@ Your old categories can be imported (see above).
 
 ## Portable data
 
-Everything FlexTaskbar keeps is stored in a `data` folder next to the exe:
+Everything FlexTaskbar keeps is stored in a `FlexTaskbarData` folder next to
+the exe. Up to 2.2.0 it was called `data`, which said nothing about whose it
+was when the exe shared a folder with other things; a folder of the old name
+is **moved across once**, the first time a newer version runs, so settings,
+icons and the app cache come with it and there is nothing to do by hand. A
+`data` folder that isn't FlexTaskbar's — no `config.json`, no `icons\` — is
+left exactly where it is.
 
 ```
 FlexTaskbar.exe
-data\
+FlexTaskbarData\
   config.json           categories, custom apps, icon choices, recents, settings
   config.json.bak       the previous good version (automatic)
   apps-cache.json       last app scan, for instant startup (safe to delete)
@@ -756,7 +762,7 @@ FlexTaskbar can replace itself with a newer release.
     offered as usual, and *Check for updates…* still reports it when you
     ask for it.
 - **Installing.** With your go-ahead the program is downloaded to
-  `data\update\` and its SHA-256 compared with the `SHA256SUMS.txt` published
+  `FlexTaskbarData\update\` and its SHA-256 compared with the `SHA256SUMS.txt` published
   beside it. Only if they match is anything replaced. A release published
   **without** checksums is never installed automatically — the app offers to
   open its page instead.
@@ -826,7 +832,7 @@ Both settings are followed live when you change them in Windows.
 
 ## Settings not shown in the window
 
-These can be edited in `data\config.json` while FlexTaskbar is not running:
+These can be edited in `FlexTaskbarData\config.json` while FlexTaskbar is not running:
 
 | Key under `settings` | Default | Meaning |
 |---|---|---|
@@ -898,7 +904,7 @@ memory (working set, private bytes and the peak), CPU time in all and on
 average since it started, GDI and USER objects, handles, and how many times
 the bar and the flyouts have been drawn, with the average and longest time.
 Ctrl+C copies the message, and the same text is saved to
-`data\diagnostics.txt`. Timing a redraw is two clock reads; nothing is
+`FlexTaskbarData\diagnostics.txt`. Timing a redraw is two clock reads; nothing is
 collected unless something is drawn, and nothing leaves the PC. The
 supervisor process is separate and small, and isn't counted.
 
@@ -934,7 +940,7 @@ checks it through Windows itself — the things no unit test can reach:
   all have a name, a place on screen and something to press;
 - it leaves no crash log.
 
-The app runs from a copy with its own `data\` folder, so a FlexTaskbar
+The app runs from a copy with its own `FlexTaskbarData\` folder, so a FlexTaskbar
 already installed is untouched, and it is stopped again whether the checks
 pass or not. Run it yourself with
 `powershell -ExecutionPolicy Bypass -File tools\smoke-test.ps1`.
@@ -953,7 +959,7 @@ logged in — so this is a genuine trade rather than one being simply better.
 Pick the user session when you want the desktop checks; pick the service when
 you want builds to happen while nobody is at the machine.
 
-The 185 unit tests cover:
+The 190 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -986,6 +992,12 @@ The 185 unit tests cover:
 - high contrast and less motion: the high-contrast colours (window, text,
   highlight, grey text; light or dark), the look made opaque, bordered,
   shadowless and without a picture mark, and animations turned off
+- the portable folder's move from `data` to `FlexTaskbarData`: a fresh install
+  taking the new name, a folder left by an older version being moved across
+  with its settings (and the old one gone, so it happens once), the new folder
+  winning and an old one beside it being left alone, and a `data` folder that
+  isn't ours — someone else's, in a folder the exe merely shares — being
+  neither taken over nor renamed
 - the version line in the Manage window: what it says at each stage (nothing
   looked for yet, checking, up to date, a version available, the check
   failed), what its button then offers to do (check, install, or nothing
@@ -1165,10 +1177,10 @@ The 185 unit tests cover:
     clicks in the *All* list still landing on the right row, and the Genie
     animation with a shadow
   - a picture on the *All* button: uploading it from the Appearance window
-    (copied into `data\icons\` and saved), on a bottom and a side bar, and
+    (copied into `FlexTaskbarData\icons\` and saved), on a bottom and a side bar, and
     *Use text* bringing the word back and deleting the copy
   - each category indicator style, uploading a PNG as the indicator (copied
-    into `data\icons\` and shown on the bar), and removing it
+    into `FlexTaskbarData\icons\` and shown on the bar), and removing it
   - apps from winget, Scoop, Chocolatey and npm folders listed with their
     labels; a new program and a new Chrome web-app shortcut picked up by
     the automatic rescan a few seconds later; an npm tool opening in a
@@ -1178,7 +1190,7 @@ The 185 unit tests cover:
     the picture ignored (the word shown), and *Use text* leaving the file
     alone
   - *Diagnostics…* via `--diagnostics` while running: the report shown and
-    saved to `data\diagnostics.txt`, its draw counts growing after
+    saved to `FlexTaskbarData\diagnostics.txt`, its draw counts growing after
     flyouts were opened, the lines Wine can't fill (private bytes,
     GDI/USER objects, handles) left out, and idle CPU staying flat over a
     minute
@@ -1446,7 +1458,7 @@ and nothing is requested unless you pick *Check for updates…* yourself.
   command-line tool open in a console; see *Apps from package managers* above
   for how its path is quoted.
 - **Pictures.** Pictures you choose (app, category, indicator and *All*
-  button icons) are copied into `data\icons\`, up to 8 MB each, and the
+  button icons) are copied into `FlexTaskbarData\icons\`, up to 8 MB each, and the
   settings store only the copy's file name. A name in `config.json` that
   isn't a plain file name (with `\`, `/`, `..` or a drive) is ignored, so a
   hand-edited or shared config can't make FlexTaskbar read or delete a file
