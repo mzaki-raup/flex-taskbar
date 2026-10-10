@@ -23,7 +23,8 @@ bar sits next to it, on the same edge, and it can be turned off.
 - One `FlexTaskbar.exe` of about 2 MB, with no installer. Settings are kept next
   to the exe.
 - Restarts itself after a crash or hang.
-- Fully local: no telemetry, no network access of any kind.
+- Fully local: no telemetry and no analytics. The only request it ever makes is
+  the update check, which can be turned off (see [Privacy](#privacy)).
 
 > **Status — please read.** This is a complete rewrite of the earlier .NET 8 / WPF
 > version, which is still in the git history. It builds for Windows, its core
@@ -81,12 +82,31 @@ the desktop.
 
 ## Features
 
-**Nested categories.** Categories can contain subcategories, plus
+What follows is the whole feature set, grouped. Each row of the table is a
+section below.
+
+| Area | What you get |
+|---|---|
+| [Organizing your apps](#organizing-your-apps) | Categories nested as deep as the screen allows, categories that fill themselves, several bar profiles, custom apps, custom icons |
+| [Where the apps come from](#where-the-apps-come-from) | Every app Start knows, including Store apps and Chrome/Edge web apps, plus nine package managers — rescanned by itself when you install something |
+| [Launching](#launching) | The bar, the tray menu, a hotkey menu, type-to-search, full keyboard control, jump lists and the quick actions Windows offers |
+| [The bar](#the-bar) | Any screen edge, one screen or every screen, Mica or Acrylic, auto-hide, running marks, drag to rearrange |
+| [Category flyouts](#category-flyouts) | Subcategory tiles at any depth, six opening animations, six shadow styles, pinned folders as stacks |
+| [Appearance](#appearance) | Dark, light or Windows default; every colour, size, border and corner adjustable; whole looks saved and exported |
+| [Looking after itself](#looking-after-itself) | A portable data folder, backups, crash and hang recovery, in-place updates, a diagnostics report |
+
+### Organizing your apps
+
+#### Nested categories
+
+Categories can contain subcategories, plus
 apps. The same app can be filed in several categories. In the tray and hotkey
 menu a category is a submenu listing its subcategories, then its apps. From the
 bar, a category opens as a flyout (below).
 
-**How deep.** Every level of subcategories opens another flyout, so the nesting
+#### How deep they go
+
+Every level of subcategories opens another flyout, so the nesting
 depth follows the screen: as many levels as fit their flyouts, between 3 and 7.
 With bars on several screens the smallest answer wins, so the limit holds
 wherever a flyout opens.
@@ -98,7 +118,9 @@ The Manage window shows the limit above the category tree and won't add or
 indent a category past it. Categories already deeper (from an import, or after
 switching to a smaller screen) keep working; their flyouts just overlap.
 
-**Smart categories** fill themselves. Make one with *Smart…* under the
+#### Smart categories
+
+Some categories fill themselves. Make one with *Smart…* under the
 category tree in the Manage window, then *New smart category*:
 - **Recently installed:** apps that turned up in the last 14 days, newest
   first. You can pick 7, 14, 30 or 90 days.
@@ -127,266 +149,337 @@ How it behaves:
 
 ![The Manage window: a smart category "Package manager tools" that fills itself, its Smart… menu open on Apps of a kind](screenshots/smart-categories.png)
 
-**The bar** is docked against a screen edge, laid out like the original
-FlexTaskbar:
-- **Which screens.** By default there is one bar, on the main screen. *Screens*
-  in the Appearance window changes that:
-  - *Main screen only* (the default);
-  - *Every screen* — a bar on each, every one docked and reserving space on its
-    own monitor, with its own icons at that monitor's DPI;
-  - or one named screen (*Screen 2 — 2560 × 1440*, and so on), listing the
-    monitors attached at the moment the window opened.
+#### Several bars
 
-  All the bars look the same and show the same categories and pinned apps:
-  there is one set of settings, not one per screen. Only one bar's flyouts are
-  open at a time — the bar you are pointing at, or on the screen the pointer
-  is on when you press a hotkey. Dragging one bar to another edge moves them
-  all, since *Position* is one setting.
+You can keep several bars ("Work", "Gaming"…). Each has its own pinned
+apps and order, and can leave out some top-level categories. Use the *Bar* submenu
+in the full menu (tray icon, or right-click an empty part of the bar):
+- Pick a bar to switch to it (the one in use is ticked). **Ctrl+Alt+N**
+  (changeable: *Next bar* on the Manage window's *Hotkeys* card) goes to
+  the next one. FlexTaskbar only takes that key once there are two
+  bars, so with one bar other programs keep it.
+- *New empty bar…* starts with just the categories. *New bar copying
+  this one…* starts as a copy of the bar in use.
+- *Rename this bar…* and *Delete this bar*. The last bar can't be
+  deleted. Deleting one only forgets its pins and order; the apps and
+  categories stay.
+- To leave a category off a bar, right-click it there and choose *Hide
+  from this bar*. *Show on this bar* in the *Bar* submenu puts it back.
+  A hidden category stays in the menus, in search and on the other bars.
 
-  Attaching or detaching a monitor adds or removes its bar by itself, and the
-  other bars are left alone (they keep their icons and don't flicker). A chosen
-  screen that is detached falls back to the main screen, so you are never left
-  without a bar; attach it again and the bar goes back to it. Windows reuses
-  display names (`\\.\DISPLAY2`), so a *different* monitor plugged into the
-  same slot inherits the choice.
-- **Mica or Acrylic behind the bar** (Windows 11 22H2 and later). *Backdrop*
-  in the Appearance window swaps the bar's plain translucency for one of
-  Windows 11's own blurred backdrops: *Mica* (the wallpaper, heavily blurred),
-  *Acrylic* (what is behind the bar, blurred and tinted), or *Mica Alt* (more
-  of the wallpaper's colour). *Off* is the default and changes nothing.
+Pinning, unpinning, dragging and *Arrange the bar* all change the bar in
+use. The bar starts as *Main*.
 
-  A backdrop is drawn by Windows behind the whole window, which a layered
-  window can't have — so with one chosen the bar is built as an ordinary
-  window and painted into instead. That settles a few things, and the
-  Appearance window simply behaves accordingly while a backdrop is on:
-  - the bar's **own background goes**, because the backdrop *is* the
-    background; icons, text, the border and the hover and pressed highlights
-    are drawn over it as before;
-  - the **floating margin and *Fit to icons*** don't apply: Windows fills the
-    whole window with the backdrop, so a margin would be a blurred band around
-    the bar. The bar sits flush and takes the full width;
-  - **auto-hide slides** rather than fades, since fading needs the layered
-    window a backdrop can't be;
-  - the **corners are Windows' own**, rounded to match *Corner radius*.
+![The Bar submenu: the bars Main and Gaming (ticked), Next bar, New empty bar…, New bar copying this one…, Rename this bar…, Delete this bar, and Show on this bar](screenshots/bars.png)
 
-  The **flyouts keep their plain translucency**: their opening animations
-  (Genie, Drawer, Fade…) need a layered window, and a backdrop would cost
-  them. On Windows 10, and Windows 11 before 22H2, there is no such backdrop
-  and the setting is greyed out.
-- **Any edge.** By default it sits next to the Windows taskbar, on the same
-  edge. To move it, press on an empty spot of the bar and drag it towards
-  another edge of the screen: it docks there as soon as the pointer is nearest
-  that edge, like the Windows taskbar. Or pick *Position* in the Appearance
-  window (*Next to the Windows taskbar*, *Bottom*, *Top*, *Left*, *Right*).
-  On the left or right edge the bar stands upright: *All* at the top, icons
-  down the middle, *Link* and ⚙ at the bottom.
-- **Start (left, or top on a side bar): *All*.** Click it for a list of every app (scroll with the wheel;
-  right-click an app to pin or unpin it). A row too narrow for a long name
-  ends in an ellipsis and shows the full name as a tooltip.
-  - **Sort:** the *Sort* button at the top orders the list by name (A–Z or
-    Z–A), by type (desktop programs, Store apps, web apps, package managers'
-    apps, custom apps), by category (a heading per root category, an app filed
-    under two shows under both, then *Not in a category*), or with recently
-    used apps first.
-  - **Show:** the *Show* button ticks app types and root categories on and
-    off. Hiding a category hides the apps that are only in that category;
-    *Not in a category* covers the rest, and *Show everything* turns it all
-    back on. While anything is hidden the title reads e.g. "12 of 15 apps".
-  - Both choices are saved (`settings.all_apps`).
-  - **Your own picture instead of the word "All".** In the Appearance window,
-    *All button picture* → *Choose…* takes any PNG, JPEG, BMP, GIF, ICO or
-    SVG file. A copy is kept in the data folder (`FlexTaskbarData\icons\`), so it
-    travels with the portable settings and the original can be moved or
-    deleted. *Use text* goes back to the word (and deletes the copy), as does
-    *Reset to defaults*.
+#### Custom apps
 
-    ![The bar with a four-squares picture on the All button](screenshots/all-icon.png)
-- **Centre: root categories and pinned apps.** A category carries a
-  bright badge in the accent colour on its icon's corner, with an arrow pointing
-  where its flyout opens (up from a bottom bar, down from a top bar, sideways
-  from a side bar). That mark can be changed in the Appearance window
-  (*Category indicator*): a badge with an arrow, a plain arrow, a dot, a folded
-  corner, an underline, none at all, or **your own picture**. Pick *Your own
-  picture* (or *Choose…*) and select any PNG, JPEG, BMP, GIF, ICO or SVG file;
-  a copy is kept in the data folder (`FlexTaskbarData\icons\`), so the original can be
-  moved or deleted. *Remove* deletes the copy. The mark's size is adjustable
-  too.
+Beyond what Windows lists, you can add any program, shortcut, file, URL, `shell:` path or
+protocol (such as `ms-settings:`) as an app, with optional arguments, a start
+folder and "Run as administrator". Browser web apps can also be added by hand,
+for example target `chrome_proxy.exe` with arguments `--profile-directory=Default --app-id=…`.
+To add apps quickly, drag `.exe` or `.lnk` files onto the Manage window.
 
-  ![The seven indicator styles on the bar's category icons](screenshots/indicators.png)
-- **End (right, or bottom on a side bar): *Link* and ⚙.** *Link* adds a website, program, file or `shell:`
-  path and pins it to the bar. ⚙ **opens the Manage window, and closes it
-  again** if it is already open — the same thing its *Close* button does, so
-  the gear puts it away without going to the window to do it. Only the gear
-  works that way: the tray menu, the bar's context menu and `--manage` all
-  mean "show it", and closing one that was already up would be a surprise.
-- **Category flyouts.** Resting the pointer on a category opens a flyout beside
-  it, on the screen side: above a bottom bar, below a top bar, to the right of
-  a left bar and to the left of a right bar:
-  - its **subcategories and apps as tiles**, each a large icon with the name
-    underneath, wrapped over **two lines** and ending in an ellipsis when it
-    is longer than that (a long name never spills past its tile). Resting the
-    pointer on a tile shows the **full name as a tooltip**, as on the bar.
-    Subcategories come first and carry the same arrow badge, like
-    categories on the bar. The flyout runs the same way as the bar: on a top
-    or bottom bar it is a **horizontal strip** (4 tiles per row by default,
-    wrapping into more rows); on a left or right bar it is a **vertical
-    strip**, one column top to bottom, wrapping into another column only if
-    it would be taller than the screen;
-  - resting the pointer on a subcategory opens **its flyout beyond this one**
-    (further from the bar, lined up with the tile), and so on down the levels.
-    Moving to another subcategory switches it; resting on an app tile closes
-    it. Tiles fill from the bar's side outwards: below a top bar the **app
-    icons fill the top rows first**, right under the bar, and the
-    subcategories follow below them, nearest where their own flyouts open;
-  - *No apps in this category* when it's empty. Flyouts only launch apps;
-    categories are managed in the Manage window (⚙ on the bar, or
-    right-click a category and pick *Manage categories…*).
-  - The flyouts close shortly after the pointer leaves all of them and the
-    bar button.
-  - **Keyboard control.** Click *All*, or press the bar hotkey
-    (**Ctrl+Alt+B**, changeable on the Manage window's *Hotkeys* card, or
-    run `FlexTaskbar.exe --bar`), and the flyouts take the keyboard:
-    - **arrow keys** move between tiles and rows (a ring in the accent
-      colour shows where you are), scrolling the *All* list at its ends;
-      **Page Up/Down**, **Home** and **End** scroll it further;
-    - **typing** jumps to the first app or tile whose name, or a word in
-      it, starts with what you typed (pause a second to start again;
-      typing the same letter again moves to the next one). In *All* it
-      searches the whole list, not just what's on screen;
-    - **Enter** (or **Space**) launches, or opens a subcategory and moves
-      into it; **Esc** or **Backspace** goes back a level, and closes from
-      the first;
-    - **Tab** / **Shift+Tab** move to the next or previous button on the
-      bar with a flyout (*All*, then each category).
+#### Custom icons
 
-    Once a key has been used the flyouts stay open while the pointer is
-    elsewhere, and close when you switch to another window; until then
-    they close when the pointer leaves, as before.
+Any app or category can have a picture of its own, from PNG, ICO, SVG, JPG, BMP or GIF
+files. A copy of the image is kept in the data folder, so moving or deleting the
+original doesn't break the icon.
 
-    ![The All list with the keyboard focus ring on Notepad after typing "note"](screenshots/keyboard.png)
-  - **Opening animation.** Every flyout (category, subcategory and *All*)
-    can animate as it opens. Pick one in the Appearance window
-    (*Opening animation*), with its length (60–600 ms, 180 by default):
-    - *Fade* (the default): fades in;
-    - *Slide*: fades in, moving out a little from the bar;
-    - *Scale*: grows out of the button it opens from;
-    - *Drawer*: pulled out of the bar, the far end first;
-    - *Genie*: stretched out of its button like the macOS genie effect, the
-      far end widening first and the end at the bar staying as narrow as the
-      button until last;
-    - *Off*: shown at once.
+#### Importing from the old FlexTaskbar
 
-    **Closing** plays the same animation in reverse (a little quicker),
-    back into the button: a Genie flyout is pulled back in, a Drawer one
-    slides back into the bar. Turn it off with *When closing* → *Close at
-    once*. A closing flyout no longer takes the pointer, so the next one
-    opens straight away; moving along the bar to another category swaps
-    them at once.
+In the Manage window, *Import old settings…* reads `%APPDATA%\FlexTaskbar\categories.json` and
+`applications.json` from the .NET version. It adds those categories and apps
+next to your current ones. Each imported app keeps its exact launch command, and
+custom icons are copied over.
 
-    Each frame is made from the finished flyout, so it is drawn only once;
-    the frames run only while it opens, and the flyout can be used straight
-    away.
+### Where the apps come from
 
-    ![A category flyout opening with the Genie animation (slowed to 600 ms)](screenshots/flyout-genie.gif)
-  - **Shadow.** Every flyout (category, subcategory and *All*) casts a
-    shadow on the desktop. Pick its style in the Appearance window
-    (*Shadow*), and how strong it is (*Shadow strength*, 10–100 %):
-    - *Soft* (the default): soft and a little below, like Windows 11's menus;
-    - *Floating*: larger and further below, lifted off the desktop;
-    - *Even all round*: the same on every side;
-    - *Sharp*: a crisp shadow offset to the lower right;
-    - *Glow*: a halo in the accent colour;
-    - *Off*.
+#### All your apps, automatically
 
-    The shadow stops at the bar's edge so it never dims the bar's icons, and
-    the pointer passes through it: resting on a shadow is the same as
-    leaving the flyout, and clicks there reach what's underneath. It is
-    drawn once per flyout size and look, and reused while the flyout is
-    redrawn on hover or scrolled, so it adds nothing to hovering.
+The app list is the Windows shell Apps folder
+(`shell:AppsFolder`), the same list as Start's "All apps". So *All*, search and
+the Manage window include:
+- desktop programs;
+- **Microsoft Store and other modern Windows 10/11 apps** (packaged apps, by
+  their AppUserModelID, such as Calculator or Windows Terminal);
+- **web apps installed from Google Chrome** (*Install app* / *Create shortcut*)
+  and **from Microsoft Edge** (*Install this site as an app*), and those of
+  other Chromium browsers.
 
-    ![The six shadow styles on a category flyout: Off, Soft, Floating, Even, Sharp and Glow](screenshots/flyout-shadows.png)
-- **Hover animations**, in the spirit of the macOS Dock, on every icon of the
-  bar (categories and pinned apps). Pick one in the Appearance window, or turn
-  them off:
-  - *Magnify* (the default): the icon under the pointer grows, its neighbours a
-    little, following the pointer smoothly;
-  - *Lift*: the icon rises towards the screen;
-  - *Bounce*: the icon hops twice;
-  - *Pulse*: the icon briefly grows and settles;
-  - *Off*.
+Each app is labelled by kind: *Store app*, *Chrome web app*, *Edge web app*,
+*Web app* or *Custom* (desktop programs have no label). The label shows on the
+right in the *All* list and the Manage window, and next to the category path in
+search, so typing "web app" or "store" finds them. If the Apps folder can't be
+read, FlexTaskbar falls back to scanning the Start Menu shortcut folders, where
+Chrome's web apps (its *Chrome Apps* folder) are still recognised; Store apps
+need the Apps folder.
 
-  The icons grow and move within the bar's thickness (a thicker bar leaves more
-  room). Frames are drawn only while something moves, about 60 a second, and
-  stop as soon as it settles.
+#### Apps from package managers
 
-  ![Magnify, Lift, Bounce and Pulse as the pointer sweeps along the bar](screenshots/hover-animations.gif)
-- **Slide between categories.** While a flyout is open, moving along the bar
-  switches to the next category straight away.
-- **Pinned apps** launch with a click. You can pin an app from the Manage
-  window (*Pin to strip*), from the *All* list, with *Link*, by dragging
-  `.exe`/`.lnk` files onto the bar, or by dragging it out of a flyout.
-- **Drag apps out of a flyout or the *All* list.** Press on a tile or a row
-  and drag: a see-through copy of its icon follows the pointer.
-  - Let go **between two buttons on the bar** (a line shows where) and the
-    app is pinned there. If it is pinned already, it moves there.
-  - Let go **on a category's button** (it gets a ring) and the app is filed
-    in that category. The same works on a **subcategory's tile** in an open
-    flyout.
-  - Let go **between two tiles of a category flyout** (a caret in the accent
-    colour shows where) and the app moves there: that is how the tiles of a
-    flyout are **rearranged**. Dropped in another category's flyout it joins
-    that category in that place. Smart categories fill themselves, so their
-    tiles can't be rearranged, and the *All* list and folders keep their own
-    order. The flyouts stay open, so several tiles can be moved in a row.
-  - The app stays wherever else it was filed; an app can be in several
-    categories.
-  - Letting go anywhere else, or pressing Esc, cancels.
+Many package managers install programs without
+a Start Menu entry. FlexTaskbar also lists the programs in their folders,
+labelled by manager:
 
-  ![Registry Editor dragged out of the Development flyout, a line on the bar where it would be pinned](screenshots/drag-from-flyout.png)
-- **Folders on the bar.** Drag a folder onto the bar (or use *Link* with a
-  folder as the target) and it opens like a category: rest on it, or
-  click it, and a flyout lists what is in it, like the Dock's stacks.
-  Subfolders come first and open their own flyout beyond (as deep as
-  categories may go); files open as they would in Explorer; *Open folder*
-  at the end opens it in Explorer. Hidden and system files are left out,
-  and at most 48 things are shown (*Open folder* says how many more there
-  are). The folder is read when its flyout opens, so it is always up to
-  date; nothing watches it in between. Folders work with the keyboard and
-  Tab like categories.
+| Manager | Folder it looks in |
+|---|---|
+| winget (portable packages) | `%LOCALAPPDATA%\Microsoft\WinGet\Links`, `%ProgramFiles%\WinGet\Links` |
+| Scoop | `%SCOOP%\shims` (default `~\scoop\shims`), and the global `%ProgramData%\scoop\shims` |
+| Chocolatey | `%ChocolateyInstall%\bin` (default `%ProgramData%\chocolatey\bin`) |
+| npm (global packages) | `%APPDATA%\npm` |
+| pip (`--user` and per-user Pythons) | every `PythonXY\Scripts` under `%APPDATA%\Python` and `%LOCALAPPDATA%\Programs\Python` |
+| pipx | `%PIPX_BIN_DIR%` (default `~\.local\bin`) |
+| Cargo | `%CARGO_HOME%\bin` (default `~\.cargo\bin`) |
+| .NET tools | `~\.dotnet\tools` |
+| Go | `%GOBIN%`, or `%GOPATH%\bin` (default `~\go\bin`) |
 
-  A folder on a network share that doesn't answer within 1.5 seconds (an
-  offline server) opens as just *Open folder* with "This folder isn't
-  responding", instead of freezing the bar. Files on a share show their
-  first letter rather than their icon, since asking Windows for each icon
-  there can be slow.
+The managers' own commands (`choco`, `scoop`, `npm`, `pip`, `cargo`…) are left
+out, and a program that is already in the list under the same name (for
+example a Scoop app that also has a Start Menu shortcut) isn't listed twice.
+Command-line tools open in a console window that stays open, in your user
+folder. Their path is handed to `cmd.exe` quoted so that characters a file
+name may contain, such as `&`, can't start another command; a path cmd would
+still expand (with `%` or `!` in it) is started directly instead. Apps that winget, Chocolatey or UniGetUI install with a normal
+installer have a Start Menu entry, so they are in the Apps folder anyway.
+Turn this off with *Include package managers' apps* on the Manage window's *Apps and settings* card.
 
-  ![A pinned folder's flyout (Docs, Pictures, files and Open folder), with Docs open above it](screenshots/folder-stack.png)
-- **Running apps.** An app with a window open gets a mark: a short line under
-  its icon on the bar (*Line*, like Windows 11) or a dot (*Dot*, like macOS),
-  under its tile in a flyout, and on the left of its row in *All*. Change or
-  turn it off with *Running apps* on the Appearance window's *Bar* card.
-  Clicking a running app **switches to it** instead of starting another
-  copy: it comes to the front (restored if minimised); if it is already in
-  front, its only window is minimised, or with several the next one comes
-  forward, like the Windows taskbar. **Shift+click** starts another copy.
-  Turn switching off with *Clicking a running app switches to it* on the
-  Manage window's *Startup and bar* card.
+#### Automatic rescan
 
-  Windows are matched to apps by their AppUserModelID (Store apps, Chrome and
-  Edge web apps) or by the program they run, which the app list reads from
-  each Start Menu shortcut. A web app's window counts only for that web app,
-  not for the browser. A **custom app** is matched by what you gave as its
-  target: `shell:AppsFolder\<id>` by that id (so a Store or web app pinned
-  from the app list is recognised), `chrome.exe --app-id=<id>` by the
-  `Chrome._crx_<id>` window Chrome opens for it, and anything else by its
-  program. A few of Windows' own apps are listed under an id their windows don't
-  carry at all — File Explorer is `Microsoft.Windows.Explorer` in the app
-  list, but its windows are plain `explorer.exe` windows — and are matched by
-  their program instead. Windows tells FlexTaskbar when windows open and close
-  (it registers for the same notifications the taskbar gets), so the marks
-  follow without any polling.
+The list is rescanned in the background when FlexTaskbar
+starts, on demand (*Rescan apps*), and **by itself when apps are installed or
+removed**. A background thread watches the Start Menu folders (where installers,
+winget, Chocolatey, UniGetUI and Chrome/Edge web apps put their shortcuts),
+`%LOCALAPPDATA%\Packages` (every Store app gets a folder there) and the package
+managers' folders above. A few seconds after the last change, once the
+installer has finished, the list is rescanned, so a new app or web app appears
+in *All*, search and the Manage window without doing anything. Folders that
+appear later (a package manager installed after FlexTaskbar started) are
+picked up within a few minutes. Turn it off with *Rescan when apps are
+installed or removed* on the Manage window's *Apps and settings* card.
 
-  ![Notepad++ and Calculator open: a line under each bar icon (like Windows 11), or a dot (like macOS)](screenshots/running-marks.png)
+The last scan is cached in the data folder (`apps-cache.json`), so the bar is
+ready as soon as it starts rather than waiting for a scan to finish.
+
+### Launching
+
+#### Five ways to launch
+
+| How | What you get |
+|---|---|
+| The bar | Hover a category, click a pinned app, or click *All*; right-click for the full menu |
+| Left- or right-click the tray icon | The full menu |
+| **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
+| **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
+| **Ctrl+Alt+B** (changeable) | The bar's *All* list, ready for the keyboard (see below) |
+| **Ctrl+Alt+N** (changeable) | The next bar, if you have made several (see *Several bars*) |
+| **A category's own hotkey** (none until you set one) | That category's flyout, ready for the keyboard; for a subcategory (no button on the bar), its menu at the pointer |
+
+Every hotkey is set on the Manage window's *Hotkeys* card; Backspace in a box
+turns one off. FlexTaskbar says so rather than failing silently if another
+program already holds the key.
+
+#### Search
+
+Search matches the app name, its file name, and the names of the categories it
+is filed under. So typing "dev" finds every app inside "Dev › Editors" too.
+Initials work as well ("vsc" → Visual Studio Code). When the box is empty, it
+lists recently used apps first, then everything else A–Z.
+
+The list is virtual, so it holds only the rows on screen however many apps are
+installed.
+
+#### Running apps
+
+An app with a window open gets a mark: a short line under
+its icon on the bar (*Line*, like Windows 11) or a dot (*Dot*, like macOS),
+under its tile in a flyout, and on the left of its row in *All*. Change or
+turn it off with *Running apps* on the Appearance window's *Bar* card.
+Clicking a running app **switches to it** instead of starting another
+copy: it comes to the front (restored if minimised); if it is already in
+front, its only window is minimised, or with several the next one comes
+forward, like the Windows taskbar. **Shift+click** starts another copy.
+Turn switching off with *Clicking a running app switches to it* on the
+Manage window's *Startup and bar* card.
+
+Windows are matched to apps by their AppUserModelID (Store apps, Chrome and
+Edge web apps) or by the program they run, which the app list reads from
+each Start Menu shortcut. A web app's window counts only for that web app,
+not for the browser. A **custom app** is matched by what you gave as its
+target: `shell:AppsFolder\<id>` by that id (so a Store or web app pinned
+from the app list is recognised), `chrome.exe --app-id=<id>` by the
+`Chrome._crx_<id>` window Chrome opens for it, and anything else by its
+program. A few of Windows' own apps are listed under an id their windows don't
+carry at all — File Explorer is `Microsoft.Windows.Explorer` in the app
+list, but its windows are plain `explorer.exe` windows — and are matched by
+their program instead. Windows tells FlexTaskbar when windows open and close
+(it registers for the same notifications the taskbar gets), so the marks
+follow without any polling.
+
+![Notepad++ and Calculator open: a line under each bar icon (like Windows 11), or a dot (like macOS)](screenshots/running-marks.png)
+
+#### Recent files and quick actions
+
+An app's right-click menu — on the bar, and on a tile or row in any flyout —
+holds two more things:
+- the files the app was last used on — its **Windows jump list**, the same
+  list the taskbar shows — at most ten, newest first. Click one to open it.
+  Long names are shortened in the middle so the kind of file still shows.
+- ***Run***, when the app already has a window open — a click switches to
+  that window rather than starting anything, so this is how to ask for
+  another copy without holding Shift. It sits directly above *Run as
+  administrator*, and isn't there at all when the app isn't running. Whether
+  a second copy actually appears is the app's own business: a desktop
+  program like PuTTY opens another window, while a Store app such as Notepad
+  brings its existing one forward instead.
+- ***Open file location***, ***Run as administrator*** and ***Uninstall***.
+
+Neither part is guessed. The files come from the app's own jump list
+(`IApplicationDocumentLists`), and the actions are whatever **Windows itself
+offers** for that app, asked for by canonical verb and carried out through
+the shell — so a Store app, which has no file on disk, shows no *Open file
+location*, and *Settings*, which can't be removed, shows no *Uninstall*. An
+app with neither files nor actions adds nothing to its menu. Apps found only
+as a file on disk (the Start Menu fallback, and apps added with *Link*) have
+no jump list of their own, so they show only the actions.
+
+Carrying an action out happens on a background thread, so an uninstaller or
+a UAC prompt never holds up the bar. Launching works the same way, so a slow
+shell handler can't freeze the bar either.
+
+#### Folders on the bar
+
+A folder can go on the bar too. Drag one onto it (or use *Link* with a
+folder as the target) and it opens like a category: rest on it, or
+click it, and a flyout lists what is in it, like the Dock's stacks.
+Subfolders come first and open their own flyout beyond (as deep as
+categories may go); files open as they would in Explorer; *Open folder*
+at the end opens it in Explorer. Hidden and system files are left out,
+and at most 48 things are shown (*Open folder* says how many more there
+are). The folder is read when its flyout opens, so it is always up to
+date; nothing watches it in between. Folders work with the keyboard and
+Tab like categories.
+
+A folder on a network share that doesn't answer within 1.5 seconds (an
+offline server) opens as just *Open folder* with "This folder isn't
+responding", instead of freezing the bar. Files on a share show their
+first letter rather than their icon, since asking Windows for each icon
+there can be slow.
+
+![A pinned folder's flyout (Docs, Pictures, files and Open folder), with Docs open above it](screenshots/folder-stack.png)
+
+### The bar
+
+The bar is docked against a screen edge, laid out like the original
+FlexTaskbar: *All* at the start, the root categories and pinned apps in the
+centre, *Link* and ⚙ at the end.
+
+#### Which screens
+
+By default there is one bar, on the main screen. *Screens*
+in the Appearance window changes that:
+- *Main screen only* (the default);
+- *Every screen* — a bar on each, every one docked and reserving space on its
+  own monitor, with its own icons at that monitor's DPI;
+- or one named screen (*Screen 2 — 2560 × 1440*, and so on), listing the
+  monitors attached at the moment the window opened.
+
+All the bars look the same and show the same categories and pinned apps:
+there is one set of settings, not one per screen. Only one bar's flyouts are
+open at a time — the bar you are pointing at, or on the screen the pointer
+is on when you press a hotkey. Dragging one bar to another edge moves them
+all, since *Position* is one setting.
+
+Attaching or detaching a monitor adds or removes its bar by itself, and the
+other bars are left alone (they keep their icons and don't flicker). A chosen
+screen that is detached falls back to the main screen, so you are never left
+without a bar; attach it again and the bar goes back to it. Windows reuses
+display names (`\\.\DISPLAY2`), so a *different* monitor plugged into the
+same slot inherits the choice.
+
+#### Any edge
+
+By default it sits next to the Windows taskbar, on the same
+edge. To move it, press on an empty spot of the bar and drag it towards
+another edge of the screen: it docks there as soon as the pointer is nearest
+that edge, like the Windows taskbar. Or pick *Position* in the Appearance
+window (*Next to the Windows taskbar*, *Bottom*, *Top*, *Left*, *Right*).
+On the left or right edge the bar stands upright: *All* at the top, icons
+down the middle, *Link* and ⚙ at the bottom.
+
+#### The start of the bar: *All*
+
+*All* sits at the left of a bottom or top bar, and at the top of a side bar.
+Click it for a list of every app (scroll with the wheel;
+right-click an app to pin or unpin it). A row too narrow for a long name
+ends in an ellipsis and shows the full name as a tooltip.
+- **Sort:** the *Sort* button at the top orders the list by name (A–Z or
+  Z–A), by type (desktop programs, Store apps, web apps, package managers'
+  apps, custom apps), by category (a heading per root category, an app filed
+  under two shows under both, then *Not in a category*), or with recently
+  used apps first.
+- **Show:** the *Show* button ticks app types and root categories on and
+  off. Hiding a category hides the apps that are only in that category;
+  *Not in a category* covers the rest, and *Show everything* turns it all
+  back on. While anything is hidden the title reads e.g. "12 of 15 apps".
+- Both choices are saved (`settings.all_apps`).
+- **Your own picture instead of the word "All".** In the Appearance window,
+  *All button picture* → *Choose…* takes any PNG, JPEG, BMP, GIF, ICO or
+  SVG file. A copy is kept in the data folder (`FlexTaskbarData\icons\`), so it
+  travels with the portable settings and the original can be moved or
+  deleted. *Use text* goes back to the word (and deletes the copy), as does
+  *Reset to defaults*.
+
+  ![The bar with a four-squares picture on the All button](screenshots/all-icon.png)
+
+#### The centre of the bar: categories and pinned apps
+
+A category carries a
+bright badge in the accent colour on its icon's corner, with an arrow pointing
+where its flyout opens (up from a bottom bar, down from a top bar, sideways
+from a side bar). That mark can be changed in the Appearance window
+(*Category indicator*): a badge with an arrow, a plain arrow, a dot, a folded
+corner, an underline, none at all, or **your own picture**. Pick *Your own
+picture* (or *Choose…*) and select any PNG, JPEG, BMP, GIF, ICO or SVG file;
+a copy is kept in the data folder (`FlexTaskbarData\icons\`), so the original can be
+moved or deleted. *Remove* deletes the copy. The mark's size is adjustable
+too.
+
+![The seven indicator styles on the bar's category icons](screenshots/indicators.png)
+
+**Pinned apps** launch with a click. You can pin an app from the Manage
+window (*Pin to strip*), from the *All* list, with *Link*, by dragging
+`.exe`/`.lnk` files onto the bar, or by dragging it out of a flyout.
+
+#### The end of the bar: *Link* and ⚙
+
+These sit at the right of a bottom or top bar, and at the bottom of a side
+bar. *Link* adds a website, program, file or `shell:`
+path and pins it to the bar. ⚙ **opens the Manage window, and closes it
+again** if it is already open — the same thing its *Close* button does, so
+the gear puts it away without going to the window to do it. Only the gear
+works that way: the tray menu, the bar's context menu and `--manage` all
+mean "show it", and closing one that was already up would be a surprise.
+
+#### Hover animations
+
+Every icon of the bar (categories and pinned apps) can answer the pointer, in
+the spirit of the macOS Dock. Pick one in the Appearance window, or turn
+them off:
+- *Magnify* (the default): the icon under the pointer grows, its neighbours a
+  little, following the pointer smoothly;
+- *Lift*: the icon rises towards the screen;
+- *Bounce*: the icon hops twice;
+- *Pulse*: the icon briefly grows and settles;
+- *Off*.
+
+The icons grow and move within the bar's thickness (a thicker bar leaves more
+room). Frames are drawn only while something moves, about 60 a second, and
+stop as soon as it settles.
+
+![Magnify, Lift, Bounce and Pulse as the pointer sweeps along the bar](screenshots/hover-animations.gif)
+
+#### Rearranging
+
 - **Rearrange by dragging.** Press on a category or app icon and drag it along
   the bar; the others make room, and it stays where you let go. Categories
   and apps can be mixed in any order. Let go away from the bar to cancel.
@@ -398,51 +491,30 @@ FlexTaskbar:
 - **Right-click** an icon to move it left or right, unpin it (an app) or hide
   it from this bar (a category), arrange the bar, manage categories or change
   the appearance; right-click anywhere else for the full menu.
-- **Recent files and quick actions** on an app's right-click menu, on the bar
-  and on a tile or row in any flyout:
-  - the files the app was last used on — its **Windows jump list**, the same
-    list the taskbar shows — at most ten, newest first. Click one to open it.
-    Long names are shortened in the middle so the kind of file still shows.
-  - ***Run***, when the app already has a window open — a click switches to
-    that window rather than starting anything, so this is how to ask for
-    another copy without holding Shift. It sits directly above *Run as
-    administrator*, and isn't there at all when the app isn't running. Whether
-    a second copy actually appears is the app's own business: a desktop
-    program like PuTTY opens another window, while a Store app such as Notepad
-    brings its existing one forward instead.
-  - ***Open file location***, ***Run as administrator*** and ***Uninstall***.
 
-  Neither part is guessed. The files come from the app's own jump list
-  (`IApplicationDocumentLists`), and the actions are whatever **Windows itself
-  offers** for that app, asked for by canonical verb and carried out through
-  the shell — so a Store app, which has no file on disk, shows no *Open file
-  location*, and *Settings*, which can't be removed, shows no *Uninstall*. An
-  app with neither files nor actions adds nothing to its menu. Apps found only
-  as a file on disk (the Start Menu fallback, and apps added with *Link*) have
-  no jump list of their own, so they show only the actions.
+#### Dragging apps out of a flyout or the *All* list
 
-  Carrying an action out happens on a background thread, so an uninstaller or
-  a UAC prompt never holds up the bar.
-- **Several bars** ("Work", "Gaming"…). Each has its own pinned apps and
-  order, and can leave out some top-level categories. Use the *Bar* submenu
-  in the full menu (tray icon, or right-click an empty part of the bar):
-  - Pick a bar to switch to it (the one in use is ticked). **Ctrl+Alt+N**
-    (changeable: *Next bar* on the Manage window's *Hotkeys* card) goes to
-    the next one. FlexTaskbar only takes that key once there are two
-    bars, so with one bar other programs keep it.
-  - *New empty bar…* starts with just the categories. *New bar copying
-    this one…* starts as a copy of the bar in use.
-  - *Rename this bar…* and *Delete this bar*. The last bar can't be
-    deleted. Deleting one only forgets its pins and order; the apps and
-    categories stay.
-  - To leave a category off a bar, right-click it there and choose *Hide
-    from this bar*. *Show on this bar* in the *Bar* submenu puts it back.
-    A hidden category stays in the menus, in search and on the other bars.
+Press on a tile or a row
+and drag: a see-through copy of its icon follows the pointer.
+- Let go **between two buttons on the bar** (a line shows where) and the
+  app is pinned there. If it is pinned already, it moves there.
+- Let go **on a category's button** (it gets a ring) and the app is filed
+  in that category. The same works on a **subcategory's tile** in an open
+  flyout.
+- Let go **between two tiles of a category flyout** (a caret in the accent
+  colour shows where) and the app moves there: that is how the tiles of a
+  flyout are **rearranged**. Dropped in another category's flyout it joins
+  that category in that place. Smart categories fill themselves, so their
+  tiles can't be rearranged, and the *All* list and folders keep their own
+  order. The flyouts stay open, so several tiles can be moved in a row.
+- The app stays wherever else it was filed; an app can be in several
+  categories.
+- Letting go anywhere else, or pressing Esc, cancels.
 
-  Pinning, unpinning, dragging and *Arrange the bar* all change the bar in
-  use. The bar starts as *Main*.
+![Registry Editor dragged out of the Development flyout, a line on the bar where it would be pinned](screenshots/drag-from-flyout.png)
 
-  ![The Bar submenu: the bars Main and Gaming (ticked), Next bar, New empty bar…, New bar copying this one…, Rename this bar…, Delete this bar, and Show on this bar](screenshots/bars.png)
+#### Screen space, full-screen apps and auto-hide
+
 - **Screen space.** By default the bar reserves its space like the taskbar
   does, so maximized windows stop above it. You can turn that off in the Manage
   window, and then the bar floats on top instead.
@@ -459,20 +531,143 @@ FlexTaskbar:
   Windows taskbar rather than above it. Each frame of the slide or fade
   moves or fades the last drawing of the bar; nothing is redrawn.
 
-**Settings windows.** The Manage, Appearance, *Arrange the bar* and custom-app
-windows share one look, in the style of Windows 11 Settings: a page title
-with a line on what the page does, the settings grouped on white cards with
-rounded corners and a title each (*Categories*, *All apps*, *Startup and
-bar*, *Hotkeys*, *General*, *Category flyouts*…), on a soft grey page, and a
-command bar along the bottom for the window's main buttons. The cards are
-drawn anti-aliased, only when Windows asks for the window to be painted.
-They follow the *Theme* setting like the bar does: **dark** (the default)
-or light, switching straight away when the theme changes, including the
-title bars, lists, text boxes and drop-downs.
+#### Turning the bar off
 
-![The Manage window in the dark theme: dark cards on a darker page](screenshots/manage-dark.png)
+*Show icon strip* in the full menu is a tick: turn it off and the bar goes
+away, while the tray icon, the hotkeys, search and the menus all keep
+working — FlexTaskbar becomes a keyboard launcher with no bar. Windows gets
+the reserved screen space back at once. Turn it on again from the same
+menu, or from *Show icon strip* on the Manage window's *Startup and bar* card.
 
-**Appearance.** Right-click the bar (or use the menu) and pick *Appearance…*.
+#### The full menu
+
+Right-click an empty part of the bar, or click the tray icon:
+
+| Entry | What it does |
+|---|---|
+| *Recent* | The apps you launched last (`max_recents`, 10 by default; `show_recents_in_menu` hides the submenu) |
+| Each root category | A submenu of its subcategories, then its apps, at any depth |
+| *All apps* | Every app; split into A–Z submenus above `group_all_apps_above` (40 by default) |
+| *Search…* | The search window (shows its hotkey) |
+| *Manage categories…* | The Manage window |
+| *Arrange the bar…* | The order of the bar's buttons as a list |
+| *Bar: …* | The bar profiles — switch, create, copy, rename, delete, and *Show on this bar* (see *Several bars*) |
+| *Appearance…* | The Appearance window |
+| *Rescan apps* | Scan the app list now (greyed, and reads *Scanning apps…*, while one is running) |
+| *Show icon strip* | A tick: the bar itself on or off |
+| *Start with Windows* | A tick: the per-user Run entry (see *Portable data*) |
+| *Diagnostics…* | What FlexTaskbar is costing right now (see *Performance*) |
+| *Open data folder* | The data folder, in Eden Explorer if it is installed, otherwise Explorer |
+| *Check for updates… (v…)* | Ask the forge now; the running version is on the entry (see *Updating*) |
+| *Exit* | Close FlexTaskbar; the supervisor does not restart it |
+
+### Category flyouts
+
+Resting the pointer on a category opens a flyout beside
+it, on the screen side: above a bottom bar, below a top bar, to the right of
+a left bar and to the left of a right bar.
+
+#### Tiles at any depth
+
+The flyout holds:
+- its **subcategories and apps as tiles**, each a large icon with the name
+  underneath, wrapped over **two lines** and ending in an ellipsis when it
+  is longer than that (a long name never spills past its tile). Resting the
+  pointer on a tile shows the **full name as a tooltip**, as on the bar.
+  Subcategories come first and carry the same arrow badge, like
+  categories on the bar. The flyout runs the same way as the bar: on a top
+  or bottom bar it is a **horizontal strip** (4 tiles per row by default,
+  wrapping into more rows); on a left or right bar it is a **vertical
+  strip**, one column top to bottom, wrapping into another column only if
+  it would be taller than the screen;
+- resting the pointer on a subcategory opens **its flyout beyond this one**
+  (further from the bar, lined up with the tile), and so on down the levels.
+  Moving to another subcategory switches it; resting on an app tile closes
+  it. Tiles fill from the bar's side outwards: below a top bar the **app
+  icons fill the top rows first**, right under the bar, and the
+  subcategories follow below them, nearest where their own flyouts open;
+- *No apps in this category* when it's empty. Flyouts only launch apps;
+  categories are managed in the Manage window (⚙ on the bar, or
+  right-click a category and pick *Manage categories…*).
+- The flyouts close shortly after the pointer leaves all of them and the
+  bar button.
+- **Slide between categories.** While a flyout is open, moving along the bar
+  switches to the next category straight away.
+
+#### Keyboard control
+
+Click *All*, or press the bar hotkey
+(**Ctrl+Alt+B**, changeable on the Manage window's *Hotkeys* card, or
+run `FlexTaskbar.exe --bar`), and the flyouts take the keyboard:
+- **arrow keys** move between tiles and rows (a ring in the accent
+  colour shows where you are), scrolling the *All* list at its ends;
+  **Page Up/Down**, **Home** and **End** scroll it further;
+- **typing** jumps to the first app or tile whose name, or a word in
+  it, starts with what you typed (pause a second to start again;
+  typing the same letter again moves to the next one). In *All* it
+  searches the whole list, not just what's on screen;
+- **Enter** (or **Space**) launches, or opens a subcategory and moves
+  into it; **Esc** or **Backspace** goes back a level, and closes from
+  the first;
+- **Tab** / **Shift+Tab** move to the next or previous button on the
+  bar with a flyout (*All*, then each category).
+
+Once a key has been used the flyouts stay open while the pointer is
+elsewhere, and close when you switch to another window; until then
+they close when the pointer leaves, as before.
+
+![The All list with the keyboard focus ring on Notepad after typing "note"](screenshots/keyboard.png)
+
+#### Opening animation
+
+Every flyout (category, subcategory and *All*)
+can animate as it opens. Pick one in the Appearance window
+(*Opening animation*), with its length (60–600 ms, 180 by default):
+- *Fade* (the default): fades in;
+- *Slide*: fades in, moving out a little from the bar;
+- *Scale*: grows out of the button it opens from;
+- *Drawer*: pulled out of the bar, the far end first;
+- *Genie*: stretched out of its button like the macOS genie effect, the
+  far end widening first and the end at the bar staying as narrow as the
+  button until last;
+- *Off*: shown at once.
+
+**Closing** plays the same animation in reverse (a little quicker),
+back into the button: a Genie flyout is pulled back in, a Drawer one
+slides back into the bar. Turn it off with *When closing* → *Close at
+once*. A closing flyout no longer takes the pointer, so the next one
+opens straight away; moving along the bar to another category swaps
+them at once.
+
+Each frame is made from the finished flyout, so it is drawn only once;
+the frames run only while it opens, and the flyout can be used straight
+away.
+
+![A category flyout opening with the Genie animation (slowed to 600 ms)](screenshots/flyout-genie.gif)
+
+#### Shadow
+
+Every flyout (category, subcategory and *All*) casts a
+shadow on the desktop. Pick its style in the Appearance window
+(*Shadow*), and how strong it is (*Shadow strength*, 10–100 %):
+- *Soft* (the default): soft and a little below, like Windows 11's menus;
+- *Floating*: larger and further below, lifted off the desktop;
+- *Even all round*: the same on every side;
+- *Sharp*: a crisp shadow offset to the lower right;
+- *Glow*: a halo in the accent colour;
+- *Off*.
+
+The shadow stops at the bar's edge so it never dims the bar's icons, and
+the pointer passes through it: resting on a shadow is the same as
+leaving the flyout, and clicks there reach what's underneath. It is
+drawn once per flyout size and look, and reused while the flyout is
+redrawn on hover or scrolled, so it adds nothing to hovering.
+
+![The six shadow styles on a category flyout: Off, Soft, Floating, Even, Sharp and Glow](screenshots/flyout-shadows.png)
+
+### Appearance
+
+Right-click the bar (or use the menu) and pick *Appearance…*.
 Every change shows on the bar straight away:
 
 | Setting | Choices | Default |
@@ -488,6 +683,8 @@ Every change shows on the bar straight away:
 | Picture | Any PNG, JPEG, BMP, GIF, ICO or SVG; copied into `FlexTaskbarData\icons\` | none |
 | Size | 25–80 % of the icon | 48 % |
 | **Bar** | | |
+| Screens | Main screen only, Every screen, or one named screen | Main screen only |
+| Backdrop (Windows 11) | Off (plain translucency), Mica, Acrylic, Mica Alt | Off |
 | Position | Next to the Windows taskbar, Bottom, Top, Left, Right (or drag the bar) | Next to the Windows taskbar |
 | Bar width | Full screen width, or fitted to its icons (a floating dock) | Full |
 | Auto-hide | Never, Slide away, Fade away | Never |
@@ -515,7 +712,36 @@ The theme also applies to the menus, the search window and the settings
 windows. *Reset to defaults*
 brings back the original look.
 
-**Saved looks.** *Saved looks…* in the Appearance window keeps whole looks
+#### Mica or Acrylic behind the bar
+
+(Windows 11 22H2 and later.) *Backdrop*
+in the Appearance window swaps the bar's plain translucency for one of
+Windows 11's own blurred backdrops: *Mica* (the wallpaper, heavily blurred),
+*Acrylic* (what is behind the bar, blurred and tinted), or *Mica Alt* (more
+of the wallpaper's colour). *Off* is the default and changes nothing.
+
+A backdrop is drawn by Windows behind the whole window, which a layered
+window can't have — so with one chosen the bar is built as an ordinary
+window and painted into instead. That settles a few things, and the
+Appearance window simply behaves accordingly while a backdrop is on:
+- the bar's **own background goes**, because the backdrop *is* the
+  background; icons, text, the border and the hover and pressed highlights
+  are drawn over it as before;
+- the **floating margin and *Fit to icons*** don't apply: Windows fills the
+  whole window with the backdrop, so a margin would be a blurred band around
+  the bar. The bar sits flush and takes the full width;
+- **auto-hide slides** rather than fades, since fading needs the layered
+  window a backdrop can't be;
+- the **corners are Windows' own**, rounded to match *Corner radius*.
+
+The **flyouts keep their plain translucency**: their opening animations
+(Genie, Drawer, Fade…) need a layered window, and a backdrop would cost
+them. On Windows 10, and Windows 11 before 22H2, there is no such backdrop
+and the setting is greyed out.
+
+#### Saved looks
+
+*Saved looks…* in the Appearance window keeps whole looks
 to switch between:
 - *Save this look…* stores everything on the page under a name (saving
   under a name that exists asks before replacing it);
@@ -531,96 +757,43 @@ to switch between:
 Pictures a saved look shows are kept even when the current look stops
 using them.
 
-**Five ways to launch:**
+#### The settings windows
 
-| How | What you get |
+The Manage, Appearance, *Arrange the bar* and custom-app
+windows share one look, in the style of Windows 11 Settings: a page title
+with a line on what the page does, the settings grouped on white cards with
+rounded corners and a title each (*Categories*, *All apps*, *Startup and
+bar*, *Hotkeys*, *General*, *Category flyouts*…), on a soft grey page, and a
+command bar along the bottom for the window's main buttons. The cards are
+drawn anti-aliased, only when Windows asks for the window to be painted.
+They follow the *Theme* setting like the bar does: **dark** (the default)
+or light, switching straight away when the theme changes, including the
+title bars, lists, text boxes and drop-downs.
+
+The Manage window is destroyed when you close it, so it costs nothing while
+you are not using it.
+
+![The Manage window in the dark theme: dark cards on a darker page](screenshots/manage-dark.png)
+
+### Looking after itself
+
+Each of these has a section of its own below:
+
+| | |
 |---|---|
-| The bar | Hover a category, click a pinned app, or click *All*; right-click for the full menu |
-| Left- or right-click the tray icon | The full menu |
-| **Ctrl+Alt+M** (changeable) | The category menu at the mouse pointer |
-| **Ctrl+Alt+Space** (changeable) | The search window: type, use ↑/↓ to pick, Enter to launch, Esc to close |
-| **Ctrl+Alt+B** (changeable) | The bar's *All* list, ready for the keyboard (see below) |
-| **Ctrl+Alt+N** (changeable) | The next bar, if you have made several (see *Several bars*) |
-| **A category's own hotkey** (none until you set one) | That category's flyout, ready for the keyboard; for a subcategory (no button on the bar), its menu at the pointer |
+| [Portable data](#portable-data) | Everything in a `FlexTaskbarData` folder beside the exe, written atomically with a last-known-good copy; *Back up settings…* and *Restore…* as one checked `.zip` |
+| [Crash and hang recovery](#crash-and-hang-recovery) | A supervisor process restarts the launcher if it dies or stops responding, and gives up rather than looping |
+| [Updating](#updating) | Checks once a day, shows the release notes, and replaces itself only when the download's SHA-256 matches the published checksums |
+| [Command-line options](#command-line-options) | `--search`, `--menu`, `--bar`, `--manage`, `--diagnostics`, `--exit`, `--reset` drive the running copy from a hotkey tool |
+| [Accessibility](#accessibility) | Screen readers through MSAA, a visible focus ring, Windows high contrast, and *Animation effects* off meaning nothing moves |
+| [Performance](#performance) | *Diagnostics…* reports memory, CPU, GDI/USER objects, handles, drawing times, and whether this copy started at logon |
+| [Privacy](#privacy) and [Security](#security) | What leaves the machine (only the update check), and how launching, pictures, names and restores are kept safe |
 
-Search matches the app name, its file name, and the names of the categories it
-is filed under. So typing "dev" finds every app inside "Dev › Editors" too.
-Initials work as well ("vsc" → Visual Studio Code). When the box is empty, it
-lists recently used apps first, then everything else A–Z.
+The exe identifies itself to Windows: *FlexTaskbar*, its version and
+*Procybro Solutions* show in Explorer's **Details** tab, in Task Manager and
+on the UAC prompt.
 
-**All your apps, automatically.** The app list is the Windows shell Apps folder
-(`shell:AppsFolder`), the same list as Start's "All apps". So *All*, search and
-the Manage window include:
-- desktop programs;
-- **Microsoft Store and other modern Windows 10/11 apps** (packaged apps, by
-  their AppUserModelID, such as Calculator or Windows Terminal);
-- **web apps installed from Google Chrome** (*Install app* / *Create shortcut*)
-  and **from Microsoft Edge** (*Install this site as an app*), and those of
-  other Chromium browsers.
-
-Each app is labelled by kind: *Store app*, *Chrome web app*, *Edge web app*,
-*Web app* or *Custom* (desktop programs have no label). The label shows on the
-right in the *All* list and the Manage window, and next to the category path in
-search, so typing "web app" or "store" finds them. If the Apps folder can't be
-read, FlexTaskbar falls back to scanning the Start Menu shortcut folders, where
-Chrome's web apps (its *Chrome Apps* folder) are still recognised; Store apps
-need the Apps folder.
-
-**Apps from package managers.** Many package managers install programs without
-a Start Menu entry. FlexTaskbar also lists the programs in their folders,
-labelled by manager:
-
-| Manager | Folder it looks in |
-|---|---|
-| winget (portable packages) | `%LOCALAPPDATA%\Microsoft\WinGet\Links`, `%ProgramFiles%\WinGet\Links` |
-| Scoop | `%SCOOP%\shims` (default `~\scoop\shims`), and the global `%ProgramData%\scoop\shims` |
-| Chocolatey | `%ChocolateyInstall%\bin` (default `%ProgramData%\chocolatey\bin`) |
-| npm (global packages) | `%APPDATA%\npm` |
-| pip (`--user` and per-user Pythons) | every `PythonXY\Scripts` under `%APPDATA%\Python` and `%LOCALAPPDATA%\Programs\Python` |
-| pipx | `%PIPX_BIN_DIR%` (default `~\.local\bin`) |
-| Cargo | `%CARGO_HOME%\bin` (default `~\.cargo\bin`) |
-| .NET tools | `~\.dotnet\tools` |
-| Go | `%GOBIN%`, or `%GOPATH%\bin` (default `~\go\bin`) |
-
-The managers' own commands (`choco`, `scoop`, `npm`, `pip`, `cargo`…) are left
-out, and a program that is already in the list under the same name (for
-example a Scoop app that also has a Start Menu shortcut) isn't listed twice.
-Command-line tools open in a console window that stays open, in your user
-folder. Their path is handed to `cmd.exe` quoted so that characters a file
-name may contain, such as `&`, can't start another command; a path cmd would
-still expand (with `%` or `!` in it) is started directly instead. Apps that winget, Chocolatey or UniGetUI install with a normal
-installer have a Start Menu entry, so they are in the Apps folder anyway.
-Turn this off with *Include package managers' apps* in the Manage window (*App list* card).
-
-**Automatic rescan.** The list is rescanned in the background when FlexTaskbar
-starts, on demand (*Rescan apps*), and **by itself when apps are installed or
-removed**. A background thread watches the Start Menu folders (where installers,
-winget, Chocolatey, UniGetUI and Chrome/Edge web apps put their shortcuts),
-`%LOCALAPPDATA%\Packages` (every Store app gets a folder there) and the package
-managers' folders above. A few seconds after the last change, once the
-installer has finished, the list is rescanned, so a new app or web app appears
-in *All*, search and the Manage window without doing anything. Folders that
-appear later (a package manager installed after FlexTaskbar started) are
-picked up within a few minutes. Turn it off with *Rescan when apps are
-installed or removed* on the Manage window's *App list* card.
-
-**Custom apps.** You can add any program, shortcut, file, URL, `shell:` path or
-protocol (such as `ms-settings:`) as an app, with optional arguments, a start
-folder and "Run as administrator". Browser web apps can also be added by hand,
-for example target `chrome_proxy.exe` with arguments `--profile-directory=Default --app-id=…`.
-To add apps quickly, drag `.exe` or `.lnk` files onto the Manage window.
-
-**Custom icons** for any app or category, from PNG, ICO, SVG, JPG, BMP or GIF
-files. A copy of the image is kept in the data folder, so moving or deleting the
-original doesn't break the icon.
-
-**Import from the old FlexTaskbar.** In the Manage window, *Import old
-settings…* reads `%APPDATA%\FlexTaskbar\categories.json` and
-`applications.json` from the .NET version. It adds those categories and apps
-next to your current ones. Each imported app keeps its exact launch command, and
-custom icons are copied over.
-
-### What changed from the .NET version
+## What changed from the .NET version
 
 The docked bar is back in its original look: *All* on the left, category and
 app icons in the centre, *Link* and ⚙ on the right, and category flyouts with
@@ -1480,6 +1653,7 @@ src/pkgsources.rs    package managers' folders and console programs   (tested)
 src/running.rs       which windows count, matching them to apps, clicks (tested)
 src/allview.rs       sorting and filtering the All list               (tested)
 src/release.rs       released versions: which one is newer, checksums  (tested)
+src/filemanager.rs   which program opens a folder (Eden Explorer)      (tested)
 src/win/watch.rs     automatic rescan when apps are installed
 src/win/backupwin.rs Back up settings… and Restore…
 src/win/prompt.rs    asking for one line of text (a look's name)
