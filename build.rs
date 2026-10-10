@@ -37,7 +37,13 @@ fn write_resource_script() -> std::path::PathBuf {
     let dir = assets.display().to_string().replace('\\', "/");
 
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
-    let description = std::env::var("CARGO_PKG_DESCRIPTION").unwrap_or_default();
+    // Windows uses FileDescription as the friendly name: it is what Explorer
+    // shows in the Details tab, and what Task Manager, the UAC prompt and
+    // "Open with" list the program as. So it holds the name of the app, and
+    // the sentence from Cargo.toml goes in Comments, the field the properties
+    // dialog keeps prose in.
+    let name = "FlexTaskbar";
+    let comments = std::env::var("CARGO_PKG_DESCRIPTION").unwrap_or_default();
     // Shown as "Company" in the file properties, and as the publisher in Task
     // Manager. `authors` in Cargo.toml records who wrote it; executables have
     // no author field of their own.
@@ -64,13 +70,14 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
+            VALUE "Comments", "{comments}"
             VALUE "CompanyName", "{company}"
-            VALUE "FileDescription", "{description}"
+            VALUE "FileDescription", "{name}"
             VALUE "FileVersion", "{major}.{minor}.{patch}.{build}"
-            VALUE "InternalName", "FlexTaskbar"
+            VALUE "InternalName", "{name}"
             VALUE "LegalCopyright", "{copyright}"
-            VALUE "OriginalFilename", "FlexTaskbar.exe"
-            VALUE "ProductName", "FlexTaskbar"
+            VALUE "OriginalFilename", "{name}.exe"
+            VALUE "ProductName", "{name}"
             VALUE "ProductVersion", "{version}"
         END
     END
