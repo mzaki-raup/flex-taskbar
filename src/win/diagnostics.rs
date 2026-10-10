@@ -1,7 +1,7 @@
 //! *Diagnostics…*: what FlexTaskbar costs right now — memory, CPU time,
 //! GDI/USER objects, handles — and how long drawing the bar and the
 //! flyouts takes. Shown in a message box (Ctrl+C copies it) and written to
-//! `data\diagnostics.txt`.
+//! `FlexTaskbarData\diagnostics.txt`.
 
 use super::{app, autostart, paths, ui};
 use crate::perf::{self, Stat};
@@ -186,7 +186,7 @@ pub fn report() -> String {
     lines.join("\n")
 }
 
-/// Shows the report and saves it to `data\diagnostics.txt`.
+/// Shows the report and saves it to `FlexTaskbarData\diagnostics.txt`.
 pub fn show() {
     let text = report();
     let file = paths::get().data.join("diagnostics.txt");
