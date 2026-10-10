@@ -1,6 +1,10 @@
 /target/
 # Portable data folder created next to the exe when running from the repo.
+# Called data/ up to 2.2.0; see src/win/paths.rs.
+/FlexTaskbarData/
 /data/
 *.exe
 # Local hand-off copies of built exes and screenshots
 /dist/
+# Cygwin/MSYS crash dumps from tools run in the repo.
+*.stackdump
