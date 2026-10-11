@@ -10,6 +10,11 @@ fn main() {
     // on its own, and a stale resource would claim the wrong version.
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
+    // Which forge's releases the program polls is baked in at build time
+    // (`win::update::RELEASES_API`). Cargo does not track `option_env!` by
+    // itself, so without this a build for one forge could reuse an object
+    // file compiled for the other.
+    println!("cargo:rerun-if-env-changed=FLEX_RELEASES_API");
 
     // Only Windows builds get the icon + manifest resource. The manifest is not
     // optional: it opts into Common Controls v6 (visual styles, alpha image lists,

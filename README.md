@@ -926,7 +926,13 @@ FlexTaskbar can replace itself with a newer release.
 
   ![The Manage window's version line: FlexTaskbar 2.1.0, up to date, with a Check for updates button](screenshots/version-line.png)
 - **Where it looks.** The releases published for the repository it was built
-  from, over HTTPS. *Check for updates…* at the bottom of the menu (it shows
+  from, over HTTPS. FlexTaskbar is published in two places — its home at
+  [git.zacx.net](https://git.zacx.net/owner/flex-taskbar) and a public mirror
+  on [GitHub](https://github.com/mzaki-raup/flex-taskbar) — with the same
+  versions in both. A copy downloaded from GitHub keeps updating from GitHub,
+  and one from git.zacx.net from git.zacx.net; the choice is baked in when
+  the release is built, and `update_feed` under `settings` overrides it.
+  *Check for updates…* at the bottom of the menu (it shows
   the running version beside it) looks now and reports whatever it finds; by
   itself the app looks **once a day**, in the background, and only says
   something when there is a newer version it hasn't been told to skip.
@@ -961,7 +967,7 @@ FlexTaskbar can replace itself with a newer release.
   FlexTaskbar tells you to start it again yourself.
 
 Releases are built and published by `.github/workflows/release.yml` when a
-`v*` tag is pushed; see *Building*.
+`v*` tag is pushed — on both forges, each publishing its own; see *Building*.
 
 ## Command-line options
 
@@ -1620,6 +1626,40 @@ doesn't match `Cargo.toml`, which would otherwise make every copy offer the
 same update for ever), then publishes `FlexTaskbar.exe`, `SHA256SUMS.txt` and a
 zip, with the commits since the previous tag as the notes. That is exactly what
 *Check for updates…* reads — see *Updating*.
+
+### Two forges, one history
+
+The repository is kept at [git.zacx.net](https://git.zacx.net/owner/flex-taskbar)
+and mirrored to [GitHub](https://github.com/mzaki-raup/flex-taskbar). They are
+the same git history, not two copies kept in step by a tool: `origin` pushes
+to both, so `git push origin main` (or a tag) lands in both places, and a
+commit made on GitHub comes back with a fast-forward:
+
+```powershell
+git fetch github
+git merge --ff-only github/main
+git push origin main
+```
+
+If that refuses, the two sides have diverged — look before merging. Versions
+and tags are made on git.zacx.net only; GitHub just builds what it is given.
+
+The same tag runs the release workflow on both forges, and each publishes a
+release of its own. The two programs differ in one constant: which forge's
+releases API they poll for updates (`RELEASES_API` in `src/win/update.rs`).
+The workflow sets `FLEX_RELEASES_API` when it builds on GitHub; unset, as in
+every local build, it means git.zacx.net. To build a GitHub-flavoured copy by
+hand:
+
+```powershell
+$env:FLEX_RELEASES_API = "https://api.github.com/repos/mzaki-raup/flex-taskbar/releases?per_page=10"
+cargo build --release
+```
+
+`cargo test` checks that the program was built with the feed it was given
+(`releases_api_is_the_one_this_build_was_given`), and `build.rs` tells Cargo to
+rebuild when the variable changes, so a build for one forge never reuses an
+object file compiled for the other.
 
 ### Source layout
 
