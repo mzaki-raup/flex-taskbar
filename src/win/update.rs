@@ -30,9 +30,18 @@ use crate::release::{self, Update, UpdateState, Version};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-/// Where this copy looks for its own releases. A different build (or a fork)
-/// points `settings.update_feed` somewhere else.
-pub const RELEASES_API: &str = "https://git.zacx.net/api/v1/repos/owner/flex-taskbar/releases?limit=10";
+/// Where this copy looks for its own releases: the releases API of the forge
+/// it was built for. The same source is published from two places —
+/// git.zacx.net and the public mirror on GitHub — and a copy downloaded from
+/// one must keep updating from that one, so the release workflow sets
+/// `FLEX_RELEASES_API` when it builds on GitHub and this is baked in. Unset
+/// (every local build, and the Forgejo release) means git.zacx.net. Both
+/// APIs answer in the same shape (`release::newer_than` reads either). A
+/// user, or a fork, points `settings.update_feed` somewhere else at run time.
+pub const RELEASES_API: &str = match option_env!("FLEX_RELEASES_API") {
+    Some(given) if !given.is_empty() => given,
+    _ => "https://git.zacx.net/api/v1/repos/owner/flex-taskbar/releases?limit=10",
+};
 
 /// How often the automatic check runs.
 const CHECK_EVERY: u64 = 24 * 60 * 60;
@@ -597,6 +606,20 @@ mod tests {
         let text = String::from_utf8(body).expect("text");
         assert!(text.contains("version"), "{text}");
         assert!(http::get("http://git.zacx.net/api/v1/version", 4096).is_err(), "plain HTTP must be refused");
+    }
+
+    /// The feed is baked in at build time, so this checks the build it is
+    /// part of: a release built for GitHub must poll GitHub, and anything
+    /// else must poll git.zacx.net — never the other way round, and never a
+    /// stale object file from a build for the other forge (build.rs tells
+    /// Cargo to rebuild when the variable changes).
+    #[test]
+    fn releases_api_is_the_one_this_build_was_given() {
+        assert!(RELEASES_API.starts_with("https://"), "{RELEASES_API}");
+        match std::env::var("FLEX_RELEASES_API") {
+            Ok(given) if !given.is_empty() => assert_eq!(RELEASES_API, given, "built with a stale feed"),
+            _ => assert!(RELEASES_API.contains("git.zacx.net"), "{RELEASES_API}"),
+        }
     }
 
     #[test]

@@ -11,8 +11,18 @@ name: Release
 # Without SHA256SUMS.txt the app refuses to install the release by itself, so
 # never publish one of these without the other.
 #
-# As in build.yml, nothing here uses a published action: this instance can't
-# fetch them from code.forgejo.org (forgejo#2809).
+# The repository lives in two places that share one history: git.zacx.net
+# (Forgejo, where versions and tags are made) and a public mirror on GitHub.
+# A tag pushed to both runs this workflow on both, and each forge publishes
+# its own release of the same version. The two builds differ in one constant:
+# which forge's releases API the program polls for updates (FLEX_RELEASES_API,
+# read by src/win/update.rs), so a copy downloaded from GitHub keeps updating
+# from GitHub and one from git.zacx.net from git.zacx.net. Everything up to
+# publishing is the same on both; the last step is the one place the two
+# APIs differ, so there is one for each, chosen by `github.server_url`.
+#
+# As in build.yml, nothing here uses a published action: the Forgejo instance
+# can't fetch them from code.forgejo.org (forgejo#2809).
 on:
   push:
     tags: ['v*']
@@ -25,6 +35,11 @@ defaults:
 jobs:
   release:
     runs-on: windows-latest
+    # GitHub hands the workflow a read-only token unless asked; creating the
+    # release needs to write. Forgejo's token can write already, and it
+    # ignores this.
+    permissions:
+      contents: write
     steps:
       - name: Check out this tag, with the history the notes need
         env:
@@ -40,6 +55,20 @@ jobs:
           git -c $auth fetch --quiet --tags origin
           git checkout --quiet --detach ${{ github.sha }}
           git log --oneline -1
+
+      - name: Which forge this is, and so which releases the program will poll
+        run: |
+          $server = "${{ github.server_url }}"
+          if ($server -eq "https://github.com") {
+            # GitHub's API answers in the same shape as Forgejo's, under a
+            # different host and page-size parameter.
+            $feed = "https://api.github.com/repos/${{ github.repository }}/releases?per_page=10"
+            "FLEX_RELEASES_API=$feed" >> $env:GITHUB_ENV
+            Write-Host "Building for GitHub: updates will be read from $feed"
+          } else {
+            # Unset: the program's own default, the Forgejo instance.
+            Write-Host "Building for $server: updates will be read from its releases API"
+          }
 
       - name: Use the latest stable Rust
         run: |
@@ -96,7 +125,24 @@ jobs:
           $notes | Set-Content notes.md -Encoding utf8
           Get-Content notes.md
 
-      - name: Publish the release
+      - name: Publish the release (GitHub)
+        if: github.server_url == 'https://github.com'
+        env:
+          # `gh` is on every GitHub-hosted runner, and the job's token (made
+          # writable above) is all it needs. The release is created last, in
+          # one go with its files, so the app never sees it without them.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $files = Get-ChildItem dist -File | ForEach-Object { $_.FullName }
+          gh release create $tag @files --repo "${{ github.repository }}" `
+            --title "FlexTaskbar ${{ steps.version.outputs.version }}" --notes-file notes.md --verify-tag
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed ($LASTEXITCODE)" }
+          gh release view $tag --repo "${{ github.repository }}" --json url,assets `
+            --jq '.url, (.assets[] | "  \(.name) \(.size) bytes")'
+
+      - name: Publish the release (Forgejo)
+        if: github.server_url != 'https://github.com'
         env:
           # Forgejo/Gitea hand the workflow a token with write access to this
           # repository; the API below is their /api/v1, not GitHub's. Who the

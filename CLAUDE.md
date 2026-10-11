@@ -21,3 +21,13 @@
   release's tag with the version it was built with, so a mismatch would offer the same update for ever.
 - Never publish the program without `SHA256SUMS.txt` beside it — the app refuses to install a release
   it can't check, and only offers its page instead.
+
+## Two forges
+- `origin` (git.zacx.net/owner/flex-taskbar, Forgejo) and the public mirror github.com/mzaki-raup/flex-taskbar
+  share one history. `origin` has both as push URLs, so `git push origin <branch|tag>` goes to both; the
+  `github` remote is for fetching what was committed there. Bring GitHub commits back with
+  `git fetch github && git merge --ff-only github/main && git push origin main` — never force-push either side.
+- Versions and tags are made on Forgejo only. A tag runs `release.yml` on both forges; each publishes its
+  own release. The GitHub build sets `FLEX_RELEASES_API` (read by `src/win/update.rs`) so that copy polls
+  GitHub for updates; unset means git.zacx.net. Keep both publish steps in `release.yml` in step.
+- Both forges run `build.yml` on pushed branches, so a branch's CI must be green on both before merging.
