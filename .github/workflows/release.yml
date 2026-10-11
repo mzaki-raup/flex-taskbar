@@ -67,7 +67,7 @@ jobs:
             Write-Host "Building for GitHub: updates will be read from $feed"
           } else {
             # Unset: the program's own default, the Forgejo instance.
-            Write-Host "Building for $server: updates will be read from its releases API"
+            Write-Host "Building for ${server}: updates will be read from its releases API"
           }
 
       - name: Use the latest stable Rust
