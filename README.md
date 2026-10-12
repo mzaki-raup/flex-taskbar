@@ -1,5 +1,13 @@
 # FlexTaskbar
 
+<p align="center">
+  <a href="https://github.com/mzaki-raup/flex-taskbar/releases"><img src="https://img.shields.io/github/downloads/mzaki-raup/flex-taskbar/total?style=for-the-badge&color=5F4B87&labelColor=14161A" alt="Downloads"></a>
+  <a href="https://github.com/mzaki-raup/flex-taskbar/releases/latest"><img src="https://img.shields.io/github/v/release/mzaki-raup/flex-taskbar?style=for-the-badge&color=5F4B87&labelColor=14161A" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mzaki-raup/flex-taskbar?style=for-the-badge&color=5F4B87&labelColor=14161A" alt="License"></a>
+  <a href="https://github.com/mzaki-raup/flex-taskbar/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/mzaki-raup/flex-taskbar/build.yml?branch=main&style=for-the-badge&color=5F4B87&labelColor=14161A" alt="Build"></a>
+  <a href="https://github.com/mzaki-raup/flex-taskbar/stargazers"><img src="https://img.shields.io/github/stars/mzaki-raup/flex-taskbar?style=for-the-badge&color=5F4B87&labelColor=14161A" alt="Stars"></a>
+</p>
+
 A portable application launcher for Windows 10 (version 1703 or later) and
 Windows 11, for people with a lot of apps installed. You file apps into
 categories nested several levels deep (as many as your screen can show,
