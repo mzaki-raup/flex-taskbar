@@ -54,14 +54,15 @@ use windows::Win32::UI::Shell::{
     SHAppBarMessage,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, GetSystemMetrics,
-    HWND_TOPMOST, InsertMenuW, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-    PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetForegroundWindow, SetTimer,
-    SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON,
-    TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WINDOW_EX_STYLE, WM_APP, WM_CAPTURECHANGED,
-    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_ERASEBKGND, WM_GETOBJECT, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_PAINT, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_ACCEPTFILES,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GWL_STYLE, GetClassNameW,
+    GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+    HWND_TOPMOST, InsertMenuW, IsIconic, IsWindowVisible, KillTimer, MA_NOACTIVATE, MF_BYPOSITION, MF_GRAYED,
+    MF_SEPARATOR, MF_STRING, PostMessageW, RegisterClassW, SM_CXDRAG, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
+    SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TPM_TOPALIGN, TRACK_POPUP_MENU_FLAGS, TrackPopupMenuEx, WINDOW_EX_STYLE, WM_APP,
+    WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_DROPFILES, WM_ERASEBKGND, WM_GETOBJECT, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NULL, WM_PAINT, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_CAPTION,
+    WS_EX_ACCEPTFILES, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{PCWSTR, w};
 
@@ -73,6 +74,12 @@ const TIMER_ANIM: usize = 2;
 /// Auto-hide: the delay after the pointer leaves, and the slide/fade frames.
 const TIMER_HIDE_DELAY: usize = 3;
 const TIMER_HIDE_ANIM: usize = 4;
+/// Look again for the full-screen app a bar is hidden for (see
+/// [`fullscreen_check`]), so losing the shell's word that it has gone can't
+/// cost the user their bar.
+const TIMER_FULLSCREEN: usize = 5;
+/// How often that check runs while a bar is hidden, in milliseconds.
+const FULLSCREEN_RECHECK_MS: u32 = 1000;
 
 const LEFT_ALL: usize = 0;
 const RIGHT_LINK: usize = 0;
@@ -143,6 +150,10 @@ struct Strip {
     hide_last: std::time::Instant,
     /// The bar's context menu is open (don't hide under it).
     menu_up: bool,
+    /// The bar's window is hidden for a full-screen app on its monitor. This
+    /// is not auto-hide: it happens whatever *Auto-hide* is set to, and the
+    /// window is gone rather than slid aside (see [`fullscreen_check`]).
+    full_screen: bool,
     /// An app dragged out of a flyout is over the bar: where it would go.
     incoming: Option<striplayout::DropOn>,
 }
@@ -347,6 +358,7 @@ pub fn apply_appearance() {
         reposition_at(i);
     });
     schedule_hide();
+    fullscreen_check();
 }
 
 /// Puts a bar on one monitor. The window class is registered once and shared.
@@ -428,6 +440,7 @@ fn create_on(screen: &crate::monitors::Screen) {
         hide_target: 0.0,
         hide_last: std::time::Instant::now(),
         menu_up: false,
+        full_screen: false,
     };
     let index = STRIPS.with(|s| {
         let mut b = s.borrow_mut();
@@ -474,6 +487,105 @@ fn discard(s: Strip) {
 
 fn auto_hide_on_at(index: usize) -> bool {
     read_at(index, |s| s.look.auto_hide != AutoHide::Off).unwrap_or(false)
+}
+
+// ------------------------------------------------------- full-screen apps
+
+/// Classes that cover a monitor without anything running full screen on it:
+/// the desktop (and the window the wallpaper slideshow puts in front of it)
+/// and the taskbar itself. Clicking the desktop makes `Progman` or `WorkerW`
+/// the window in front, which would otherwise read as a frameless window
+/// over the whole screen.
+const SHELL_CLASSES: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+
+/// The window in front, as what a bar needs to decide whether to get out of
+/// its way: where it is, and whether it still has a frame of its own.
+///
+/// `None` means there is nothing to hide from: no window in front, a
+/// minimized one, one of our own (a flyout or the search window), or the
+/// desktop and the shell's own bars.
+fn front_window() -> Option<((i32, i32, i32, i32), bool)> {
+    unsafe {
+        let h = GetForegroundWindow();
+        if h.is_invalid() || !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        if pid == std::process::id() {
+            return None;
+        }
+        let mut class = [0u16; 64];
+        let len = GetClassNameW(h, &mut class).max(0) as usize;
+        let class = String::from_utf16_lossy(&class[..len.min(class.len())]);
+        if SHELL_CLASSES.contains(&class.as_str()) {
+            return None;
+        }
+        let mut r = RECT::default();
+        GetWindowRect(h, &mut r).ok()?;
+        let style = GetWindowLongW(h, GWL_STYLE) as u32;
+        let framed = style & (WS_CAPTION.0 | WS_THICKFRAME.0) != 0;
+        Some(((r.left, r.top, r.right, r.bottom), framed))
+    }
+}
+
+/// Looks for a full-screen app and takes each bar off the screen, or puts it
+/// back, to match.
+///
+/// A bar gets out of the way of a game or a full-screen video whatever
+/// *Auto-hide* is set to — but only for a window that really is full screen,
+/// and only on the monitor that window covers. `ABN_FULLSCREENAPP`, the
+/// shell's word for it, cannot be trusted for either:
+///
+/// - Windows 10 counts any window reaching every edge of a monitor, an
+///   ordinary maximized one included, which happens as soon as nothing
+///   reserves space on that edge — *Reserve space* turned off, an
+///   auto-hiding bar, or a Windows taskbar set to hide itself.
+/// - It goes to every app bar on every screen, so a game on one monitor
+///   took the bars on the others with it.
+/// - Its matching "back to normal" goes missing often enough — a game that
+///   exits while another window has the focus, Explorer's own state getting
+///   out of step — to leave a bar hidden for good, with *Auto-hide* set to
+///   *Never* and no way back short of restarting the app.
+///
+/// So the claim is never taken on trust. The window in front is measured
+/// against each bar's own monitor by [`autohide::full_screen_on`], each bar
+/// decides for itself, and everything that changes which window is in front
+/// checks again — as does a timer while a bar is hidden, so a notification
+/// that never arrives costs at most a second.
+pub fn fullscreen_check() {
+    let front = front_window();
+    for_each(|i| {
+        let Some((h, mon, was)) = read_at(i, |s| (s.hwnd, rect_tuple(s.mon), s.full_screen)) else {
+            return;
+        };
+        let now = front.is_some_and(|(win, framed)| autohide::full_screen_on(win, mon, framed));
+        if now == was {
+            return;
+        }
+        with_at(i, |s| s.full_screen = now);
+        if now {
+            flyout::close();
+        }
+        unsafe {
+            let _ = ShowWindow(h, if now { SW_HIDE } else { SW_SHOWNOACTIVATE });
+            if now {
+                SetTimer(Some(h), TIMER_FULLSCREEN, FULLSCREEN_RECHECK_MS, None);
+            } else {
+                let _ = KillTimer(Some(h), TIMER_FULLSCREEN);
+            }
+        }
+        if !now {
+            // Back on screen where it belongs: the window was hidden, so
+            // its last drawing has to be put on it again.
+            reposition_at(i);
+            present_frame_at(i);
+        }
+    });
+}
+
+fn rect_tuple(r: RECT) -> (i32, i32, i32, i32) {
+    (r.left, r.top, r.right, r.bottom)
 }
 
 /// The pointer left the bar (or a flyout or menu closed): hide after the
@@ -661,6 +773,7 @@ pub fn shell_restarted() {
             reposition_at(i);
         }
     });
+    fullscreen_check();
 }
 
 pub fn theme_changed() {
@@ -2020,6 +2133,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             hide_frame(hwnd);
             LRESULT(0)
         }
+        WM_TIMER if wparam.0 == TIMER_FULLSCREEN => {
+            fullscreen_check();
+            LRESULT(0)
+        }
         WM_TIMER if wparam.0 == TIMER_ANIM => {
             let busy = anim_step();
             render();
@@ -2098,11 +2215,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                         reposition_at(i);
                     }
                 }
-                ABN_FULLSCREENAPP => unsafe {
-                    // Get out of the way of games and full-screen video.
-                    flyout::close();
-                    let _ = ShowWindow(hwnd, if lparam.0 != 0 { SW_HIDE } else { SW_SHOWNOACTIVATE });
-                },
+                // The shell says something went full screen, or stopped
+                // being. It is only a hint: `fullscreen_check` looks for
+                // itself, per monitor.
+                ABN_FULLSCREENAPP => fullscreen_check(),
                 _ => {}
             }
             LRESULT(0)
