@@ -1639,6 +1639,11 @@ covered the things Wine could not show:
   handler was exercised with a real `HDROP`, but not the shell's drag source
 - importing old .NET settings (no previous install on the machine)
 - NVDA and JAWS (only Narrator was run)
+- **Windows 10 itself.** Everything here was seen on Windows 11. The
+  full-screen rule is checked on every build against the *shape* of the
+  Windows 10 problem — a framed window covering the whole screen, which that
+  shell reports as full screen — and the fix no longer depends on what the
+  shell reports at all, but it has not been watched on a Windows 10 desktop
 
 ## Building
 
