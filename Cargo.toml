@@ -1,6 +1,6 @@
 [package]
 name = "flex-taskbar"
-version = "2.4.3"
+version = "2.4.4"
 edition = "2024"
 authors = ["MZaki"]
 description = "Portable, categorized application launcher for Windows"
