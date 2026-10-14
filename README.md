@@ -526,8 +526,28 @@ and drag: a see-through copy of its icon follows the pointer.
 - **Screen space.** By default the bar reserves its space like the taskbar
   does, so maximized windows stop above it. You can turn that off in the Manage
   window, and then the bar floats on top instead.
-- **Full-screen apps.** It hides while a full-screen app (a game or a video) is
-  in front.
+- **Full-screen apps.** A bar takes itself off the screen while a full-screen
+  app — a game, or a video player — is in front on *its* monitor, whatever
+  *Auto-hide* is set to, and comes back the moment that window goes, is
+  closed, or loses the focus. With a bar on each screen only the one the
+  full-screen window covers goes; the others stay where they are.
+
+  Which window counts is decided by FlexTaskbar, not taken from the shell.
+  Windows tells app bars when "a full-screen app" appears, but on **Windows
+  10** it counts any window that reaches every edge of a monitor — an
+  ordinary maximized one included, which is what happens as soon as nothing
+  reserves space on that edge (*Reserve space* turned off, an auto-hiding
+  bar, or a Windows taskbar set to hide itself) — it sends the same word to
+  every bar on every screen, and the matching "it has gone" goes missing
+  often enough (a game that exits while another window has the focus) to
+  leave a bar hidden for good. Taken at face value, all three cost people
+  their bar — a bar with *Auto-hide* set to *Never* disappearing behind a
+  maximized window and staying away — so it isn't. The window in front is
+  measured against each bar's own monitor and has to have dropped its frame
+  — a caption or a sizing border means maximized, not full screen — and the
+  check runs again
+  on every window change and once a second while a bar is hidden, so nothing
+  the shell forgets to say can cost you your bar for longer than that.
 - **Auto-hide.** *Auto-hide* on the Appearance window's *Bar* card hides the
   bar when the pointer leaves it: *Slide away* slides it past the screen
   edge, *Fade away* fades it out. A 2-pixel line stays at the edge; touch
@@ -537,7 +557,9 @@ and drag: a see-through copy of its icon follows the pointer.
   for the bar hotkey. An auto-hiding bar doesn't reserve screen space and
   docks against the screen's own edge, so when shown it lies over the
   Windows taskbar rather than above it. Each frame of the slide or fade
-  moves or fades the last drawing of the bar; nothing is redrawn.
+  moves or fades the last drawing of the bar; nothing is redrawn. *Never*
+  means the bar never hides itself: the only thing that still takes it off
+  the screen is a genuine full-screen app on its monitor, as above.
 
 #### Turning the bar off
 
@@ -1172,6 +1194,10 @@ checks it through Windows itself — the things no unit test can reach:
 
 - the bar appears, is a sensible size, and is docked against a screen edge;
 - it reserves its screen space as an AppBar, and gives it back when it exits;
+- a window covering the whole screen **with** a frame (an ordinary maximized
+  one) leaves the bar alone, while a frameless one covering the whole screen
+  takes it off the screen and closing it brings the bar back — the
+  full-screen rule, and the Windows 10 false alarm it used to fall for;
 - a screen reader reads it as a **toolbar** called FlexTaskbar whose buttons
   all have a name, a place on screen and something to press;
 - it leaves no crash log.
@@ -1195,7 +1221,7 @@ logged in — so this is a genuine trade rather than one being simply better.
 Pick the user session when you want the desktop checks; pick the service when
 you want builds to happen while nobody is at the machine.
 
-The 206 unit tests cover:
+The 209 unit tests cover:
 - the config format: round trips, recovering a corrupt file from the backup,
   never overwriting a good backup with a bad file, tolerating unknown and
   missing fields
@@ -1291,6 +1317,12 @@ The 206 unit tests cover:
   past it, where the bar goes on each edge (leaving the 2-pixel line) and
   how opaque it is part-way, and Fade waiting off screen at full opacity so
   the line still catches the pointer
+- full-screen apps: a frameless window covering a monitor counting as full
+  screen (including one reporting a rectangle a little larger than the
+  monitor), a framed one covering the same monitor not counting however
+  maximized it is, a window short of the monitor's edges not counting, and
+  the answer worked out per monitor, so a game on one screen leaves the bar
+  on the other alone
 - running apps: which windows count (visible, not cloaked, titled, not a
   tool or owned window unless it asks to be shown), matching by
   AppUserModelID or program path (a web app not making its browser look
@@ -1373,7 +1405,10 @@ The 206 unit tests cover:
   - auto-hide: Slide and Fade hiding after the delay, coming back when the
     pointer touches the 2-pixel line at the bottom edge, `--bar` bringing
     the hidden bar back with its *All* list and the bar hiding again after
-    Esc, and the two new rows on the Appearance window
+    Esc, and the two new rows on the Appearance window. With *Auto-hide* set to
+    *Never* the bar stays through a window maximized over it, a window
+    resized to the whole screen, and the desktop being clicked, and still
+    goes for a frameless window covering the screen
   - running apps: Notepad started from the bar getting the Line mark (and
     the Dot), its row in *All* getting one, a click minimising it when in
     front and the next one bringing it back, Shift+click starting a second
@@ -1510,7 +1545,12 @@ covered the things Wine could not show:
   and removed again when turned off
 - the bar beside the real Windows taskbar, reserving its space (the desktop
   work area shrinks by the bar's height and is given back when it exits) and
-  getting out of the way of a full-screen window
+  getting out of the way of a full-screen window — and **staying put** for a
+  maximized one covering the whole screen, which is what Windows 10's shell
+  reports as full screen. Both are checked on every build now
+  (`tools\smoke-test.ps1`): a frameless window the size of the screen takes
+  the bar off it and closing the window brings it back, while a framed one
+  the same size changes nothing.
 - a file dropped on the bar being pinned
 - an app's right-click menu on the bar, for a Store app and a desktop program
   side by side: *Notepad* listing the ten files from its own jump list with
@@ -1599,6 +1639,11 @@ covered the things Wine could not show:
   handler was exercised with a real `HDROP`, but not the shell's drag source
 - importing old .NET settings (no previous install on the machine)
 - NVDA and JAWS (only Narrator was run)
+- **Windows 10 itself.** Everything here was seen on Windows 11. The
+  full-screen rule is checked on every build against the *shape* of the
+  Windows 10 problem — a framed window covering the whole screen, which that
+  shell reports as full screen — and the fix no longer depends on what the
+  shell reports at all, but it has not been watched on a Windows 10 desktop
 
 ## Building
 
@@ -1686,7 +1731,8 @@ src/win/app.rs       state, tray icon, hotkeys, message loop, launching, icon ca
 src/win/menu.rs      nested popup menus (full menu, one category)
 src/appearance.rs    appearance settings and colours                  (tested)
 src/anim.rs          hover animations (magnify, lift, bounce, pulse)  (tested)
-src/autohide.rs      auto-hiding the bar: slide, fade, the line left  (tested)
+src/autohide.rs      auto-hiding the bar: slide, fade, the line left, and
+                     what counts as a full-screen app                 (tested)
 src/backup.rs        settings backups: writing and checking the zip   (tested)
 src/looks.rs         saved looks: names, their pictures                (tested)
 src/folders.rs       pinned folders: what their flyouts list           (tested)

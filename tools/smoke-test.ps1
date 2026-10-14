@@ -51,6 +51,8 @@ public class Smoke {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool alt);
   [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint a, uint b, ref RECT r, uint c);
   [DllImport("oleacc.dll", PreserveSig=false)]
   public static extern void AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid,
@@ -192,6 +194,65 @@ try {
         $p = $k -split "`t"
         Write-Host "    '$($p[1])' role=$($p[2]) action='$($p[3])'"
     }
+
+    # ---------------------------------------------- full-screen apps
+    # A bar gets out of the way of a window really running full screen, and
+    # only of one. A *framed* window covering the whole monitor is an
+    # ordinary maximized one: Windows 10's shell calls those full screen and
+    # tells every app bar to disappear, which used to hide a bar with
+    # *Auto-hide* set to *Never*. Both windows here are the same size on
+    # purpose — only the frame tells them apart.
+    Add-Type -AssemblyName System.Windows.Forms
+    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+    function Pump([int]$ms) {
+        $deadline = (Get-Date).AddMilliseconds($ms)
+        while ((Get-Date) -lt $deadline) {
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 50
+        }
+    }
+
+    function BarShown([bool]$want, [int]$ms = 4000) {
+        $deadline = (Get-Date).AddMilliseconds($ms)
+        while ((Get-Date) -lt $deadline) {
+            [System.Windows.Forms.Application]::DoEvents()
+            if (([Smoke]::Windows("FlexTaskbar.Strip").Count -gt 0) -eq $want) { return $true }
+            Start-Sleep -Milliseconds 150
+        }
+        return $false
+    }
+
+    function CoverScreen([bool]$framed) {
+        $f = New-Object System.Windows.Forms.Form
+        $f.FormBorderStyle = if ($framed) { 'Sizable' } else { 'None' }
+        $f.StartPosition = 'Manual'
+        $f.TopMost = $true
+        $f.Bounds = $bounds
+        $f.Show()
+        $f.Activate()
+        # Whether a bar hides follows the window *in front*, so the test has
+        # to really take the foreground. A console whose output is redirected
+        # does not have it to give, which `Activate` alone cannot get round.
+        [Smoke]::SetForegroundWindow($f.Handle) | Out-Null
+        [Smoke]::SwitchToThisWindow($f.Handle, $true)
+        Pump 600
+        return $f
+    }
+
+    $maximized = CoverScreen $true
+    Check "a maximized window does not hide the bar" (BarShown $true) `
+        "the bar went away for a framed window covering the screen"
+    $maximized.Close()
+    Pump 400
+
+    $game = CoverScreen $false
+    Check "a full-screen window hides the bar" (BarShown $false) `
+        "the bar stayed on top of a frameless window covering the screen"
+    $game.Close()
+    Pump 400
+    Check "the bar comes back when it closes" (BarShown $true) `
+        "the bar was still hidden after the full-screen window went"
 
     # The bar hands the screen space back when it goes.
     & $copy --exit | Out-Null

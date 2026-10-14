@@ -318,6 +318,10 @@ fn taskbar_created_msg() -> u32 {
 unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg != 0 && msg == super::running::shell_message() {
         super::running::window_event(hwnd);
+        // Which window is in front decides whether a bar gets out of the way
+        // of a full-screen app, so look again on every window notification
+        // rather than waiting for the shell to say so.
+        super::strip::fullscreen_check();
         return LRESULT(0);
     }
     match msg {
@@ -391,6 +395,10 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         }
         WM_TIMER if wparam.0 == super::running::TIMER_REFRESH || wparam.0 == super::running::TIMER_LAUNCHED => {
             super::running::timer(hwnd, wparam.0);
+            // A window that has just gone full screen is often still its old
+            // size when the notification arrives: this is the look once the
+            // burst has settled.
+            super::strip::fullscreen_check();
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_RESCAN => {
